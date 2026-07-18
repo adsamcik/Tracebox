@@ -1,0 +1,38 @@
+{
+  "requirement_id": "F0.3-F0.7-ARM64",
+  "command": "adb devices -l; adb -s <serial> shell getprop ro.product.cpu.abi; adb -s <serial> shell getprop ro.build.version.sdk",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "tool_version": "Android Debug Bridge version 1.0.41",
+  "start_time_utc": "2026-07-18T13:17:29.4352460Z",
+  "end_time_utc": "2026-07-18T13:17:30.1164449Z",
+  "timeout_seconds": 30,
+  "exit_status": 0,
+  "expected_assertions": [
+    "Execute every connected representative arm64-v8a physical lane",
+    "Cover available 4 KiB and 16 KiB physical page-size cells",
+    "Record vendor/OEM identity"
+  ],
+  "actual_assertions": {
+    "connected_android_endpoints": [
+      {
+        "serial": "emulator-5554",
+        "abi": "x86_64",
+        "api": "30",
+        "description": "product:sdk_gphone_x86_64 model:sdk_gphone_x86_64 device:generic_x86_64_arm64 transport_id:4"
+      },
+      {
+        "serial": "emulator-5556",
+        "abi": "x86_64",
+        "api": "36",
+        "description": "product:sdk_gphone64_x86_64 model:sdk_gphone64_x86_64 device:emu64xa transport_id:2"
+      }
+    ],
+    "connected_arm64_physical_devices": 0,
+    "executed_physical_cells": 0
+  },
+  "artifact_paths": [],
+  "matrix_cell": "ALL_AVAILABLE_REPRESENTATIVE_ARM64_PHYSICAL",
+  "result": "UNAVAILABLE_EXTERNAL",
+  "reason": "No representative arm64 Android hardware is connected or otherwise accessible in this environment.",
+  "owner_needed": "A device-lab owner with API 30-37 arm64-v8a Pixel and two distinct OEM families, including supported 4 KiB and 16 KiB cells."
+}

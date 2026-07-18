@@ -1,0 +1,23 @@
+{
+  "requirement_id": "PHASE0-PRESUBMIT-FINAL",
+  "command": "tools\\ci\\presubmit.ps1",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "reviewed_implementation_commit": "c0271e90e338e112aca34cbf0fcdc11e4024e9b9",
+  "start_time_utc": "2026-07-18T17:14:48.1663995Z",
+  "end_time_utc": "2026-07-18T17:17:10.8422933Z",
+  "timeout_seconds": 1200,
+  "exit_status": 0,
+  "expected_assertions": [
+    "frozen specs verify",
+    "toolchain pins and locks verify",
+    "no-network static scan passes",
+    "Crashpad source and both ABI builds pass",
+    "all Gradle variants build",
+    "Rust format, clippy, host tests, fuzz smoke, and Android cross-builds pass"
+  ],
+  "actual_assertions": {
+    "presubmit": "PASS"
+  },
+  "matrix_cell": "HOST_WINDOWS_X86_64_ARM64_BUILD",
+  "result": "PASS"
+}

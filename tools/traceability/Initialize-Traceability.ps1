@@ -19,6 +19,9 @@ function Quote-Csv {
 function Get-ImplementationPath {
     param([string] $Source, [string] $Section, [int] $Line)
 
+    if ($Source -eq 'ADR0008') {
+        return 'docs/adr/0008-engineering-feasibility-prerequisite-supersession.md; docs/project/implementation-ledger.md; docs/project/phase0-feasibility-status.md'
+    }
     if ($Source -eq 'ASSIGNMENT') {
         if ($Line -ge 218 -and $Line -le 315) {
             return 'phase0/; specs/; docs/adr/; native/; android/; benchmarks/; test-apps/'
@@ -60,6 +63,9 @@ function Get-ImplementationPath {
 function Get-EvidencePath {
     param([string] $Source, [string] $Section, [int] $Line)
 
+    if ($Source -eq 'ADR0008') {
+        return 'evidence/phase0/'
+    }
     if (($Source -eq 'ASSIGNMENT' -and $Line -ge 218 -and $Line -le 315) -or
         $Section -match 'Crashpad|handler|Emergency|ANR|Performance|Open decisions') {
         return 'evidence/phase0/; benchmarks/; test-apps/'
@@ -68,8 +74,11 @@ function Get-EvidencePath {
 }
 
 function Get-Matrix {
-    param([string] $Text)
+    param([string] $Text, [string] $Source)
 
+    if ($Source -eq 'ADR0008') {
+        return 'PHASE0_GATE_DISPOSITION; PHASE1_5_IMPLEMENTATION_AUTHORIZATION'
+    }
     if ($Text -match 'API 30|API 37|x86_64|arm64|4 KiB|16 KiB|physical|emulator') {
         return 'API30_API37_X86_64_AND_ALL_AVAILABLE_ARM64; page-size cells where available'
     }
@@ -96,6 +105,7 @@ $documents = @(
     @('ADR0005', 'docs\adr\0005-live-anr-thresholds-and-sampling.md'),
     @('ADR0006', 'docs\adr\0006-deterministic-package-compression.md'),
     @('ADR0007', 'docs\adr\0007-open-decision-closure.md'),
+    @('ADR0008', 'docs\adr\0008-engineering-feasibility-prerequisite-supersession.md'),
     @('PLAN', 'docs\implementation-plan.md')
 )
 
@@ -134,10 +144,17 @@ foreach ($document in $documents) {
             'ADR0005' { 'ADR5-L' }
             'ADR0006' { 'ADR6-L' }
             'ADR0007' { 'ADR7-L' }
+            'ADR0008' { 'ADR8-L' }
             default { 'PLAN-L' }
         }
         $id = $prefix + ('{0:D4}' -f ($i + 1))
-        $status = if ($source -eq 'PLAN' -and $clean -match '^F0\.1\s*\|') { 'IN_PROGRESS' } else { 'NOT_STARTED' }
+        $status = if ($source -eq 'ADR0008') {
+            'PASS'
+        } elseif ($source -eq 'PLAN' -and $clean -match '^F0\.1\s*\|') {
+            'IN_PROGRESS'
+        } else {
+            'NOT_STARTED'
+        }
         $rows.Add([pscustomobject]@{
             id = $id
             source = $source
@@ -146,7 +163,7 @@ foreach ($document in $documents) {
             requirement = $clean
             implementation = Get-ImplementationPath $source $section ($i + 1)
             evidence = Get-EvidencePath $source $section ($i + 1)
-            matrix = Get-Matrix $clean
+            matrix = Get-Matrix $clean $source
             status = $status
             sha = ''
         })
@@ -155,7 +172,7 @@ foreach ($document in $documents) {
 
 $ledger = Get-Content 'docs\project\implementation-ledger.md'
 foreach ($line in $ledger) {
-    if ($line -match '^\| ([FCRXPT]\d+\.\d+|E6\.\d+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([A-Z_]+) \|') {
+    if ($line -match '^\| ([FCRXPT]\d+\.\d+|E6\.\d+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([A-Z_]+) \| ([^|]*) \|') {
         $workPackage = $Matches[1]
         $matrix = if ($workPackage -like 'F0.*') {
             'Phase 0 frozen engineering matrix'
@@ -172,7 +189,7 @@ foreach ($line in $ledger) {
             evidence = 'evidence/; package-specific tests/benchmarks'
             matrix = $matrix
             status = $Matches[5]
-            sha = ''
+            sha = $Matches[6].Trim()
         })
     }
 }
@@ -212,7 +229,7 @@ $readme = @(
     '',
     'Rows are conservative at bootstrap: no requirement is PASS merely because it is documented. Later commits update implementation/evidence paths and status only after verification, and may cite only an earlier commit.',
     '',
-    'Coverage includes normative bullets, numbered requirements, normative table rows, explicit must/never/prohibited statements from the assignment, architecture, ADR-0001, implementation plan, plus one explicit row for every work package.'
+    'Coverage includes normative bullets, numbered requirements, normative table rows, explicit must/never/prohibited statements from the assignment, architecture, all repository ADRs, implementation plan, plus one explicit row for every work package.'
 )
 Set-Content 'docs\traceability\README.md' $readme -Encoding utf8
 

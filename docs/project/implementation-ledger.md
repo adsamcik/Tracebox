@@ -3,7 +3,7 @@
 - Immutable baseline SHA: `dc87c6f9e2a6576cc554f7cb181ce80a02bf0802`
 - Implementation branch: `copilot/tracebox-foundation`
 - Worktree: `G:\Github\Tracebox-worktrees\tracebox-foundation`
-- Scope currently authorized: Phase 0 only
+- Scope currently authorized: Phase 0 closeout; Phase 1–5 implementation may proceed under the explicit user supersession in ADR-0008
 - Allowed states: `NOT_STARTED`, `IN_PROGRESS`, `PASS`, `FAIL`, `BLOCKED_PRODUCT_DECISION`, `UNAVAILABLE_EXTERNAL`, `NOT_APPLICABLE_WITH_RATIONALE`
 - Commit rule: `satisfied-by-prior-commit` is filled only by a later commit; a row never records its containing commit.
 
@@ -12,12 +12,12 @@
 | ID | Work | Dependencies | Acceptance/output | State | Satisfied by prior commit | Notes/evidence |
 |---|---|---|---|---|---|---|
 | F0.1 | Freeze terminology and invariants | — | Threat model, privacy classes, evidence grades, readiness states approved | PASS | 76c57c4482ead7e45c900a170014761b692fd8fd | Frozen by ADR-0002 through ADR-0007 and `specs/`. |
-| F0.2 | Pin toolchains and dependencies | F0.1 | Gradle, AGP, Kotlin, JDK, NDK, CMake, Rust, Crashpad revisions locked and verified | PASS |  | Reproducible Gradle/Android/native/Rust foundations and verified Crashpad acquisition. |
-| F0.3 | Crashpad privacy spike | F0.1;F0.2 | Raw stream inventory, structural-summary prototype, seeded-secret results | IN_PROGRESS |  | Capture-only Crashpad integration and privacy inventory in progress. |
-| F0.4 | Android handler spike | F0.2 | Multi-client handler on API 30/37, page compatibility, restart/death evidence | IN_PROGRESS |  | Private handler implementation and endpoint matrix in progress. |
-| F0.5 | Emergency fallback spike | F0.2 | Fixed signal record survives pre-Durable and Crashpad-unavailable faults | IN_PROGRESS |  | Signal-safe Android fault corpus in progress. |
-| F0.6 | Live ANR spike | F0.3;F0.4 | Measured watchdog, candidate capture, nonfatal request, lifecycle, timeout/cancellation | NOT_STARTED |  |  |
-| F0.7 | Baseline artifact and PSS measurement | F0.3;F0.4;F0.5;F0.6 | Per-ABI size and handler/app resource evidence | NOT_STARTED |  |  |
+| F0.2 | Pin toolchains and dependencies | F0.1 | Gradle, AGP, Kotlin, JDK, NDK, CMake, Rust, Crashpad revisions locked and verified | PASS | 04f2d4ee34ab0600f7970a2db9aac5e1aff08254 | Reproducible Gradle/Android/native/Rust foundations and verified Crashpad acquisition. |
+| F0.3 | Crashpad privacy spike | F0.1;F0.2 | Raw stream inventory, structural-summary prototype, seeded-secret results | FAIL |  | API 30 inventory/seed checks pass; required API 37 lane is unusable. See `evidence/phase0/API30-x86_64-4096-qualification.json` and `evidence/phase0/API37-x86_64-16384-environment-failure.json`. |
+| F0.4 | Android handler spike | F0.2 | Multi-client handler on API 30/37, page compatibility, restart/death evidence | FAIL |  | API 30 topology/lifecycle works, but fatal p95 and handler CPU fail; API 37 infrastructure fails. |
+| F0.5 | Emergency fallback spike | F0.2 | Fixed signal record survives pre-Durable and Crashpad-unavailable faults | FAIL |  | API 30 fault corpus passes; required API 37 lane could not execute. |
+| F0.6 | Live ANR spike | F0.3;F0.4 | Measured watchdog, candidate capture, nonfatal request, lifecycle, timeout/cancellation | FAIL |  | Candidate/rate/lifecycle behavior works, but target pause fails after three approaches, timeout/cancellation exceeds its deadline, and API 37 is blocked. |
+| F0.7 | Baseline artifact and PSS measurement | F0.3;F0.4;F0.5;F0.6 | Per-ABI size and handler/app resource evidence | FAIL |  | Size/PSS pass; readiness, handler CPU, heartbeat, timeout, fatal latency, final static no-network, full APK reproducibility, and required API 37 evidence fail. |
 | C1.1 | Formal privacy/event schema | F0.1;F0.3 | Stable bounded privacy-classified schema | NOT_STARTED |  |  |
 | C1.2 | Schema model and compiler | C1.1 | Kotlin/C/C++/Rust/protobuf/docs generation and golden tests | NOT_STARTED |  |  |
 | C1.3 | Kotlin public API | C1.2 | Generated-only recording API | NOT_STARTED |  |  |
@@ -61,12 +61,20 @@
 
 ## Ready-work rule
 
-A package is ready only when every dependency is `PASS`. Phase 0 mandatory gates block broad Phase 1+ implementation until `F0.3` through `F0.7` pass. Available required lanes that fail remain `FAIL`; unavailable named external hardware alone may be `UNAVAILABLE_EXTERNAL`.
+Ordinarily, a package is ready only when every dependency is `PASS`, and the failed F0.3–F0.7 gates would block broad Phase 1+ implementation. ADR-0008 records the user's explicit supersession of the `ENGINEERING_FEASIBILITY_PASS` prerequisite, so Phases 1–5 may proceed at implementation risk despite those failed Phase 0 dependencies. The supersession does not change any dependency or lane to `PASS`, relax a threshold, or permit certification. Available required lanes that fail remain `FAIL`; unavailable named external hardware remains `UNAVAILABLE_EXTERNAL`.
+
+## Explicit gate disposition
+
+| Gate | Measured state | Decision | Effect |
+|---|---|---|---|
+| `ENGINEERING_FEASIBILITY_PASS` | NOT REACHED | Explicitly superseded for implementation by ADR-0008 | Phases 1–5 may proceed at risk; Phase 0 results remain unchanged. |
+| `CERTIFICATION_FEASIBILITY_PASS` | NOT REACHED | Not superseded | Certification remains blocked. |
+| `FOUNDATION_CERTIFIED` | NOT REACHED | Not superseded | No certification claim is permitted. |
 
 ## Resume protocol
 
 1. Verify branch, worktree, baseline ancestry, and cleanliness.
-2. Select the first `IN_PROGRESS` package, otherwise the first dependency-ready `NOT_STARTED` package.
+2. Select the first `IN_PROGRESS` package, otherwise the first dependency-ready `NOT_STARTED` package. Under ADR-0008, failed Phase 0 feasibility dependencies are explicit implementation risks rather than a stop condition for Phases 1–5; no other dependency is waived.
 3. Read its traceability rows and frozen protocols before changing implementation.
 4. Preserve structured evidence under `evidence/` and update rows only after verified commands finish successfully.
 5. Commit coherent dependency gates without amending history.

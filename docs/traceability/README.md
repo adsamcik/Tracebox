@@ -6,4 +6,4 @@ Baseline: `dc87c6f9e2a6576cc554f7cb181ce80a02bf0802`
 
 Rows are conservative at bootstrap: no requirement is PASS merely because it is documented. Later commits update implementation/evidence paths and status only after verification, and may cite only an earlier commit.
 
-Coverage includes normative bullets, numbered requirements, normative table rows, explicit must/never/prohibited statements from the assignment, architecture, ADR-0001, implementation plan, plus one explicit row for every work package.
+Coverage includes normative bullets, numbered requirements, normative table rows, explicit must/never/prohibited statements from the assignment, architecture, all repository ADRs, implementation plan, plus one explicit row for every work package.
