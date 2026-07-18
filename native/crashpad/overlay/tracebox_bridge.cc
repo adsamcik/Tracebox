@@ -45,6 +45,8 @@ namespace {
 constexpr int kControlBacklog = 8;
 constexpr int kRegistrationDeadlineMillis = 2'000;
 constexpr int kNonfatalDeadlineMillis = 2'000;
+// The public deadline includes cancellation, descriptor teardown, and JNI return.
+constexpr uint64_t kDeadlineCompletionReserveNanoseconds = UINT64_C(25'000'000);
 constexpr long kConnectDelayNanoseconds = 50'000'000;
 constexpr size_t kSignalStackBytes = 64 * 1024;
 constexpr std::array<int, 6> kHandledSignals{
@@ -113,6 +115,12 @@ uint64_t DeadlineAfterMilliseconds(int milliseconds) {
     return 0;
   }
   return now + static_cast<uint64_t>(milliseconds) * UINT64_C(1'000'000);
+}
+
+uint64_t BlockingDeadline(uint64_t overall_deadline) {
+  return overall_deadline > kDeadlineCompletionReserveNanoseconds
+             ? overall_deadline - kDeadlineCompletionReserveNanoseconds
+             : overall_deadline;
 }
 
 int RemainingPollMilliseconds(uint64_t deadline) {
@@ -347,11 +355,12 @@ void TestPriorSignalHandler(int, siginfo_t*, void*) {
 }
 
 RegistrationOutcome SendRegistration(int socket_fd) {
-  const uint64_t deadline =
+  const uint64_t overall_deadline =
       DeadlineAfterMilliseconds(kRegistrationDeadlineMillis);
-  if (deadline == 0) {
+  if (overall_deadline == 0) {
     return RegistrationOutcome::kSystemError;
   }
+  const uint64_t deadline = BlockingDeadline(overall_deadline);
   ucred credentials{};
   socklen_t credentials_size = sizeof(credentials);
   if (getsockopt(socket_fd,
@@ -518,11 +527,12 @@ bool StartDeathWatcher(int socket_fd) {
 RegistrationOutcome ConnectControlSocket(const std::string& socket_path,
                                         int* handler_socket,
                                         pid_t* handler_pid) {
-  const uint64_t deadline =
+  const uint64_t overall_deadline =
       DeadlineAfterMilliseconds(kRegistrationDeadlineMillis);
-  if (deadline == 0) {
+  if (overall_deadline == 0) {
     return RegistrationOutcome::kSystemError;
   }
+  const uint64_t deadline = BlockingDeadline(overall_deadline);
   while (RemainingPollMilliseconds(deadline) > 0) {
     const int socket_fd =
         socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
@@ -685,9 +695,10 @@ bool RequestDumpWithTimeout(int timeout_millis, uint64_t deadline_ns) {
       !g_handler_alive.load(std::memory_order_acquire)) {
     return false;
   }
+  const uint64_t wait_deadline_ns = BlockingDeadline(deadline_ns);
   const timespec deadline{
-      static_cast<time_t>(deadline_ns / UINT64_C(1'000'000'000)),
-      static_cast<long>(deadline_ns % UINT64_C(1'000'000'000))};
+      static_cast<time_t>(wait_deadline_ns / UINT64_C(1'000'000'000)),
+      static_cast<long>(wait_deadline_ns % UINT64_C(1'000'000'000))};
 
   auto* request = CreateDumpRequest();
   if (request == nullptr) {
