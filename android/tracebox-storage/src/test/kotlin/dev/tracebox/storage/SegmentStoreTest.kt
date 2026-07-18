@@ -79,15 +79,31 @@ class SegmentStoreTest {
         assertTrue(SegmentWriter.recover(path).frames.isEmpty())
     }
 
-    @Test fun unsealed_frame_with_physical_size_of_old_seal_is_recovered_as_frame() {
-        val path = directory().resolve("forty-eight-byte-frame.tbseg")
+    @Test fun unsealed_frame_with_physical_size_of_current_seal_is_recovered_as_frame() {
+        val path = directory().resolve("fifty-two-byte-frame.tbseg")
         writer(path, header(3)).writer.use {
-            assertIs<SegmentAppendResult.Appended>(it.append(3, record(ByteArray(28) { 7 })))
+            assertIs<SegmentAppendResult.Appended>(it.append(3, record(ByteArray(32) { 7 })))
         }
         val recovered = SegmentWriter.recover(path)
         assertFalse(recovered.sealed)
         assertFalse(recovered.corruptionDetected)
-        assertEquals(28, recovered.frames.single().payload.size)
+        assertEquals(176, Files.size(path)) // 124-byte header + (4 length + 12 body + 32 payload + 4 CRC)
+        assertEquals(32, recovered.frames.single().payload.size)
+        assertEquals(0, recovered.frames.single().sequence)
+    }
+
+    @Test fun sealing_at_role_quota_boundary_charges_the_seal_without_exceeding_quota() {
+        val quota = 196L // 124-byte header + 20-byte empty frame + 52-byte seal
+        val path = directory().resolve("quota-boundary.tbseg")
+        writer(path, header(9), quota).writer.use {
+            assertIs<SegmentAppendResult.Appended>(it.append(3, record(byteArrayOf())))
+            it.seal()
+        }
+        val recovered = SegmentWriter.recover(path)
+        assertTrue(recovered.sealed)
+        assertFalse(recovered.corruptionDetected)
+        assertEquals(1, recovered.frames.size)
+        assertEquals(quota, Files.size(path))
     }
 
     @Test fun corrupt_length_crc_and_sequence_are_quarantined_to_affected_segment() {
@@ -122,7 +138,7 @@ class SegmentStoreTest {
 
     @Test fun role_quota_is_reconstructed_for_a_brand_new_process_instance() {
         val dir = directory()
-        val quota = 400L
+        val quota = 441L
         val first = writer(dir.resolve("first.tbseg"), header(6), quota)
         assertIs<SegmentAppendResult.Appended>(first.writer.append(3, record(ByteArray(100))))
         first.writer.close()

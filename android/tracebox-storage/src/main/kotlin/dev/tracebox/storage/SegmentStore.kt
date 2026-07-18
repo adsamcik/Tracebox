@@ -78,7 +78,15 @@ class SegmentWriter private constructor(
         if (sealed) throw SegmentException.Sealed
         if (record.payload.size > MAX_PAYLOAD) throw SegmentException.FrameTooLarge
         val frameBytes = Int.SIZE_BYTES + FRAME_FIXED_BYTES + record.payload.size + Int.SIZE_BYTES
-        return quotaLedger.appendAtomically(header.processRole, path, frameBytes.toLong(), record.priority) {
+        // Section 11.3's hard bound requires every byte to fit. Keep space for the mandatory
+        // seal before extending a live segment; seal() then charges those exact bytes atomically.
+        return quotaLedger.appendAtomically(
+            header.processRole,
+            path,
+            frameBytes.toLong(),
+            record.priority,
+            reservedTailBytes = SEAL_SIZE.toLong(),
+        ) {
             val gateResult = policyGate.appendAllowed(record)
             if (gateResult != GateResult.Allowed) return@appendAtomically SegmentAppendResult.Dropped(gateResult)
             val sequence = nextSequence
@@ -104,14 +112,23 @@ class SegmentWriter private constructor(
     fun seal() {
         DiskIoGuard.assertNotMainThread()
         if (sealed) throw SegmentException.Sealed
-        val prefix = recover(path, repair = false)
-        val digest = sha256(Files.readAllBytes(path).copyOfRange(HEADER_SIZE, prefix.validBytes.toInt()))
-        val seal = ByteBuffer.allocate(SEAL_SIZE).order(ByteOrder.LITTLE_ENDIAN)
-        seal.putInt(SEAL_MAGIC).putLong(nextSequence - 1).putLong(prefix.frames.size.toLong()).put(digest).flip()
-        FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.APPEND).use {
-            it.write(seal)
-            it.force(true)
+        val written = quotaLedger.appendAtomically(
+            header.processRole,
+            path,
+            SEAL_SIZE.toLong(),
+            RecordPriority.ORDINARY_EVENT,
+        ) {
+            val prefix = recover(path, repair = false)
+            val digest = sha256(Files.readAllBytes(path).copyOfRange(HEADER_SIZE, prefix.validBytes.toInt()))
+            val seal = ByteBuffer.allocate(SEAL_SIZE).order(ByteOrder.LITTLE_ENDIAN)
+            seal.putInt(SEAL_MAGIC).putLong(nextSequence - 1).putLong(prefix.frames.size.toLong()).put(digest).flip()
+            FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.APPEND).use {
+                it.write(seal)
+                it.force(true)
+            }
+            SegmentAppendResult.Appended(nextSequence)
         }
+        if (written is SegmentAppendResult.DroppedQuota) throw SegmentException.Quota
         sealed = true
     }
 
@@ -134,7 +151,13 @@ class SegmentWriter private constructor(
             quotaLedger: RoleQuotaLedger,
         ): SegmentWriter {
             DiskIoGuard.assertNotMainThread()
-            val created = quotaLedger.createAtomically(header.processRole, path, HEADER_SIZE.toLong(), RecordPriority.ORDINARY_EVENT) {
+            val created = quotaLedger.createAtomically(
+                header.processRole,
+                path,
+                HEADER_SIZE.toLong(),
+                RecordPriority.ORDINARY_EVENT,
+                reservedTailBytes = SEAL_SIZE.toLong(),
+            ) {
                 val bytes = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
                 bytes.putInt(MAGIC).putInt(VERSION)
                 bytes.put(header.identity.segmentId).put(header.identity.processInstanceId).put(header.schemaFingerprint)
@@ -307,12 +330,15 @@ class RoleQuotaLedger(
     /**
      * Holds an inter-process lock while reading the authoritative role total and appending the
      * frame. The segment itself is the durable charge, so recovery cannot grant a fresh budget.
+     * A reserved tail is capacity required by the same append but written by a later mandatory
+     * operation, such as the immutable segment seal.
      */
     fun appendAtomically(
         role: Int,
         segment: Path,
         bytes: Long,
         priority: RecordPriority,
+        reservedTailBytes: Long = 0,
         append: () -> SegmentAppendResult,
     ): SegmentAppendResult {
         val directory = root ?: segment.parent
@@ -321,7 +347,7 @@ class RoleQuotaLedger(
         FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
             channel.lock().use {
                 val used = durableUsed(directory, role)
-                if (policy.allow(role, used, bytes, priority) !is QuotaDecision.Allowed) {
+                if (policy.allow(role, used, bytes + reservedTailBytes, priority) !is QuotaDecision.Allowed) {
                     return SegmentAppendResult.DroppedQuota(priority)
                 }
                 return append()
@@ -334,6 +360,7 @@ class RoleQuotaLedger(
         segment: Path,
         bytes: Long,
         priority: RecordPriority,
+        reservedTailBytes: Long = 0,
         create: () -> Unit,
     ): Boolean {
         val directory = root ?: segment.parent
@@ -341,7 +368,7 @@ class RoleQuotaLedger(
         val lock = directory.resolve(".tracebox-role-quota.lock")
         FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
             channel.lock().use {
-                if (policy.allow(role, durableUsed(directory, role), bytes, priority) !is QuotaDecision.Allowed) {
+                if (policy.allow(role, durableUsed(directory, role), bytes + reservedTailBytes, priority) !is QuotaDecision.Allowed) {
                     return false
                 }
                 create()
