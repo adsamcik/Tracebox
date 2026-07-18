@@ -83,6 +83,13 @@ enum class CrashDispatchResult {
     DegradedNativeDisabled,
 }
 
+/** Mirrors tracebox_bridge.cc: previous sigaction is preserved and re-raised exactly once. */
+data class NativeSignalDispatchPlan(
+    val result: CrashDispatchResult,
+    val preservePreviousAction: Boolean,
+    val reraisePreviousExactlyOnce: Boolean,
+)
+
 class CrashDispatchStateMachine(private val policy: CrashCoexistencePolicy) {
     fun dispatch(priorHandlerDetected: Boolean): CrashDispatchResult = when (policy) {
         CrashCoexistencePolicy.EXCLUSIVE -> CrashDispatchResult.PrimaryCrashpad
@@ -90,6 +97,15 @@ class CrashDispatchStateMachine(private val policy: CrashCoexistencePolicy) {
             if (priorHandlerDetected) CrashDispatchResult.PrimaryCrashpadThenPrior else CrashDispatchResult.PrimaryCrashpad
         CrashCoexistencePolicy.DISABLE_ON_CONFLICT ->
             if (priorHandlerDetected) CrashDispatchResult.DegradedNativeDisabled else CrashDispatchResult.PrimaryCrashpad
+    }
+
+    fun nativePlan(priorHandlerDetected: Boolean): NativeSignalDispatchPlan {
+        val result = dispatch(priorHandlerDetected)
+        return NativeSignalDispatchPlan(
+            result = result,
+            preservePreviousAction = priorHandlerDetected && policy == CrashCoexistencePolicy.BEST_EFFORT_CHAIN,
+            reraisePreviousExactlyOnce = result == CrashDispatchResult.PrimaryCrashpadThenPrior,
+        )
     }
 }
 
@@ -149,6 +165,7 @@ class GlobalPolicyCoordinator(
                     persistCensus()
                 }
             }
+
         }
     }
 

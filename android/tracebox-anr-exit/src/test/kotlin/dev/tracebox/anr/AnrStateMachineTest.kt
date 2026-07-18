@@ -4,6 +4,7 @@ import dev.tracebox.core.PolicySnapshot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class AnrStateMachineTest {
     @Test fun suppresses_debugger_and_suspend_gaps_without_candidate() {
@@ -38,5 +39,24 @@ class AnrStateMachineTest {
         machine.recovered()
         machine.heartbeatDelayed(12_000, 22, false, false)
         assertEquals(AnrTransition.Suppressed(AnrSuppression.DUPLICATE), machine.heartbeatDelayed(12_001, 22, false, false))
+    }
+
+    @Test fun heartbeat_binding_requests_native_snapshot_only_after_real_second_delayed_heartbeat() {
+        val requests = mutableListOf<Int>()
+        val candidates = mutableListOf<AnrCandidate>()
+        val binding = AnrHeartbeatBinding(
+            AnrStateMachine(AnrPolicy { PolicySnapshot(1, 0) }, startupGraceMillis = 0),
+            NonFatalRequester { timeout -> requests += timeout; true },
+            { candidate -> candidates.add(candidate) },
+        )
+        binding.lifecycle(AnrOperatingMode.FOREGROUND_INTERACTIVE, 1)
+        val frames = listOf(StackTraceElement("Main", "blocked", "Main.kt", 3))
+
+        assertIs<AnrTransition.Suspected>(binding.delayed(6_000, 11, frames, false, false))
+        assertIs<AnrTransition.Captured>(binding.delayed(6_100, 12, frames, false, false))
+
+        assertEquals(listOf(2_000), requests)
+        assertEquals(1, candidates.size)
+        assertTrue(candidates.single().nonFatalRequested)
     }
 }

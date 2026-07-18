@@ -432,6 +432,13 @@ interface DeletionHooks {
     fun closeActiveStores()
 }
 
+/** A library-owned storage family that participates in the same R2.8 deletion transaction. */
+interface DeletionParticipant {
+    fun markIneligible()
+    fun deleteOwned()
+    fun remainingOwned(): List<Path>
+}
+
 /** Crash-injection seam called immediately after each durable journal transition. */
 fun interface DeletionCrashInjector { fun after(state: DeletionState): Boolean }
 
@@ -444,6 +451,7 @@ class DeletionEngine(
     private val journalPath: Path,
     private val hooks: DeletionHooks,
     private val maxRetries: Int = 3,
+    private val participants: List<DeletionParticipant> = emptyList(),
 ) {
     private var attempts = 0
 
@@ -498,13 +506,20 @@ class DeletionEngine(
                     hooks.invalidateApprovalsAndSnapshotKeys()
                     hooks.closeActiveStores()
                     markIneligible()
+                    participants.forEach(DeletionParticipant::markIneligible)
                     DeletionState.STORES_MARKED_INELIGIBLE
                 }
                 DeletionState.STORES_MARKED_INELIGIBLE -> {
                     deletePhase2Paths()
+                    participants.forEach(DeletionParticipant::deleteOwned)
                     DeletionState.DELETING
                 }
-                DeletionState.DELETING -> if (remainingLibraryOwned().isEmpty()) DeletionState.COMPLETE else DeletionState.PENDING_FAILURE
+                DeletionState.DELETING ->
+                    if (remainingLibraryOwned().isEmpty() && participants.flatMap(DeletionParticipant::remainingOwned).isEmpty()) {
+                        DeletionState.COMPLETE
+                    } else {
+                        DeletionState.PENDING_FAILURE
+                    }
                 DeletionState.PENDING_FAILURE, DeletionState.COMPLETE -> state
             }
             transition(next, injector)

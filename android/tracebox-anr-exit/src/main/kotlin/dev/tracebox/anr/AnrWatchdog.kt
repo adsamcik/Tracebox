@@ -4,6 +4,7 @@ import android.os.Debug
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import dev.tracebox.core.PolicySnapshot
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
@@ -31,6 +32,7 @@ class AnrWatchdog(
     private val mainHandler: Handler = Handler(Looper.getMainLooper()),
     private val requester: NonFatalRequester,
     private val onCandidate: (AnrCandidate) -> Unit,
+    private val stateMachine: AnrStateMachine = AnrStateMachine(AnrPolicy { PolicySnapshot(0, 0) }),
     private val clockMillis: () -> Long = SystemClock::elapsedRealtime,
 ) : AutoCloseable {
     private val running = AtomicBoolean(false)
@@ -54,6 +56,7 @@ class AnrWatchdog(
                 }
                 acknowledgedGeneration.set(postedGeneration.get())
                 lastAcknowledgedMillis.set(clockMillis())
+                stateMachine.recovered()
                 lock.withLock { eligibilityChanged.signalAll() }
                 scheduleHeartbeat(2_000)
                 val duration = SystemClock.elapsedRealtimeNanos() - startedNanos
@@ -80,6 +83,10 @@ class AnrWatchdog(
         }
 
         mainHandler.removeCallbacks(heartbeat)
+        stateMachine.mode(
+            if (value) AnrOperatingMode.FOREGROUND_INTERACTIVE else AnrOperatingMode.SUSPENDED,
+            clockMillis(),
+        )
         if (value && running.get()) {
             lastAcknowledgedMillis.set(clockMillis())
             scheduleHeartbeat(0)
@@ -133,7 +140,7 @@ class AnrWatchdog(
                 }
                 continue
             }
-            if (capturedGeneration == observedGeneration) {
+            if (capturedGeneration == observedGeneration && stateMachine.state() == AnrWatchState.CAPTURED_CANDIDATE) {
                 lock.withLock { eligibilityChanged.await() }
                 continue
             }
@@ -152,18 +159,18 @@ class AnrWatchdog(
 
     private fun captureCandidate(delayedMillis: Long) {
         val debuggerAffected = Debug.isDebuggerConnected() || Debug.waitingForDebugger()
-        if (debuggerAffected) {
-            return
-        }
         val frames = Looper.getMainLooper().thread.stackTrace.take(64)
+        val signature = frames.fold(1L) { value, frame -> 31 * value + frame.hashCode() }
+        val transition = stateMachine.heartbeatDelayed(delayedMillis, signature, debuggerAffected, suspendGap = false)
+        if (transition !is AnrTransition.Captured) return
         val now = clockMillis()
-        val mayRequest = lastRequestMillis == Long.MIN_VALUE || now - lastRequestMillis >= 600_000
-        val requested = if (mayRequest) {
+        val requested = if (lastRequestMillis == Long.MIN_VALUE || now - lastRequestMillis >= 600_000) {
             lastRequestMillis = now
             requester.request(2_000)
         } else {
             false
         }
+
         onCandidate(AnrCandidate(delayedMillis, frames, requested, debuggerAffected = false))
     }
 
@@ -179,5 +186,28 @@ class AnrWatchdog(
         val samples = heartbeatSamples.copyOf(heartbeatSampleCount)
         samples.sort()
         return samples[kotlin.math.ceil(samples.size * 0.99).toInt() - 1]
+    }
+}
+
+/** Host-testable bridge used by the Android watchdog to turn real heartbeat timing into capture work. */
+class AnrHeartbeatBinding(
+    private val stateMachine: AnrStateMachine,
+    private val requester: NonFatalRequester,
+    private val onCandidate: (AnrCandidate) -> Unit,
+) {
+    fun lifecycle(mode: AnrOperatingMode, nowMillis: Long) = stateMachine.mode(mode, nowMillis)
+
+    fun delayed(
+        delayedMillis: Long,
+        stackSignature: Long,
+        frames: List<StackTraceElement>,
+        debuggerAttached: Boolean,
+        suspendGap: Boolean,
+    ): AnrTransition {
+        val transition = stateMachine.heartbeatDelayed(delayedMillis, stackSignature, debuggerAttached, suspendGap)
+        if (transition is AnrTransition.Captured) {
+            onCandidate(AnrCandidate(delayedMillis, frames.take(64), requester.request(2_000), debuggerAffected = false))
+        }
+        return transition
     }
 }

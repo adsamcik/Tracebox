@@ -12,11 +12,43 @@ class FailureCaptureStoreTest {
         val store = RawArtifactStore(root, rawQuotaBytes = 128)
         val id = ByteArray(32) { 9 }
 
-        assertTrue(store.preCapture(id, originRole = 3, acceptedEpoch = 4))
+        assertTrue(store.preCapture(id, ByteArray(32) { 8 }, originRole = 3, acceptedEpoch = 4))
         assertTrue(store.commitRaw(id, byteArrayOf(1, 2, 3)))
         assertEquals(RawArtifactDisposition.STRUCTURAL_SUMMARY_ONLY, store.journal(id)!!.disposition)
         Files.write(root.resolve("orphan.tbraw"), byteArrayOf(7))
         store.deleteUnverifiableOrphans()
+        assertFalse(Files.exists(root.resolve("orphan.tbraw")))
+    }
+
+    @Test fun lifecycle_journal_is_forced_before_capture_bytes_and_participates_in_deletion() {
+        val root = Files.createTempDirectory("tracebox-raw-lifecycle")
+        val store = RawArtifactStore(root, rawQuotaBytes = 128)
+        val id = ByteArray(32) { 9 }
+        var observedJournalBeforeBytes = false
+        val lifecycle = CrashpadCaptureLifecycle(store)
+
+        assertTrue(lifecycle.capture(id, ByteArray(32) { 7 }, 3, 4) {
+            observedJournalBeforeBytes = store.journal(id)?.originProcessInstanceId?.contentEquals(ByteArray(32) { 7 }) == true
+            byteArrayOf(1, 2, 3)
+        })
+        assertTrue(observedJournalBeforeBytes)
+
+        Files.write(root.resolve("orphan.tbraw"), byteArrayOf(7))
+        val deletionRoot = Files.createTempDirectory("tracebox-delete")
+        val engine = DeletionEngine(
+            deletionRoot,
+            deletionRoot.resolve("delete.journal"),
+            object : DeletionHooks {
+                override fun commitDisabledEpoch() = true
+                override fun quiesceWriters() = true
+                override fun invalidateApprovalsAndSnapshotKeys() = Unit
+                override fun closeActiveStores() = Unit
+            },
+            participants = listOf(RawArtifactDeletionParticipant(store, root)),
+        )
+
+        assertEquals(DeletionState.COMPLETE, engine.deleteAll())
+        assertFalse(Files.exists(root.resolve("${java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(id)}.tbraw")))
         assertFalse(Files.exists(root.resolve("orphan.tbraw")))
     }
 

@@ -11,21 +11,30 @@ import java.util.Base64
 enum class RawArtifactDisposition { STRUCTURAL_SUMMARY_ONLY }
 data class RawArtifactJournal(
     val id: ByteArray,
+    val originProcessInstanceId: ByteArray,
     val originRole: Int,
     val acceptedEpoch: Long,
     val disposition: RawArtifactDisposition = RawArtifactDisposition.STRUCTURAL_SUMMARY_ONLY,
-) { init { require(id.size == 32) } }
+) {
+    init {
+        require(id.size == 32)
+        require(originProcessInstanceId.size == 32)
+    }
+}
 
 /** CE handler raw-artifact store with a separate, hard byte budget. */
 class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) {
     init { require(rawQuotaBytes >= 0) }
 
-    fun preCapture(id: ByteArray, originRole: Int, acceptedEpoch: Long): Boolean {
-        val journal = RawArtifactJournal(id.copyOf(), originRole, acceptedEpoch)
+    fun preCapture(id: ByteArray, originProcessInstanceId: ByteArray, originRole: Int, acceptedEpoch: Long): Boolean {
+        val journal = RawArtifactJournal(id.copyOf(), originProcessInstanceId.copyOf(), originRole, acceptedEpoch)
         val path = journalPath(id)
         if (Files.exists(path)) return false
         Files.createDirectories(root)
-        forceWrite(path, "${encode(journal.id)}|${journal.originRole}|${journal.acceptedEpoch}".toByteArray())
+        forceWrite(
+            path,
+            "${encode(journal.id)}|${encode(journal.originProcessInstanceId)}|${journal.originRole}|${journal.acceptedEpoch}".toByteArray(),
+        )
         return true
     }
 
@@ -39,9 +48,9 @@ class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) 
         val path = journalPath(id)
         if (!Files.isRegularFile(path)) return null
         val parts = try { Files.readString(path).trim().split('|') } catch (_: java.io.IOException) { return null }
-        if (parts.size != 3) return null
+        if (parts.size != 4) return null
         return try {
-            RawArtifactJournal(decode(parts[0]), parts[1].toInt(), parts[2].toLong())
+            RawArtifactJournal(decode(parts[0]), decode(parts[1]), parts[2].toInt(), parts[3].toLong())
         } catch (_: IllegalArgumentException) {
             null
         }
@@ -49,12 +58,31 @@ class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) 
 
     /** Tracebox-generated raw bytes without a valid lifecycle journal are destroyed, never parsed. */
     fun deleteUnverifiableOrphans() {
+        if (!Files.isDirectory(root)) return
         Files.list(root).use { paths ->
             paths.filter { it.fileName.toString().endsWith(".tbraw") }.forEach { raw ->
                 val id = raw.fileName.toString().removeSuffix(".tbraw")
                 if (journalByName(id) == null) Files.deleteIfExists(raw)
             }
         }
+    }
+
+    /** Removes expired raw bytes and their binding journals, then removes any remaining invalid orphan. */
+    fun expire(nowMillis: Long, ttlMillis: Long): Int {
+        require(ttlMillis >= 0)
+        if (!Files.isDirectory(root)) return 0
+        var deleted = 0
+        Files.list(root).use { paths ->
+            paths.filter { it.fileName.toString().endsWith(".tbraw") }
+                .filter { nowMillis - Files.getLastModifiedTime(it).toMillis() >= ttlMillis }
+                .forEach { raw ->
+                    val id = raw.fileName.toString().removeSuffix(".tbraw")
+                    if (Files.deleteIfExists(raw)) deleted++
+                    Files.deleteIfExists(root.resolve("$id.tbrawjournal"))
+                }
+        }
+        deleteUnverifiableOrphans()
+        return deleted
     }
 
     private fun journalByName(id: String): RawArtifactJournal? =
@@ -64,6 +92,46 @@ class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) 
     private fun usedRawBytes(): Long = Files.list(root).use { it.filter { path -> path.fileName.toString().endsWith(".tbraw") }.mapToLong(Files::size).sum() }
     private fun encode(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
     private fun decode(value: String): ByteArray = Base64.getUrlDecoder().decode(value)
+}
+
+/** The only handler capture-start route: it forces a lifecycle journal before capture bytes exist. */
+class CrashpadCaptureLifecycle(private val rawStore: RawArtifactStore) {
+    fun capture(
+        rawArtifactId: ByteArray,
+        originProcessInstanceId: ByteArray,
+        originRole: Int,
+        acceptedPolicyEpoch: Long,
+        writeCaptureBytes: () -> ByteArray,
+    ): Boolean {
+        if (!rawStore.preCapture(rawArtifactId, originProcessInstanceId, originRole, acceptedPolicyEpoch)) return false
+        return rawStore.commitRaw(rawArtifactId, writeCaptureBytes())
+    }
+}
+
+/** R2.8 participant for CE raw artifacts; deletion is only complete after this participant is empty. */
+class RawArtifactDeletionParticipant(private val rawStore: RawArtifactStore, private val root: Path) : DeletionParticipant {
+    override fun markIneligible() = Unit
+
+    override fun deleteOwned() {
+        if (!Files.isDirectory(root)) return
+        Files.list(root).use { files ->
+            files.filter {
+                val name = it.fileName.toString()
+                name.endsWith(".tbraw") || name.endsWith(".tbrawjournal")
+            }.forEach { Files.deleteIfExists(it) }
+        }
+    }
+
+    override fun remainingOwned(): List<Path> {
+        rawStore.deleteUnverifiableOrphans()
+        if (!Files.isDirectory(root)) return emptyList()
+        return Files.list(root).use { files ->
+            files.filter {
+                val name = it.fileName.toString()
+                name.endsWith(".tbraw") || name.endsWith(".tbrawjournal")
+            }.toList()
+        }
+    }
 }
 
 /** Durable states make spool replay recoverable after every source-retirement boundary. */
