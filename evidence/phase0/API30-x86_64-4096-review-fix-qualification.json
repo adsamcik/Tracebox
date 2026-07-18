@@ -4,10 +4,10 @@
   "phase0_state": "INCOMPLETE",
   "command": "tools\\android\\Run-Phase0ReviewFixQualification.ps1 -Serial emulator-5554 -ExpectedApi 30 -ExpectedPageSize 4096",
   "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
-  "reviewed_implementation_commit": "b0f7c22fb74fb661a65a0fd24c99d841944471ae",
-  "start_time_utc": "2026-07-18T18:42:18.0111724Z",
-  "end_time_utc": "2026-07-18T18:43:04.0816705Z",
-  "duration_ms": 46070.0,
+  "reviewed_implementation_commit": "233f5a76cbef8b62548894fef1b64e754f74dc79",
+  "start_time_utc": "2026-07-18T19:33:49.1378616Z",
+  "end_time_utc": "2026-07-18T19:34:20.9115571Z",
+  "duration_ms": 31774.0,
   "exit_status": 0,
   "tools": {
     "adb": "Android Debug Bridge version 1.0.41",
@@ -22,18 +22,18 @@
     "matrix_cell": "API30_x86_64_4096B_TARGETED_REVIEW_FIX"
   },
   "artifacts": {
-    "apk_sha256": "0ff404403dea4b73c5a4ea50cdc903b1589f308bbaadd393312d04f3e76411a4",
-    "native_x86_64_sha256": "a8445379659ee28f76585a45fc2ed8f6e8da1194a86a8fffb77232de942630e4",
-    "seeded_dump_sha256": "b0b1f3b8a9a74e4cb26dbae2aa234dd0935fb35daa470f01803d4b3c7be0d9f6"
+    "apk_sha256": "7d5249f1185d8ec9bb479db6d95c1202e1551d0ed7a97ccdf81544db693107c7",
+    "native_x86_64_sha256": "7311447a21d4c2c993a1d0ed95df6d4a490d981768154d8e36a47a080105b35d",
+    "seeded_dump_sha256": "b243d477627394e0ebbdf0fe66043e69af8083fbbb98e7962b5f939dbb0dd852"
   },
   "registration": {
     "connected": false,
     "outcome": 1,
-    "elapsed_us": 1980426
+    "elapsed_us": 1977540
   },
   "hang_timeout": {
     "captured": false,
-    "elapsed_us": 1992712
+    "elapsed_us": 1983645
   },
   "privacy": {
     "identity_established": true,
@@ -96,6 +96,13 @@
       }
     ]
   },
+  "emergency_restart_reset": {
+    "prior_record_validator_exit": 0,
+    "restarted_record_validator_exit": 1,
+    "restarted_record_validator_output": "invalid emergency record: InvalidMagic",
+    "restarted_record_all_zero": true,
+    "pm_clear_used": false
+  },
   "handler_unavailable_fallback": {
     "validator_exit": 0,
     "validator_output": "valid emergency record v1",
@@ -104,8 +111,8 @@
     "raw_dump_delta": 0,
     "process_death_observed": true,
     "process_log": [
-      "F/libc    (28228): Fatal signal 6 (SIGABRT), code -6 (SI_TKILL) in tid 28228 (tracebox.phase0), pid 28228 (tracebox.phase0)",
-      "I/Zygote  (  299): Process 28228 exited due to signal 6 (Aborted)"
+      "F/libc    (30242): Fatal signal 6 (SIGABRT), code -6 (SI_TKILL) in tid 30242 (tracebox.phase0), pid 30242 (tracebox.phase0)",
+      "I/Zygote  (  299): Process 30242 exited due to signal 6 (Aborted)"
     ]
   },
   "previous_signal_action": {
@@ -114,7 +121,7 @@
     "slot_sequence": 1,
     "prior_action_count": 1,
     "process_death_observed": true,
-    "process_log": "I/Zygote  (  299): Process 28405 exited due to signal 6 (Aborted)"
+    "process_log": "I/Zygote  (  299): Process 30418 exited due to signal 6 (Aborted)"
   },
   "assertions": {
     "registration_receive_deadline": true,
@@ -122,6 +129,7 @@
     "live_identity_required": true,
     "seeded_summary_scan": true,
     "known_identity_scan": true,
+    "emergency_slot_reset_on_process_restart": true,
     "unexpected_streams_rejected": true,
     "handler_unavailable_fallback": true,
     "previous_signal_action_once": true

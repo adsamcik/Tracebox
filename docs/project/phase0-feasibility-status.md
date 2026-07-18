@@ -29,6 +29,7 @@ This permits Phases 1–5 implementation to proceed at risk. It does not change 
 | Connected representative arm64 physical devices | UNAVAILABLE_EXTERNAL | `evidence/phase0/arm64-external-lanes.json` |
 
 The API 30 run stopped after the frozen thresholds below had already failed; it is not presented as the required 60-minute false-positive qualification.
+Its preserved JSON now records `exit_status=2`, matching `result=FAIL` and the runner's failure exit. The correction is metadata-only with explicit provenance in the evidence; no measurement was rerun or changed.
 
 | API 30 metric | Threshold | Observed | Result |
 |---|---:|---:|---|
@@ -64,6 +65,7 @@ cell. `evidence/phase0/API30-x86_64-4096-review-fix-qualification.json` records:
 | Unexpected stream rejection | PASS; profile remains invalid |
 | Handler unavailable fatal fallback | one valid record, sequence 1, flags 3, zero raw dump delta |
 | Prior signal action and default death | invoked once; signal death observed |
+| Prior-process emergency slot after restart without `pm clear` | previous valid record replaced by 256 zero bytes; validator rejected `InvalidMagic` |
 
 No API 37 result is claimed by this targeted run.
 
@@ -76,6 +78,7 @@ No API 37 result is claimed by this targeted run.
 | Full APK reproducibility comparison | FAIL | `evidence/phase0/final-reproducibility.json` |
 | Artifact size inventory | PASS | `evidence/phase0/F0.7-artifact-sizes.json` |
 | Targeted review-fix host/native/Rust regressions | PASS | `evidence/phase0/review-fix-host-validation.json` |
+| Round-2 parser/archive/native structural regressions | PASS | `evidence/phase0/review-fix-round2-host-validation.json` |
 
 The presubmit and targeted review-fix results record that their configured checks completed successfully. They do not override the separate final no-network, reproducibility, stream-profile, required-lane, or complete-protocol failures.
 
@@ -87,9 +90,9 @@ The presubmit and targeted review-fix results record that their configured check
 - handler death notification, explicit restart/reconnect, hang timeout/cancellation, and crash-loop start budget;
 - CE app-private raw-artifact quarantine with eight-report/16 MiB hard admission bounds;
 - actual nonfatal and fatal Crashpad capture paths;
-- fixed 256-byte emergency writer with preopened descriptor, alternate stack, recursion guard, CRC32C, completion marker, one positional write, preserved prior actions, exactly-once chaining, and Android re-raise;
+- fixed 256-byte emergency writer with durable initialization-time slot invalidation, preopened descriptor, alternate stack, recursion guard, CRC32C, completion marker, one positional signal-path write, preserved prior actions, exactly-once chaining, and Android re-raise;
 - live main-looper watchdog with lifecycle suspension, five-second candidate semantics, bounded stack, ten-minute snapshot rate limit, and two-second request timeout;
-- bounded Rust minidump parser with exact stream allowlist enforcement and fixed-field/per-stream extent validation;
+- bounded Rust minidump parser with exact stream allowlist enforcement, complete fixed-structure extents, and checked counted-list extents confined to each declared stream;
 - non-vacuous seeded-secret and known internal-identity encoding scans over raw bytes and the actual serialized structural summary;
 - minified, debuggable-release, and debug fixtures plus benchmark APKs.
 
