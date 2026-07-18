@@ -45,7 +45,7 @@ mod tests {
                 abi_version: 1,
             },
             code: 1,
-            reserved_flags: 0,
+            monotonic_time_ns: 0,
         };
         assert_eq!(record_breadcrumb(&PanickingRecorder, value), StatusV1::Dropped);
     }
