@@ -90,6 +90,12 @@ $documents = @(
     @('ASSIGNMENT', 'IMPLEMENTATION_AGENT_PROMPT.md'),
     @('ARCH', 'docs\architecture\tracebox-design.md'),
     @('ADR0001', 'docs\adr\0001-foundation-architecture.md'),
+    @('ADR0002', 'docs\adr\0002-crashpad-source-and-privacy-profile.md'),
+    @('ADR0003', 'docs\adr\0003-handler-topology-abi-and-coexistence.md'),
+    @('ADR0004', 'docs\adr\0004-foundation-storage-schema-and-policy.md'),
+    @('ADR0005', 'docs\adr\0005-live-anr-thresholds-and-sampling.md'),
+    @('ADR0006', 'docs\adr\0006-deterministic-package-compression.md'),
+    @('ADR0007', 'docs\adr\0007-open-decision-closure.md'),
     @('PLAN', 'docs\implementation-plan.md')
 )
 
@@ -122,6 +128,12 @@ foreach ($document in $documents) {
             'ASSIGNMENT' { 'ASN-L' }
             'ARCH' { 'ARCH-L' }
             'ADR0001' { 'ADR1-L' }
+            'ADR0002' { 'ADR2-L' }
+            'ADR0003' { 'ADR3-L' }
+            'ADR0004' { 'ADR4-L' }
+            'ADR0005' { 'ADR5-L' }
+            'ADR0006' { 'ADR6-L' }
+            'ADR0007' { 'ADR7-L' }
             default { 'PLAN-L' }
         }
         $id = $prefix + ('{0:D4}' -f ($i + 1))

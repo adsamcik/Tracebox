@@ -1,0 +1,49 @@
+{
+  "requirement_id": "F0.1",
+  "command": "tools\\traceability\\Initialize-Traceability.ps1; tools\\verify\\Verify-FoundationSpecs.ps1",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "tool_version": "7.6.3",
+  "start_time_utc": "2026-07-18T08:40:43.5239682Z",
+  "end_time_utc": "2026-07-18T08:40:43.8570565Z",
+  "timeout_seconds": 120,
+  "exit_status": 0,
+  "expected_assertions": [
+    "six assignment-accepted ADRs",
+    "all twelve open decisions mapped",
+    "finite immutable Phase 0 thresholds and workloads",
+    "256-byte emergency layout",
+    "at least 1000 traceability rows",
+    "WP-F0.1 PASS"
+  ],
+  "actual_assertions": {
+    "accepted_adrs": 6,
+    "open_decisions": 12,
+    "traceability_rows": 1563,
+    "emergency_record_bytes": 256,
+    "result": "PASS"
+  },
+  "artifact_paths": [
+    "docs\\adr\\0002-crashpad-source-and-privacy-profile.md",
+    "docs\\adr\\0003-handler-topology-abi-and-coexistence.md",
+    "docs\\adr\\0004-foundation-storage-schema-and-policy.md",
+    "docs\\adr\\0005-live-anr-thresholds-and-sampling.md",
+    "docs\\adr\\0006-deterministic-package-compression.md",
+    "docs\\adr\\0007-open-decision-closure.md",
+    "specs\\foundation-contracts.md",
+    "specs\\emergency-record-v1.md",
+    "specs\\phase0-measurement-protocol.md"
+  ],
+  "artifact_sha256": {
+    "docs\\adr\\0006-deterministic-package-compression.md": "4526bd479652459b0721de5e13538f09a710616efb43dea64ba230862e40fd6e",
+    "specs\\phase0-measurement-protocol.md": "7c36539b4fe98a46cba3a4b2efa02c444c91994f55e77773b9221bd4d50da769",
+    "docs\\adr\\0004-foundation-storage-schema-and-policy.md": "02b0ae35c3dade99edd48ed4046c85d3e523eda621d2c74fbcd7b6ece7e3e2f8",
+    "docs\\adr\\0003-handler-topology-abi-and-coexistence.md": "3ab5284fba7ad2712284119ae13bd9d9ceec2c410368018d71914437cdfcf3f6",
+    "docs\\adr\\0005-live-anr-thresholds-and-sampling.md": "5b966446fee2041872ef59f8e913732e6a025694f31c162c149054d148975c3b",
+    "docs\\adr\\0002-crashpad-source-and-privacy-profile.md": "a690bb0115da245d1b89010d955c0dc387b4a38ada6617488a945008c3c098f9",
+    "specs\\emergency-record-v1.md": "8884f96358ce67e06aec53806c2535b9b71be81785bc3aebe159430fc3af4124",
+    "docs\\adr\\0007-open-decision-closure.md": "7fa311376fdace4d40e369c66069fca3f9bdb834eefc1187b4e59d5f4c48329b",
+    "specs\\foundation-contracts.md": "0dffcd2241ca5c5de63eb5b287eeb9d7fd7d307ce75993c372560b628401e07e"
+  },
+  "matrix_cell": "HOST_SPEC_STATIC",
+  "result": "PASS"
+}
