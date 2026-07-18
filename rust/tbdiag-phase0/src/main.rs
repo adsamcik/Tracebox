@@ -6,7 +6,7 @@ fn main() -> ExitCode {
     let mut args = env::args_os();
     let _program = args.next();
     let Some(command) = args.next() else {
-        eprintln!("usage: tbdiag-phase0 emergency|minidump <path> [seed]");
+        eprintln!("usage: tbdiag-phase0 emergency <path> | minidump <path> <seed> <identity-hex>");
         return ExitCode::from(2);
     };
     let Some(path) = args.next() else {
@@ -32,20 +32,41 @@ fn main() -> ExitCode {
             }
         }
         Ok(bytes) if command == "minidump" => {
-            let seed = args
-                .next()
-                .map(|value| value.to_string_lossy().into_owned());
+            let Some(seed) = args.next() else {
+                eprintln!("minidump requires a non-empty seed");
+                return ExitCode::from(2);
+            };
+            let seed = seed.to_string_lossy().into_owned();
+            let Some(identity_hex) = args.next() else {
+                eprintln!("minidump requires one established 256-bit identity");
+                return ExitCode::from(2);
+            };
             if args.next().is_some() {
-                eprintln!("minidump accepts a path and optional seed");
+                eprintln!("minidump accepts one path, seed, and identity");
                 return ExitCode::from(2);
             }
+            let Some(identity) = decode_identity_hex(&identity_hex.to_string_lossy()) else {
+                eprintln!("identity must be exactly 64 hexadecimal characters");
+                return ExitCode::from(2);
+            };
             match tracebox_phase0::summarize_minidump(&bytes) {
                 Ok(summary) => {
-                    let raw_seed_matches = seed.as_ref().map_or(0, |value| {
-                        tracebox_phase0::count_occurrences(&bytes, value.as_bytes())
-                    });
-                    print_summary(&summary, raw_seed_matches);
-                    ExitCode::SUCCESS
+                    let serialized = tracebox_phase0::serialize_structural_summary(&summary);
+                    match tracebox_phase0::scan_privacy(
+                        &bytes,
+                        serialized.as_bytes(),
+                        seed.as_bytes(),
+                        &identity,
+                    ) {
+                        Ok(scan) => {
+                            print_summary(&serialized, scan);
+                            ExitCode::SUCCESS
+                        }
+                        Err(error) => {
+                            eprintln!("privacy scan failed: {error:?}");
+                            ExitCode::from(1)
+                        }
+                    }
                 }
                 Err(error) => {
                     eprintln!("invalid minidump: {error:?}");
@@ -64,41 +85,34 @@ fn main() -> ExitCode {
     }
 }
 
-fn print_summary(summary: &tracebox_phase0::MinidumpSummary, raw_seed_matches: usize) {
-    println!("{{");
-    println!("  \"stream_count\": {},", summary.streams.len());
-    println!("  \"streams\": [");
-    for (index, stream) in summary.streams.iter().enumerate() {
-        let comma = if index + 1 == summary.streams.len() {
-            ""
-        } else {
-            ","
-        };
-        println!(
-            "    {{\"type\": {}, \"name\": \"{}\", \"size\": {}}}{}",
-            stream.stream_type, stream.name, stream.size, comma
-        );
-    }
-    println!("  ],");
-    print_optional("thread_count", summary.thread_count.map(u64::from));
-    print_optional("module_count", summary.module_count.map(u64::from));
-    print_optional(
-        "memory_range_count",
-        summary.memory_range_count.map(u64::from),
+fn print_summary(serialized: &str, scan: tracebox_phase0::PrivacyScanResult) {
+    let prefix = serialized
+        .strip_suffix('}')
+        .expect("structural summary is a JSON object");
+    print!("{prefix}");
+    println!(",");
+    println!("  \"raw_seed_matches\": {},", scan.raw_seed_matches);
+    println!("  \"summary_seed_matches\": {},", scan.summary_seed_matches);
+    println!("  \"raw_identity_matches\": {},", scan.raw_identity_matches);
+    println!(
+        "  \"summary_identity_matches\": {},",
+        scan.summary_identity_matches
     );
-    print_optional("exception_code", summary.exception_code.map(u64::from));
-    print_optional(
-        "processor_architecture",
-        summary.processor_architecture.map(u64::from),
+    println!(
+        "  \"identity_encodings_scanned\": {}",
+        scan.identity_encodings_scanned
     );
-    println!("  \"raw_seed_matches\": {raw_seed_matches},");
-    println!("  \"summary_seed_matches\": 0");
     println!("}}");
 }
 
-fn print_optional(name: &str, value: Option<u64>) {
-    match value {
-        Some(number) => println!("  \"{name}\": {number},"),
-        None => println!("  \"{name}\": null,"),
+fn decode_identity_hex(value: &str) -> Option<[u8; tracebox_phase0::PROCESS_INSTANCE_ID_SIZE]> {
+    if value.len() != tracebox_phase0::PROCESS_INSTANCE_ID_SIZE * 2 {
+        return None;
     }
+    let mut identity = [0_u8; tracebox_phase0::PROCESS_INSTANCE_ID_SIZE];
+    for (index, destination) in identity.iter_mut().enumerate() {
+        let start = index * 2;
+        *destination = u8::from_str_radix(&value[start..start + 2], 16).ok()?;
+    }
+    Some(identity)
 }

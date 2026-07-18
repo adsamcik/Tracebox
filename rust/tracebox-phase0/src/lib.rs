@@ -1,12 +1,18 @@
 pub const EMERGENCY_RECORD_SIZE: usize = 256;
 pub const EMERGENCY_MAGIC: &[u8; 8] = b"TBEMERG1";
 pub const MAX_MINIDUMP_STREAMS: usize = 128;
+pub const PROCESS_INSTANCE_ID_SIZE: usize = 32;
+
+const EMERGENCY_RECORD_SIZE_U32: u32 = 256;
+const REQUIRED_MINIDUMP_STREAMS: [u32; 5] = [3, 4, 6, 7, 15];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmergencyRecordError {
     InvalidSize,
     InvalidMagic,
     InvalidVersion,
+    InvalidDeclaredSize,
+    NonZeroReserved,
     Incomplete,
     InvalidChecksum,
 }
@@ -18,6 +24,12 @@ pub enum MinidumpError {
     TooManyStreams,
     InvalidDirectory,
     InvalidStream,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivacyScanError {
+    MissingSeed,
+    InvalidIdentitySize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +48,18 @@ pub struct MinidumpSummary {
     pub memory_range_count: Option<u32>,
     pub exception_code: Option<u32>,
     pub processor_architecture: Option<u16>,
+    pub unexpected_stream_types: Vec<u32>,
+    pub duplicate_stream_types: Vec<u32>,
+    pub missing_required_stream_types: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrivacyScanResult {
+    pub raw_seed_matches: usize,
+    pub summary_seed_matches: usize,
+    pub raw_identity_matches: usize,
+    pub summary_identity_matches: usize,
+    pub identity_encodings_scanned: usize,
 }
 
 /// Validates the fixed structural fields of one emergency record.
@@ -53,6 +77,14 @@ pub fn validate_emergency_record(record: &[u8]) -> Result<(), EmergencyRecordErr
     }
     if u32::from_le_bytes([record[8], record[9], record[10], record[11]]) != 1 {
         return Err(EmergencyRecordError::InvalidVersion);
+    }
+    if u32::from_le_bytes([record[12], record[13], record[14], record[15]])
+        != EMERGENCY_RECORD_SIZE_U32
+    {
+        return Err(EmergencyRecordError::InvalidDeclaredSize);
+    }
+    if record[128..244].iter().any(|byte| *byte != 0) {
+        return Err(EmergencyRecordError::NonZeroReserved);
     }
     let marker = u64::from_le_bytes([
         record[248],
@@ -110,6 +142,9 @@ pub fn summarize_minidump(bytes: &[u8]) -> Result<MinidumpSummary, MinidumpError
         memory_range_count: None,
         exception_code: None,
         processor_architecture: None,
+        unexpected_stream_types: Vec::new(),
+        duplicate_stream_types: Vec::new(),
+        missing_required_stream_types: Vec::new(),
     };
 
     for index in 0..stream_count {
@@ -120,6 +155,19 @@ pub fn summarize_minidump(bytes: &[u8]) -> Result<MinidumpSummary, MinidumpError
         let stream_start = usize::try_from(rva).map_err(|_| MinidumpError::InvalidStream)?;
         let stream_size = usize::try_from(size).map_err(|_| MinidumpError::InvalidStream)?;
         checked_range(bytes, stream_start, stream_size)?;
+        if stream_size < minimum_stream_size(stream_type) {
+            return Err(MinidumpError::InvalidStream);
+        }
+        if !is_allowed_stream(stream_type) {
+            summary.unexpected_stream_types.push(stream_type);
+        }
+        if summary
+            .streams
+            .iter()
+            .any(|stream| stream.stream_type == stream_type)
+        {
+            summary.duplicate_stream_types.push(stream_type);
+        }
 
         summary.streams.push(MinidumpStream {
             stream_type,
@@ -131,10 +179,10 @@ pub fn summarize_minidump(bytes: &[u8]) -> Result<MinidumpSummary, MinidumpError
             3 => summary.thread_count = Some(read_u32(bytes, stream_start)?),
             4 => summary.module_count = Some(read_u32(bytes, stream_start)?),
             5 => summary.memory_range_count = Some(read_u32(bytes, stream_start)?),
-            6 if stream_size >= 12 => {
+            6 => {
                 summary.exception_code = Some(read_u32(bytes, stream_start + 8)?);
             }
-            7 if stream_size >= 2 => {
+            7 => {
                 summary.processor_architecture = Some(u16::from_le_bytes([
                     bytes[stream_start],
                     bytes[stream_start + 1],
@@ -143,7 +191,139 @@ pub fn summarize_minidump(bytes: &[u8]) -> Result<MinidumpSummary, MinidumpError
             _ => {}
         }
     }
+    summary.missing_required_stream_types = REQUIRED_MINIDUMP_STREAMS
+        .into_iter()
+        .filter(|required| {
+            !summary
+                .streams
+                .iter()
+                .any(|stream| stream.stream_type == *required)
+        })
+        .collect();
     Ok(summary)
+}
+
+impl MinidumpSummary {
+    #[must_use]
+    pub fn stream_profile_valid(&self) -> bool {
+        self.unexpected_stream_types.is_empty()
+            && self.duplicate_stream_types.is_empty()
+            && self.missing_required_stream_types.is_empty()
+    }
+}
+
+/// Serializes the exact allowlisted structural summary inspected by Phase 0.
+///
+/// The output contains no raw minidump bytes, strings, paths, annotations, or
+/// internal identities. Privacy scans must run against these exact bytes.
+#[must_use]
+pub fn serialize_structural_summary(summary: &MinidumpSummary) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::new();
+    writeln!(&mut output, "{{").expect("writing to String cannot fail");
+    writeln!(
+        &mut output,
+        "  \"stream_profile_valid\": {},",
+        summary.stream_profile_valid()
+    )
+    .expect("writing to String cannot fail");
+    writeln!(
+        &mut output,
+        "  \"stream_count\": {},",
+        summary.streams.len()
+    )
+    .expect("writing to String cannot fail");
+    writeln!(&mut output, "  \"streams\": [").expect("writing to String cannot fail");
+    for (index, stream) in summary.streams.iter().enumerate() {
+        let comma = if index + 1 == summary.streams.len() {
+            ""
+        } else {
+            ","
+        };
+        writeln!(
+            &mut output,
+            "    {{\"type\": {}, \"name\": \"{}\", \"size\": {}}}{}",
+            stream.stream_type, stream.name, stream.size, comma
+        )
+        .expect("writing to String cannot fail");
+    }
+    writeln!(&mut output, "  ],").expect("writing to String cannot fail");
+    write_u32_array(
+        &mut output,
+        "unexpected_stream_types",
+        &summary.unexpected_stream_types,
+    );
+    write_u32_array(
+        &mut output,
+        "duplicate_stream_types",
+        &summary.duplicate_stream_types,
+    );
+    write_u32_array(
+        &mut output,
+        "missing_required_stream_types",
+        &summary.missing_required_stream_types,
+    );
+    write_optional(
+        &mut output,
+        "thread_count",
+        summary.thread_count.map(u64::from),
+    );
+    write_optional(
+        &mut output,
+        "module_count",
+        summary.module_count.map(u64::from),
+    );
+    write_optional(
+        &mut output,
+        "memory_range_count",
+        summary.memory_range_count.map(u64::from),
+    );
+    write_optional(
+        &mut output,
+        "exception_code",
+        summary.exception_code.map(u64::from),
+    );
+    write_optional(
+        &mut output,
+        "processor_architecture",
+        summary.processor_architecture.map(u64::from),
+    );
+    output.push_str("  \"structural_summary_format\": 1\n");
+    output.push('}');
+    output
+}
+
+/// Scans raw bytes and the exact serialized structural summary for the seeded
+/// value and every known encoding of one established live process identity.
+///
+/// # Errors
+///
+/// Returns an error instead of producing vacuous zeroes when the seed or live
+/// 256-bit identity is absent.
+pub fn scan_privacy(
+    raw: &[u8],
+    serialized_summary: &[u8],
+    seed: &[u8],
+    identity: &[u8],
+) -> Result<PrivacyScanResult, PrivacyScanError> {
+    if seed.is_empty() {
+        return Err(PrivacyScanError::MissingSeed);
+    }
+    if identity.len() != PROCESS_INSTANCE_ID_SIZE {
+        return Err(PrivacyScanError::InvalidIdentitySize);
+    }
+    let identity_encodings = identity_encodings(identity);
+    Ok(PrivacyScanResult {
+        raw_seed_matches: count_occurrences(raw, seed),
+        summary_seed_matches: count_occurrences(serialized_summary, seed),
+        raw_identity_matches: count_encoding_occurrences(raw, &identity_encodings),
+        summary_identity_matches: count_encoding_occurrences(
+            serialized_summary,
+            &identity_encodings,
+        ),
+        identity_encodings_scanned: identity_encodings.len(),
+    })
 }
 
 #[must_use]
@@ -155,6 +335,121 @@ pub fn count_occurrences(bytes: &[u8], needle: &[u8]) -> usize {
         .windows(needle.len())
         .filter(|window| *window == needle)
         .count()
+}
+
+fn write_u32_array(output: &mut String, name: &str, values: &[u32]) {
+    use std::fmt::Write as _;
+
+    write!(output, "  \"{name}\": [").expect("writing to String cannot fail");
+    for (index, value) in values.iter().enumerate() {
+        if index != 0 {
+            output.push_str(", ");
+        }
+        write!(output, "{value}").expect("writing to String cannot fail");
+    }
+    output.push_str("],\n");
+}
+
+fn write_optional(output: &mut String, name: &str, value: Option<u64>) {
+    use std::fmt::Write as _;
+
+    match value {
+        Some(number) => {
+            writeln!(output, "  \"{name}\": {number},").expect("writing to String cannot fail");
+        }
+        None => {
+            writeln!(output, "  \"{name}\": null,").expect("writing to String cannot fail");
+        }
+    }
+}
+
+const fn minimum_stream_size(stream_type: u32) -> usize {
+    match stream_type {
+        3..=5 => 4,
+        6 => 12,
+        7 => 2,
+        _ => 0,
+    }
+}
+
+const fn is_allowed_stream(stream_type: u32) -> bool {
+    matches!(
+        stream_type,
+        3 | 4 | 6 | 7 | 14 | 15 | 0x4767_0003 | 0x4767_0004 | 0x4767_0005 | 0x4767_0009
+    )
+}
+
+fn count_encoding_occurrences(bytes: &[u8], encodings: &[Vec<u8>]) -> usize {
+    encodings
+        .iter()
+        .map(|encoding| count_occurrences(bytes, encoding))
+        .sum()
+}
+
+fn identity_encodings(identity: &[u8]) -> Vec<Vec<u8>> {
+    let candidates = [
+        identity.to_vec(),
+        hex_encode(identity, b"0123456789abcdef"),
+        hex_encode(identity, b"0123456789ABCDEF"),
+        base64_encode(
+            identity,
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+            true,
+        ),
+        base64_encode(
+            identity,
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+            false,
+        ),
+        base64_encode(
+            identity,
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+            true,
+        ),
+        base64_encode(
+            identity,
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+            false,
+        ),
+    ];
+    let mut encodings = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        if !encodings.contains(&candidate) {
+            encodings.push(candidate);
+        }
+    }
+    encodings
+}
+
+fn hex_encode(bytes: &[u8], alphabet: &[u8; 16]) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(alphabet[usize::from(byte >> 4)]);
+        encoded.push(alphabet[usize::from(byte & 0x0f)]);
+    }
+    encoded
+}
+
+fn base64_encode(bytes: &[u8], alphabet: &[u8; 64], padded: bool) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        encoded.push(alphabet[usize::from(first >> 2)]);
+        encoded.push(alphabet[usize::from(((first & 0x03) << 4) | (second >> 4))]);
+        if chunk.len() >= 2 {
+            encoded.push(alphabet[usize::from(((second & 0x0f) << 2) | (third >> 6))]);
+        } else if padded {
+            encoded.push(b'=');
+        }
+        if chunk.len() == 3 {
+            encoded.push(alphabet[usize::from(third & 0x3f)]);
+        } else if padded {
+            encoded.push(b'=');
+        }
+    }
+    encoded
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, MinidumpError> {
@@ -194,6 +489,10 @@ const fn stream_name(stream_type: u32) -> &'static str {
         16 => "MemoryInfoListStream",
         24 => "ThreadNamesStream",
         0x4350_0001 => "CrashpadInfoStream",
+        0x4767_0003 => "LinuxCpuInfoStream",
+        0x4767_0004 => "LinuxProcStatusStream",
+        0x4767_0005 => "LinuxLsbReleaseStream",
+        0x4767_0009 => "LinuxMappingsStream",
         _ => "UnknownStream",
     }
 }
@@ -207,6 +506,11 @@ mod tests {
         let mut record = [0_u8; EMERGENCY_RECORD_SIZE];
         record[0..8].copy_from_slice(EMERGENCY_MAGIC);
         record[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        record[12..16].copy_from_slice(
+            &u32::try_from(EMERGENCY_RECORD_SIZE)
+                .expect("record size fits u32")
+                .to_le_bytes(),
+        );
         record[248..256].copy_from_slice(&0x5442_454d_434f_4d50_u64.to_le_bytes());
         let checksum = crc32c(&record[0..244]);
         record[244..248].copy_from_slice(&checksum.to_le_bytes());
@@ -223,18 +527,31 @@ mod tests {
 
     #[test]
     fn inventories_bounded_minidump() {
-        let mut bytes = vec![0_u8; 48];
+        let mut bytes = vec![0_u8; 114];
         bytes[0..4].copy_from_slice(b"MDMP");
-        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[8..12].copy_from_slice(&5_u32.to_le_bytes());
         bytes[12..16].copy_from_slice(&32_u32.to_le_bytes());
         bytes[32..36].copy_from_slice(&3_u32.to_le_bytes());
         bytes[36..40].copy_from_slice(&4_u32.to_le_bytes());
-        bytes[40..44].copy_from_slice(&44_u32.to_le_bytes());
-        bytes[44..48].copy_from_slice(&2_u32.to_le_bytes());
+        bytes[40..44].copy_from_slice(&92_u32.to_le_bytes());
+        bytes[44..48].copy_from_slice(&4_u32.to_le_bytes());
+        bytes[48..52].copy_from_slice(&4_u32.to_le_bytes());
+        bytes[52..56].copy_from_slice(&96_u32.to_le_bytes());
+        bytes[56..60].copy_from_slice(&6_u32.to_le_bytes());
+        bytes[60..64].copy_from_slice(&12_u32.to_le_bytes());
+        bytes[64..68].copy_from_slice(&100_u32.to_le_bytes());
+        bytes[68..72].copy_from_slice(&7_u32.to_le_bytes());
+        bytes[72..76].copy_from_slice(&2_u32.to_le_bytes());
+        bytes[76..80].copy_from_slice(&112_u32.to_le_bytes());
+        bytes[80..84].copy_from_slice(&15_u32.to_le_bytes());
+        bytes[84..88].copy_from_slice(&0_u32.to_le_bytes());
+        bytes[88..92].copy_from_slice(&112_u32.to_le_bytes());
+        bytes[92..96].copy_from_slice(&2_u32.to_le_bytes());
 
         let summary = summarize_minidump(&bytes).expect("valid minidump");
         assert_eq!(summary.streams[0].name, "ThreadListStream");
         assert_eq!(summary.thread_count, Some(2));
+        assert!(summary.stream_profile_valid());
     }
 
     #[test]
@@ -253,6 +570,11 @@ mod tests {
         let mut record = [0_u8; EMERGENCY_RECORD_SIZE];
         record[0..8].copy_from_slice(EMERGENCY_MAGIC);
         record[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        record[12..16].copy_from_slice(
+            &u32::try_from(EMERGENCY_RECORD_SIZE)
+                .expect("record size fits u32")
+                .to_le_bytes(),
+        );
         record[248..256].copy_from_slice(&0x5442_454d_434f_4d50_u64.to_le_bytes());
         let checksum = crc32c(&record[0..244]);
         record[244..248].copy_from_slice(&checksum.to_le_bytes());
@@ -281,5 +603,134 @@ mod tests {
             let _ = summarize_minidump(&bytes);
             bytes[index] = original;
         }
+    }
+
+    #[test]
+    fn rejects_each_fixed_emergency_field_flip() {
+        let valid = valid_emergency_record();
+        for range in [0..8, 8..12, 12..16, 128..244, 244..248, 248..256] {
+            let mut record = valid;
+            record[range.start] ^= 1;
+            if range.start < 244 {
+                let checksum = crc32c(&record[0..244]);
+                record[244..248].copy_from_slice(&checksum.to_le_bytes());
+            }
+            assert!(validate_emergency_record(&record).is_err(), "{range:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_short_streams_before_list_count_reads() {
+        for stream_type in [3_u32, 4, 5] {
+            let bytes = single_stream_minidump(stream_type, 3, 44, 47);
+            assert_eq!(
+                summarize_minidump(&bytes),
+                Err(MinidumpError::InvalidStream)
+            );
+        }
+        assert_eq!(
+            summarize_minidump(&single_stream_minidump(6, 11, 44, 55)),
+            Err(MinidumpError::InvalidStream)
+        );
+        assert_eq!(
+            summarize_minidump(&single_stream_minidump(7, 1, 44, 45)),
+            Err(MinidumpError::InvalidStream)
+        );
+    }
+
+    #[test]
+    fn accepts_stream_ending_at_file_boundary() {
+        let bytes = single_stream_minidump(3, 4, 44, 48);
+        let summary = summarize_minidump(&bytes).expect("boundary stream is valid");
+        assert_eq!(summary.thread_count, Some(0));
+    }
+
+    #[test]
+    fn rejects_unexpected_and_duplicate_stream_profile_entries() {
+        let mut bytes = vec![0_u8; 64];
+        bytes[0..4].copy_from_slice(b"MDMP");
+        bytes[8..12].copy_from_slice(&2_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&32_u32.to_le_bytes());
+        for entry in [32_usize, 44] {
+            bytes[entry..entry + 4].copy_from_slice(&24_u32.to_le_bytes());
+            bytes[entry + 4..entry + 8].copy_from_slice(&0_u32.to_le_bytes());
+            bytes[entry + 8..entry + 12].copy_from_slice(&56_u32.to_le_bytes());
+        }
+        let summary = summarize_minidump(&bytes).expect("inventory remains parseable");
+        assert!(!summary.stream_profile_valid());
+        assert_eq!(summary.unexpected_stream_types, vec![24, 24]);
+        assert_eq!(summary.duplicate_stream_types, vec![24]);
+        assert_eq!(summary.missing_required_stream_types, vec![3, 4, 6, 7, 15]);
+    }
+
+    #[test]
+    fn scans_serialized_summary_and_known_identity_encodings() {
+        let identity = [0x5a_u8; PROCESS_INSTANCE_ID_SIZE];
+        let summary = MinidumpSummary {
+            streams: Vec::new(),
+            thread_count: None,
+            module_count: None,
+            memory_range_count: None,
+            exception_code: None,
+            processor_architecture: None,
+            unexpected_stream_types: Vec::new(),
+            duplicate_stream_types: Vec::new(),
+            missing_required_stream_types: REQUIRED_MINIDUMP_STREAMS.to_vec(),
+        };
+        let mut serialized = serialize_structural_summary(&summary).into_bytes();
+        serialized.extend_from_slice(b" TRACEBOX_SEED ");
+        serialized.extend_from_slice(&hex_encode(&identity, b"0123456789abcdef"));
+        let mut raw = b"TRACEBOX_SEED ".to_vec();
+        raw.extend_from_slice(&identity);
+        let scan = scan_privacy(&raw, &serialized, b"TRACEBOX_SEED", &identity)
+            .expect("live identity permits scan");
+        assert_eq!(scan.raw_seed_matches, 1);
+        assert_eq!(scan.summary_seed_matches, 1);
+        assert_eq!(scan.raw_identity_matches, 1);
+        assert_eq!(scan.summary_identity_matches, 1);
+        assert!(scan.identity_encodings_scanned >= 5);
+    }
+
+    #[test]
+    fn privacy_scan_rejects_missing_live_inputs() {
+        assert_eq!(
+            scan_privacy(&[], &[], &[], &[0_u8; PROCESS_INSTANCE_ID_SIZE]),
+            Err(PrivacyScanError::MissingSeed)
+        );
+        assert_eq!(
+            scan_privacy(&[], &[], b"seed", &[]),
+            Err(PrivacyScanError::InvalidIdentitySize)
+        );
+    }
+
+    fn valid_emergency_record() -> [u8; EMERGENCY_RECORD_SIZE] {
+        let mut record = [0_u8; EMERGENCY_RECORD_SIZE];
+        record[0..8].copy_from_slice(EMERGENCY_MAGIC);
+        record[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        record[12..16].copy_from_slice(
+            &u32::try_from(EMERGENCY_RECORD_SIZE)
+                .expect("record size fits u32")
+                .to_le_bytes(),
+        );
+        record[248..256].copy_from_slice(&0x5442_454d_434f_4d50_u64.to_le_bytes());
+        let checksum = crc32c(&record[0..244]);
+        record[244..248].copy_from_slice(&checksum.to_le_bytes());
+        record
+    }
+
+    fn single_stream_minidump(
+        stream_type: u32,
+        declared_size: u32,
+        rva: u32,
+        total_size: usize,
+    ) -> Vec<u8> {
+        let mut bytes = vec![0_u8; total_size];
+        bytes[0..4].copy_from_slice(b"MDMP");
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&32_u32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&stream_type.to_le_bytes());
+        bytes[36..40].copy_from_slice(&declared_size.to_le_bytes());
+        bytes[40..44].copy_from_slice(&rva.to_le_bytes());
+        bytes
     }
 }

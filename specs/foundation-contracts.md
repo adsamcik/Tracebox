@@ -20,7 +20,7 @@ Classes C0, C1, C2, and Prohibited from architecture section 6 are closed catego
 
 ## Internal identities
 
-The complete identity table in architecture section 10.3 is normative. Random identities are 256 bits except the 128-bit OS correlation token. Randomness failure rejects durable-object creation. Internal identities are stripped or replaced with deterministic package-local numbers. Known binary and documented textual encodings are scanned before raw export.
+The complete identity table in architecture section 10.3 is normative. Random identities are 256 bits except the 128-bit OS correlation token. Randomness failure rejects durable-object creation. Internal identities are stripped or replaced with deterministic package-local numbers. Known binary and documented textual encodings are scanned before raw export. For the Phase 0 256-bit process identity, the required known encodings are the 32 raw bytes, contiguous lowercase and uppercase hexadecimal, and RFC 4648 standard and URL-safe Base64 with and without padding; duplicate byte representations are scanned once.
 
 ## Ordinary segment wire format
 
@@ -59,4 +59,3 @@ ADR-0004 and architecture sections 8.5 and 11.5 are normative. Tightening is res
 ## Package and build identity
 
 `.tbdiag` v1 limits and rejection rules in architecture section 15.2 are normative, with ADR-0006 selecting `STORED`. Build identity is the tuple of schema fingerprint, application ID/version, variant, R8 mapping hash/ID, ABI, ELF build IDs, Crashpad pin/patch-set hash, Rust lock hash, and dependency-verification hash. Symbolication requires an exact tuple match.
-

@@ -20,28 +20,54 @@ $patchSetHash = [Convert]::ToHexString(
     [Security.Cryptography.SHA256]::HashData(
         [Text.Encoding]::UTF8.GetBytes(($patchMaterial -join '')))).ToLowerInvariant()
 
-New-Item -ItemType Directory -Force $checkout, $downloads | Out-Null
-$verifiedManifest = Join-Path $checkout 'verified-sources.json'
-if (-not $Force -and (Test-Path $verifiedManifest)) {
-    $verified = Get-Content $verifiedManifest -Raw | ConvertFrom-Json
-    if ($verified.source_lock_sha256 -eq $sourceLockHash -and
-        $verified.patch_set_sha256 -eq $patchSetHash -and
-        $verified.components.Count -eq $lock.components.Count) {
-        Write-Output "Reusing verified Crashpad checkout with $($lock.components.Count) components."
-        return
-    }
-}
-
 function Get-TreeHash {
-    param([string] $Directory)
+    param(
+        [string] $Directory,
+        [string[]] $ExcludedRelativePrefixes = @()
+    )
 
-    $entries = foreach ($file in Get-ChildItem $Directory -Recurse -File | Sort-Object FullName) {
+    $entries = foreach ($file in Get-ChildItem $Directory -Recurse -File |
+            Sort-Object FullName) {
         $relative = $file.FullName.Substring($Directory.Length + 1).Replace('\', '/')
+        $excluded = $false
+        foreach ($prefix in $ExcludedRelativePrefixes) {
+            if ($relative -eq $prefix -or $relative.StartsWith($prefix)) {
+                $excluded = $true
+                break
+            }
+        }
+        if ($excluded) {
+            continue
+        }
         $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         "$relative`n$hash`n"
     }
     $bytes = [Text.Encoding]::UTF8.GetBytes(($entries -join ''))
-    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    return [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+}
+
+New-Item -ItemType Directory -Force $checkout, $downloads | Out-Null
+$verifiedManifest = Join-Path $checkout 'verified-sources.json'
+$generatedTreeExclusions = @(
+    'verified-sources.json',
+    'crashpad/out/',
+    'crashpad/tracebox_overlay/'
+)
+if (-not $Force -and (Test-Path $verifiedManifest)) {
+    $verified = Get-Content $verifiedManifest -Raw | ConvertFrom-Json
+    if ($verified.source_lock_sha256 -eq $sourceLockHash -and
+        $verified.patch_set_sha256 -eq $patchSetHash -and
+        $verified.components.Count -eq $lock.components.Count -and
+        $verified.post_patch_tree_sha256) {
+        $actualPostPatchTreeHash =
+            Get-TreeHash $checkout $generatedTreeExclusions
+        if ($actualPostPatchTreeHash -eq $verified.post_patch_tree_sha256) {
+            Write-Output "Reusing verified Crashpad checkout with $($lock.components.Count) components."
+            return
+        }
+        Write-Warning 'Cached Crashpad checkout failed post-patch tree verification; reconstructing.'
+    }
 }
 
 foreach ($component in $lock.components) {
@@ -97,6 +123,10 @@ $manifest = foreach ($component in $lock.components) {
 [ordered]@{
     source_lock_sha256 = $sourceLockHash
     patch_set_sha256 = $patchSetHash
+    post_patch_tree_sha256 = Get-TreeHash $checkout $generatedTreeExclusions
+    post_patch_tree_hash_algorithm =
+        'sha256(UTF8(sorted(relative_path + LF + file_sha256 + LF)))'
+    excluded_generated_paths = $generatedTreeExclusions
     components = $manifest
 } | ConvertTo-Json -Depth 5 |
     Set-Content $verifiedManifest -Encoding utf8

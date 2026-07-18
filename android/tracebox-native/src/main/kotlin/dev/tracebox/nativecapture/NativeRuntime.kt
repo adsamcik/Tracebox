@@ -11,6 +11,8 @@ object NativeRuntime {
 
     external fun connectClient(socketPath: String, processRole: Int): Boolean
 
+    external fun lastRegistrationOutcomeForTest(): Int
+
     external fun requestNonFatal(reason: Int, timeoutMillis: Int): Boolean
 
     external fun requestSeededNonFatalForTest(): Boolean
@@ -28,6 +30,8 @@ object NativeRuntime {
     external fun hangForTest()
 
     external fun recursiveSignalForTest()
+
+    external fun prepareSignalChainForTest(directory: String): Boolean
 
     external fun terminateHandlerForTest()
 }

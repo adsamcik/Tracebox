@@ -19,8 +19,10 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <climits>
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,11 +43,15 @@
 namespace {
 
 constexpr int kControlBacklog = 8;
-constexpr int kConnectAttempts = 40;
+constexpr int kRegistrationDeadlineMillis = 2'000;
+constexpr int kNonfatalDeadlineMillis = 2'000;
 constexpr long kConnectDelayNanoseconds = 50'000'000;
 constexpr size_t kSignalStackBytes = 64 * 1024;
+constexpr std::array<int, 6> kHandledSignals{
+    SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
 
 std::atomic<bool> g_handler_alive{false};
+std::atomic<int32_t> g_last_registration_outcome{2};
 int g_control_socket = -1;
 int g_shared_client_socket = -1;
 int g_emergency_fd = -1;
@@ -57,6 +63,20 @@ using OverflowFunction = void (*)(uint64_t);
 volatile OverflowFunction g_overflow_function = nullptr;
 __thread volatile sig_atomic_t g_in_signal = 0;
 __thread void* g_signal_stack = nullptr;
+pthread_once_t g_signal_install_once = PTHREAD_ONCE_INIT;
+int g_signal_install_result = EIO;
+std::array<struct sigaction, kHandledSignals.size()> g_previous_actions{};
+std::array<struct sigaction, kHandledSignals.size()> g_default_actions{};
+int g_chain_test_fd = -1;
+volatile sig_atomic_t g_chain_test_count = 0;
+
+enum class RegistrationOutcome : int32_t {
+  kSuccess = 0,
+  kDeadlineExceeded = 1,
+  kUnavailable = 2,
+  kProtocolError = 3,
+  kSystemError = 4,
+};
 
 struct RegistrationReply {
   int32_t handler_pid;
@@ -85,6 +105,83 @@ uint64_t MonotonicNanoseconds() {
   }
   return static_cast<uint64_t>(now.tv_sec) * 1'000'000'000ULL +
          static_cast<uint64_t>(now.tv_nsec);
+}
+
+uint64_t DeadlineAfterMilliseconds(int milliseconds) {
+  const uint64_t now = MonotonicNanoseconds();
+  if (now == 0 || milliseconds <= 0) {
+    return 0;
+  }
+  return now + static_cast<uint64_t>(milliseconds) * UINT64_C(1'000'000);
+}
+
+int RemainingPollMilliseconds(uint64_t deadline) {
+  const uint64_t now = MonotonicNanoseconds();
+  if (now == 0 || now >= deadline) {
+    return 0;
+  }
+  const uint64_t remaining_ns = deadline - now;
+  const uint64_t whole_ms = remaining_ns / UINT64_C(1'000'000);
+  return whole_ms > static_cast<uint64_t>(INT_MAX)
+             ? INT_MAX
+             : static_cast<int>(whole_ms);
+}
+
+RegistrationOutcome WaitForSocket(int socket_fd,
+                                  short events,
+                                  uint64_t deadline) {
+  while (true) {
+    const int timeout_ms = RemainingPollMilliseconds(deadline);
+    if (timeout_ms == 0) {
+      return RegistrationOutcome::kDeadlineExceeded;
+    }
+    pollfd descriptor{socket_fd, events, 0};
+    const int result = poll(&descriptor, 1, timeout_ms);
+    if (result > 0) {
+      if ((descriptor.revents & events) != 0) {
+        return RegistrationOutcome::kSuccess;
+      }
+      return RegistrationOutcome::kUnavailable;
+    }
+    if (result == 0) {
+      return RegistrationOutcome::kDeadlineExceeded;
+    }
+    if (errno != EINTR) {
+      return RegistrationOutcome::kSystemError;
+    }
+  }
+}
+
+RegistrationOutcome WaitBeforeConnectRetry(uint64_t deadline) {
+  const uint64_t now = MonotonicNanoseconds();
+  if (now == 0) {
+    return RegistrationOutcome::kSystemError;
+  }
+  if (now >= deadline) {
+    return RegistrationOutcome::kDeadlineExceeded;
+  }
+  uint64_t remaining = deadline - now;
+  if (remaining > static_cast<uint64_t>(kConnectDelayNanoseconds)) {
+    remaining = static_cast<uint64_t>(kConnectDelayNanoseconds);
+  }
+  timespec delay{
+      static_cast<time_t>(remaining / UINT64_C(1'000'000'000)),
+      static_cast<long>(remaining % UINT64_C(1'000'000'000))};
+  while (nanosleep(&delay, &delay) != 0) {
+    if (errno != EINTR) {
+      return RegistrationOutcome::kSystemError;
+    }
+  }
+  return RegistrationOutcome::kSuccess;
+}
+
+size_t SignalIndex(int signal_number) {
+  for (size_t index = 0; index < kHandledSignals.size(); ++index) {
+    if (kHandledSignals[index] == signal_number) {
+      return index;
+    }
+  }
+  return kHandledSignals.size();
 }
 
 void ExtractControlAddresses(void* context,
@@ -136,27 +233,37 @@ bool WriteEmergency(int signal_number, int signal_code, void* context, uint64_t 
          static_cast<ssize_t>(sizeof(record.bytes));
 }
 
-[[noreturn]] void ReraiseDefault(int signal_number) {
-  struct sigaction action {};
-  sigemptyset(&action.sa_mask);
-  action.sa_handler = SIG_DFL;
-  sigaction(signal_number, &action, nullptr);
+[[noreturn]] void ReraisePrevious(int signal_number) {
+  const size_t index = SignalIndex(signal_number);
+  const struct sigaction* action =
+      index < kHandledSignals.size() ? &g_previous_actions[index] : nullptr;
+  const struct sigaction* default_action =
+      index < kHandledSignals.size() ? &g_default_actions[index] : nullptr;
+  if (action != nullptr && action->sa_handler != SIG_IGN) {
+    sigaction(signal_number, action, nullptr);
+  } else if (default_action != nullptr) {
+    sigaction(signal_number, default_action, nullptr);
+  }
   sigset_t unblocked;
   sigemptyset(&unblocked);
   sigaddset(&unblocked, signal_number);
   sigprocmask(SIG_UNBLOCK, &unblocked, nullptr);
   syscall(SYS_tgkill, getpid(), gettid(), signal_number);
+  if (default_action != nullptr) {
+    sigaction(signal_number, default_action, nullptr);
+    syscall(SYS_tgkill, getpid(), gettid(), signal_number);
+  }
   _exit(128 + signal_number);
 }
 
 void EmergencySignalHandler(int signal_number, siginfo_t* signal_info, void* context) {
   if (g_in_signal != 0) {
-    ReraiseDefault(signal_number);
+    ReraisePrevious(signal_number);
   }
   g_in_signal = 1;
   const int signal_code = signal_info == nullptr ? 0 : signal_info->si_code;
   WriteEmergency(signal_number, signal_code, context, UINT64_C(1));
-  ReraiseDefault(signal_number);
+  ReraisePrevious(signal_number);
 }
 
 bool EmergencyLastChance(int signal_number, siginfo_t* signal_info, ucontext_t* context) {
@@ -193,24 +300,58 @@ bool InstallSignalStack() {
   return true;
 }
 
-bool InstallEmergencyHandlers() {
+void InstallEmergencyHandlersOnce() {
   if (!InstallSignalStack()) {
-    return false;
+    g_signal_install_result = errno == 0 ? EIO : errno;
+    return;
   }
-  constexpr int signals[] = {SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
-  for (const int signal_number : signals) {
+  for (size_t index = 0; index < kHandledSignals.size(); ++index) {
+    struct sigaction default_action {};
+    sigemptyset(&default_action.sa_mask);
+    default_action.sa_handler = SIG_DFL;
+    g_default_actions[index] = default_action;
+
     struct sigaction action {};
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = EmergencySignalHandler;
     action.sa_flags = SA_SIGINFO | SA_ONSTACK;
-    if (sigaction(signal_number, &action, nullptr) != 0) {
-      return false;
+    if (sigaction(
+            kHandledSignals[index], &action, &g_previous_actions[index]) != 0) {
+      g_signal_install_result = errno == 0 ? EIO : errno;
+      for (size_t restore = 0; restore < index; ++restore) {
+        sigaction(
+            kHandledSignals[restore], &g_previous_actions[restore], nullptr);
+      }
+      return;
     }
   }
-  return true;
+  g_signal_install_result = 0;
 }
 
-bool SendRegistration(int socket_fd) {
+bool InstallEmergencyHandlers() {
+  const int once_result =
+      pthread_once(&g_signal_install_once, InstallEmergencyHandlersOnce);
+  return once_result == 0 && g_signal_install_result == 0;
+}
+
+void TestPriorSignalHandler(int, siginfo_t*, void*) {
+  const sig_atomic_t count = g_chain_test_count + 1;
+  g_chain_test_count = count;
+  if (g_chain_test_fd >= 0) {
+    const uint8_t marker =
+        count > static_cast<sig_atomic_t>(UINT8_MAX)
+            ? UINT8_MAX
+            : static_cast<uint8_t>(count);
+    pwrite(g_chain_test_fd, &marker, sizeof(marker), 0);
+  }
+}
+
+RegistrationOutcome SendRegistration(int socket_fd) {
+  const uint64_t deadline =
+      DeadlineAfterMilliseconds(kRegistrationDeadlineMillis);
+  if (deadline == 0) {
+    return RegistrationOutcome::kSystemError;
+  }
   ucred credentials{};
   socklen_t credentials_size = sizeof(credentials);
   if (getsockopt(socket_fd,
@@ -219,7 +360,7 @@ bool SendRegistration(int socket_fd) {
                  &credentials,
                  &credentials_size) != 0 ||
       credentials.uid != getuid()) {
-    return false;
+    return RegistrationOutcome::kProtocolError;
   }
 
   RegistrationReply reply{getpid(), 0};
@@ -235,20 +376,40 @@ bool SendRegistration(int socket_fd) {
   header->cmsg_type = SCM_RIGHTS;
   header->cmsg_len = CMSG_LEN(sizeof(int));
   std::memcpy(CMSG_DATA(header), &g_shared_client_socket, sizeof(int));
-  return sendmsg(socket_fd, &message, MSG_NOSIGNAL) ==
-         static_cast<ssize_t>(sizeof(reply));
+  while (true) {
+    const ssize_t sent =
+        sendmsg(socket_fd, &message, MSG_NOSIGNAL | MSG_DONTWAIT);
+    if (sent == static_cast<ssize_t>(sizeof(reply))) {
+      return RegistrationOutcome::kSuccess;
+    }
+    if (sent >= 0) {
+      return RegistrationOutcome::kProtocolError;
+    }
+    if (errno == EINTR) {
+      continue;
+    }
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      return RegistrationOutcome::kUnavailable;
+    }
+    const RegistrationOutcome wait =
+        WaitForSocket(socket_fd, POLLOUT, deadline);
+    if (wait != RegistrationOutcome::kSuccess) {
+      return wait;
+    }
+  }
 }
 
 void* ControlServer(void*) {
   while (g_handler_alive.load(std::memory_order_acquire)) {
-    const int client = accept4(g_control_socket, nullptr, nullptr, SOCK_CLOEXEC);
+    const int client =
+        accept4(g_control_socket, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
     if (client < 0) {
       if (errno == EINTR) {
         continue;
       }
       break;
     }
-    SendRegistration(client);
+    static_cast<void>(SendRegistration(client));
     close(client);
   }
   return nullptr;
@@ -285,7 +446,10 @@ bool StartControlServer(const std::string& socket_path) {
   return true;
 }
 
-bool ReceiveRegistration(int socket_fd, int* handler_socket, pid_t* handler_pid) {
+RegistrationOutcome ReceiveRegistration(int socket_fd,
+                                        int* handler_socket,
+                                        pid_t* handler_pid,
+                                        uint64_t deadline) {
   RegistrationReply reply{};
   iovec io{&reply, sizeof(reply)};
   std::array<char, CMSG_SPACE(sizeof(int))> control{};
@@ -294,19 +458,39 @@ bool ReceiveRegistration(int socket_fd, int* handler_socket, pid_t* handler_pid)
   message.msg_iovlen = 1;
   message.msg_control = control.data();
   message.msg_controllen = control.size();
-  if (recvmsg(socket_fd, &message, 0) != static_cast<ssize_t>(sizeof(reply)) ||
-      reply.status != 0) {
-    return false;
+  while (true) {
+    const ssize_t received = recvmsg(socket_fd, &message, MSG_DONTWAIT);
+    if (received == static_cast<ssize_t>(sizeof(reply))) {
+      break;
+    }
+    if (received >= 0) {
+      return RegistrationOutcome::kProtocolError;
+    }
+    if (errno == EINTR) {
+      continue;
+    }
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      return RegistrationOutcome::kUnavailable;
+    }
+    const RegistrationOutcome wait =
+        WaitForSocket(socket_fd, POLLIN, deadline);
+    if (wait != RegistrationOutcome::kSuccess) {
+      return wait;
+    }
+  }
+  if (reply.status != 0 ||
+      (message.msg_flags & (MSG_CTRUNC | MSG_TRUNC)) != 0) {
+    return RegistrationOutcome::kProtocolError;
   }
   const cmsghdr* header = CMSG_FIRSTHDR(&message);
   if (header == nullptr || header->cmsg_level != SOL_SOCKET ||
       header->cmsg_type != SCM_RIGHTS ||
       header->cmsg_len != CMSG_LEN(sizeof(int))) {
-    return false;
+    return RegistrationOutcome::kProtocolError;
   }
   std::memcpy(handler_socket, CMSG_DATA(header), sizeof(int));
   *handler_pid = reply.handler_pid;
-  return true;
+  return RegistrationOutcome::kSuccess;
 }
 
 void* HandlerDeathWatcher(void* argument) {
@@ -331,30 +515,63 @@ bool StartDeathWatcher(int socket_fd) {
   return true;
 }
 
-bool ConnectControlSocket(const std::string& socket_path,
-                          int* handler_socket,
-                          pid_t* handler_pid) {
-  for (int attempt = 0; attempt < kConnectAttempts; ++attempt) {
-    const int socket_fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+RegistrationOutcome ConnectControlSocket(const std::string& socket_path,
+                                        int* handler_socket,
+                                        pid_t* handler_pid) {
+  const uint64_t deadline =
+      DeadlineAfterMilliseconds(kRegistrationDeadlineMillis);
+  if (deadline == 0) {
+    return RegistrationOutcome::kSystemError;
+  }
+  while (RemainingPollMilliseconds(deadline) > 0) {
+    const int socket_fd =
+        socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (socket_fd < 0) {
-      return false;
+      return RegistrationOutcome::kSystemError;
     }
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
     std::memcpy(address.sun_path, socket_path.c_str(), socket_path.size() + 1);
-    if (connect(socket_fd,
+    bool connected =
+        connect(socket_fd,
                 reinterpret_cast<const sockaddr*>(&address),
-                sizeof(address)) == 0) {
-      const bool received =
-          ReceiveRegistration(socket_fd, handler_socket, handler_pid);
+                sizeof(address)) == 0;
+    int connect_error = connected ? 0 : errno;
+    if (!connected && connect_error == EINPROGRESS) {
+      const RegistrationOutcome wait =
+          WaitForSocket(socket_fd, POLLOUT, deadline);
+      if (wait == RegistrationOutcome::kSuccess) {
+        socklen_t error_size = sizeof(connect_error);
+        if (getsockopt(socket_fd,
+                       SOL_SOCKET,
+                       SO_ERROR,
+                       &connect_error,
+                       &error_size) != 0) {
+          connect_error = errno;
+        }
+        connected = connect_error == 0;
+      } else {
+        close(socket_fd);
+        return wait;
+      }
+    }
+    if (connected) {
+      const RegistrationOutcome received =
+          ReceiveRegistration(socket_fd, handler_socket, handler_pid, deadline);
       close(socket_fd);
       return received;
     }
     close(socket_fd);
-    timespec delay{0, kConnectDelayNanoseconds};
-    nanosleep(&delay, nullptr);
+    if (connect_error != ENOENT && connect_error != ECONNREFUSED &&
+        connect_error != EAGAIN) {
+      return RegistrationOutcome::kUnavailable;
+    }
+    const RegistrationOutcome retry = WaitBeforeConnectRetry(deadline);
+    if (retry != RegistrationOutcome::kSuccess) {
+      return retry;
+    }
   }
-  return false;
+  return RegistrationOutcome::kDeadlineExceeded;
 }
 
 int CountPendingReports() {
@@ -374,12 +591,39 @@ int CountPendingReports() {
 }
 
 struct DumpRequest {
-  pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-  pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
+  pthread_mutex_t mutex;
+  pthread_cond_t condition;
   std::atomic<int> references{2};
   bool done = false;
   bool success = false;
 };
+
+DumpRequest* CreateDumpRequest() {
+  auto* request = new (std::nothrow) DumpRequest();
+  if (request == nullptr) {
+    return nullptr;
+  }
+  if (pthread_mutex_init(&request->mutex, nullptr) != 0) {
+    delete request;
+    return nullptr;
+  }
+  pthread_condattr_t attributes;
+  if (pthread_condattr_init(&attributes) != 0) {
+    pthread_mutex_destroy(&request->mutex);
+    delete request;
+    return nullptr;
+  }
+  const bool initialized =
+      pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC) == 0 &&
+      pthread_cond_init(&request->condition, &attributes) == 0;
+  pthread_condattr_destroy(&attributes);
+  if (!initialized) {
+    pthread_mutex_destroy(&request->mutex);
+    delete request;
+    return nullptr;
+  }
+  return request;
+}
 
 void ReleaseDumpRequest(DumpRequest* request) {
   if (request->references.fetch_sub(1, std::memory_order_acq_rel) == 1) {
@@ -435,27 +679,28 @@ void* RunDumpRequest(void* argument) {
   return nullptr;
 }
 
-bool RequestDumpWithTimeout(int timeout_millis) {
-  if (timeout_millis <= 0 ||
+bool RequestDumpWithTimeout(int timeout_millis, uint64_t deadline_ns) {
+  if (timeout_millis != kNonfatalDeadlineMillis ||
+      deadline_ns == 0 ||
       !g_handler_alive.load(std::memory_order_acquire)) {
     return false;
   }
-  auto* request = new DumpRequest();
+  const timespec deadline{
+      static_cast<time_t>(deadline_ns / UINT64_C(1'000'000'000)),
+      static_cast<long>(deadline_ns % UINT64_C(1'000'000'000))};
+
+  auto* request = CreateDumpRequest();
+  if (request == nullptr) {
+    return false;
+  }
   pthread_t thread;
   if (pthread_create(&thread, nullptr, RunDumpRequest, request) != 0) {
+    pthread_cond_destroy(&request->condition);
+    pthread_mutex_destroy(&request->mutex);
     delete request;
     return false;
   }
   pthread_detach(thread);
-
-  timespec deadline{};
-  clock_gettime(CLOCK_REALTIME, &deadline);
-  deadline.tv_sec += timeout_millis / 1000;
-  deadline.tv_nsec += static_cast<long>(timeout_millis % 1000) * 1'000'000;
-  if (deadline.tv_nsec >= 1'000'000'000) {
-    ++deadline.tv_sec;
-    deadline.tv_nsec -= 1'000'000'000;
-  }
 
   pthread_mutex_lock(&request->mutex);
   int wait_result = 0;
@@ -623,7 +868,11 @@ Java_dev_tracebox_nativecapture_NativeRuntime_connectClient(
 
   int handler_socket = -1;
   pid_t handler_pid = -1;
-  if (!ConnectControlSocket(socket_path, &handler_socket, &handler_pid)) {
+  const RegistrationOutcome registration =
+      ConnectControlSocket(socket_path, &handler_socket, &handler_pid);
+  g_last_registration_outcome.store(
+      static_cast<int32_t>(registration), std::memory_order_release);
+  if (registration != RegistrationOutcome::kSuccess) {
     return JNI_FALSE;
   }
   const int watcher_socket = dup(handler_socket);
@@ -647,18 +896,21 @@ Java_dev_tracebox_nativecapture_NativeRuntime_connectClient(
   return JNI_TRUE;
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_tracebox_nativecapture_NativeRuntime_lastRegistrationOutcomeForTest(
+    JNIEnv*,
+    jobject) {
+  return g_last_registration_outcome.load(std::memory_order_acquire);
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_dev_tracebox_nativecapture_NativeRuntime_requestNonFatal(
     JNIEnv*,
     jobject,
     jint,
     jint timeout_millis) {
-  const int before = CountPendingReports();
-  if (before < 0 || !RequestDumpWithTimeout(timeout_millis)) {
-    return JNI_FALSE;
-  }
-  const int after = CountPendingReports();
-  return after > before ? JNI_TRUE : JNI_FALSE;
+  const uint64_t deadline = DeadlineAfterMilliseconds(timeout_millis);
+  return RequestDumpWithTimeout(timeout_millis, deadline) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -771,6 +1023,44 @@ Java_dev_tracebox_nativecapture_NativeRuntime_recursiveSignalForTest(
     jobject) {
   g_in_signal = 1;
   EmergencySignalHandler(SIGABRT, nullptr, nullptr);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_tracebox_nativecapture_NativeRuntime_prepareSignalChainForTest(
+    JNIEnv* env,
+    jobject,
+    jstring directory) {
+  const std::string base = CopyString(env, directory);
+  if (base.empty()) {
+    return JNI_FALSE;
+  }
+  const std::string path = base + "/tracebox-chain-marker.bin";
+  const int fd = open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_DSYNC, 0600);
+  if (fd < 0 || ftruncate(fd, 1) != 0) {
+    if (fd >= 0) {
+      close(fd);
+    }
+    return JNI_FALSE;
+  }
+  const uint8_t zero = 0;
+  if (pwrite(fd, &zero, sizeof(zero), 0) != static_cast<ssize_t>(sizeof(zero))) {
+    close(fd);
+    return JNI_FALSE;
+  }
+  struct sigaction action {};
+  sigemptyset(&action.sa_mask);
+  action.sa_sigaction = TestPriorSignalHandler;
+  action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+  if (sigaction(SIGABRT, &action, nullptr) != 0) {
+    close(fd);
+    return JNI_FALSE;
+  }
+  if (g_chain_test_fd >= 0) {
+    close(g_chain_test_fd);
+  }
+  g_chain_test_fd = fd;
+  g_chain_test_count = 0;
+  return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL

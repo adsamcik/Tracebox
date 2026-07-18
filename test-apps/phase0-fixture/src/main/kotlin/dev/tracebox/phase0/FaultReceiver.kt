@@ -31,6 +31,19 @@ class FaultReceiver : BroadcastReceiver() {
                 )
                 NativeRuntime.recursiveSignalForTest()
             }
+            "early_chain" -> {
+                val prepared =
+                    NativeRuntime.prepareSignalChainForTest(
+                        context.noBackupFilesDir.absolutePath,
+                    )
+                val initialized =
+                    NativeRuntime.initializeEmergency(
+                        context.noBackupFilesDir.absolutePath,
+                        PROCESS_ROLE_MAIN,
+                    )
+                Log.i(TAG, "early_chain_prepared=$prepared initialized=$initialized")
+                NativeRuntime.crashForTest(0)
+            }
             "fatal" -> NativeRuntime.crashForTest(0)
             "stall" -> {
                 SystemClock.sleep(6_000)

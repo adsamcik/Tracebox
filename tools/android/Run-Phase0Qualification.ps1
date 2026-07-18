@@ -30,7 +30,7 @@ function Invoke-Adb {
 
 function Wait-Log {
     param([string] $Pattern, [int] $TimeoutSeconds = 15)
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
         $match = Invoke-Adb logcat '-d' '-v' brief '-s' $tag |
             Select-String $Pattern |
@@ -39,7 +39,7 @@ function Wait-Log {
             return $match.ToString()
         }
         Start-Sleep -Milliseconds 100
-    } while ((Get-Date) -lt $deadline)
+    } while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
     throw "Timed out waiting for log: $Pattern"
 }
 
@@ -62,6 +62,27 @@ function Get-ProcessId {
         return 0
     }
     return [int](($line.ToString() -split '\s+')[1])
+}
+
+function Wait-ProcessIdGone {
+    param([int] $ProcessId, [string] $ProcessName, [int] $TimeoutSeconds = 10)
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        if ((Get-ProcessId $ProcessName) -ne $ProcessId) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 50
+    } while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    return $false
+}
+
+function Get-DeathLog {
+    return @(
+        Invoke-Adb logcat '-d' '-v' brief |
+            Select-String 'Fatal signal|exited due to signal|exiting due to SIG_DFL' |
+            Select-Object -Last 5 |
+            ForEach-Object ToString
+    )
 }
 
 function Get-Jiffies {
@@ -290,27 +311,33 @@ New-Item -ItemType Directory -Force $runtimeDirectory | Out-Null
 $dumpLocal = Join-Path $runtimeDirectory "api$api-seeded.dmp"
 Pull-AppFile $dumpPath $dumpLocal
 $seed = 'TRACEBOX_PHASE0_SEEDED_SECRET_7F4C19E2A6B35D80'
-$summaryJson = & cargo run -q -p tbdiag-phase0 --locked --offline -- `
-    minidump $dumpLocal $seed
-if ($LASTEXITCODE -ne 0) { throw 'Minidump summary failed' }
-$privacySummary = ($summaryJson -join "`n") | ConvertFrom-Json
-
 $emergencyRemote = "$dataDirectory/no_backup/tracebox-emergency-1.bin"
 $emergencyLocal = Join-Path $runtimeDirectory "api$api-emergency.bin"
+Start-Action emergency
+Wait-Log 'emergency_written=true' 5 | Out-Null
 Pull-AppFile $emergencyRemote $emergencyLocal
 $emergencyBytes = [IO.File]::ReadAllBytes($emergencyLocal)
 $completion = [BitConverter]::ToUInt64($emergencyBytes, 248)
+$identityValidation = & cargo run -q -p tbdiag-phase0 --locked --offline -- `
+    emergency $emergencyLocal 2>&1
+$identityValidatorExit = $LASTEXITCODE
 $hasEmergencyIdentity =
+    $identityValidatorExit -eq 0 -and
     [Text.Encoding]::ASCII.GetString($emergencyBytes, 0, 8) -eq 'TBEMERG1' -and
     $completion -eq 0x5442454d434f4d50
-$internalIdMatches =
-    if ($hasEmergencyIdentity) {
-        Count-Bytes `
-            ([IO.File]::ReadAllBytes($dumpLocal)) `
-            $emergencyBytes[16..47]
-    } else {
-        0
+$privacySummary = $null
+$summaryParserExit = -1
+$summaryParserOutput = 'identity unavailable; summary privacy scan not run'
+if ($hasEmergencyIdentity) {
+    $identityHex = [Convert]::ToHexString($emergencyBytes[16..47]).ToLowerInvariant()
+    $summaryJson = & cargo run -q -p tbdiag-phase0 --locked --offline -- `
+        minidump $dumpLocal $seed $identityHex 2>&1
+    $summaryParserExit = $LASTEXITCODE
+    $summaryParserOutput = $summaryJson -join "`n"
+    if ($summaryParserExit -eq 0) {
+        $privacySummary = $summaryParserOutput | ConvertFrom-Json
     }
+}
 
 Reset-And-Launch
 $quotaResults = @()
@@ -337,17 +364,16 @@ for ($iteration = 1; $iteration -le 30; $iteration++) {
     }
     $before = [int]((Invoke-Adb shell `
             "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
-    $crashStarted = Get-Date
+    $crashTimer = [Diagnostics.Stopwatch]::StartNew()
     Send-Fault fatal
-    $deadline = (Get-Date).AddSeconds(3)
     do {
         Start-Sleep -Milliseconds 50
         $after = [int]((Invoke-Adb shell `
                 "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
-    } while ($after -le $before -and (Get-Date) -lt $deadline)
+    } while ($after -le $before -and $crashTimer.Elapsed.TotalSeconds -lt 3)
     $fatalMeasurements += [ordered]@{
         iteration = $iteration
-        elapsed_ms = [math]::Round(((Get-Date) - $crashStarted).TotalMilliseconds)
+        elapsed_ms = [math]::Round($crashTimer.Elapsed.TotalMilliseconds)
         artifact_created = $after -eq $before + 1
     }
 }
@@ -358,12 +384,16 @@ for ($iteration = 1; $iteration -le 10; $iteration++) {
     Start-Action hang_handler
     Start-Sleep 1
     Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
-    $requestStart = Get-Date
+    $requestTimer = [Diagnostics.Stopwatch]::StartNew()
     Start-Action nonfatal
     $line = Wait-Log 'nonfatal_captured=false' 6
+    if ($line -notmatch 'nonfatal_captured=false elapsed_us=(\d+)') {
+        throw 'Cannot parse hung-handler timeout measurement'
+    }
     $timeoutMeasurements += [ordered]@{
         iteration = $iteration
-        elapsed_ms = [math]::Round(((Get-Date) - $requestStart).TotalMilliseconds)
+        elapsed_us = [long]$Matches[1]
+        host_elapsed_ms = [math]::Round($requestTimer.Elapsed.TotalMilliseconds)
         result = 'cancelled'
     }
     Invoke-Adb shell am force-stop $package | Out-Null
@@ -392,7 +422,37 @@ $lifecycle.crash_loop_blocked =
     'handler_start_blocked=crash_loop'
 
 $emergencyResults = @()
-foreach ($fault in @('early_abort', 'early_stack', 'early_recursive')) {
+
+Reset-And-Launch
+$fallbackAppPid = Get-ProcessId $package
+$fallbackDumpCountBefore = [int]((Invoke-Adb shell `
+        "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+Start-Action terminate_handler
+Wait-Log 'handler_alive=false' 10 | Out-Null
+Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
+Send-Fault fatal
+$fallbackProcessDied = Wait-ProcessIdGone $fallbackAppPid $package 10
+Start-Sleep 1
+$fallbackLocal = Join-Path $runtimeDirectory "api$api-handler-unavailable-fatal.bin"
+Pull-AppFile $emergencyRemote $fallbackLocal
+$fallbackValidation = & cargo run -q -p tbdiag-phase0 --locked --offline -- `
+    emergency $fallbackLocal 2>&1
+$fallbackValidatorExit = $LASTEXITCODE
+$fallbackBytes = [IO.File]::ReadAllBytes($fallbackLocal)
+$fallbackDumpCountAfter = [int]((Invoke-Adb shell `
+        "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+$emergencyResults += [ordered]@{
+    fault = 'handler_unavailable_fatal'
+    validator_exit = $fallbackValidatorExit
+    validator_output = $fallbackValidation -join "`n"
+    slot_sequence = [BitConverter]::ToUInt64($fallbackBytes, 48)
+    flags = [BitConverter]::ToUInt64($fallbackBytes, 120)
+    raw_dump_delta = $fallbackDumpCountAfter - $fallbackDumpCountBefore
+    process_death_observed = $fallbackProcessDied
+    process_log = Get-DeathLog
+}
+
+foreach ($fault in @('early_abort', 'early_stack', 'early_recursive', 'early_chain')) {
     Invoke-Adb shell am force-stop $package | Out-Null
     Invoke-Adb shell pm clear $package | Out-Null
     Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
@@ -401,16 +461,20 @@ foreach ($fault in @('early_abort', 'early_stack', 'early_recursive')) {
     $local = Join-Path $runtimeDirectory "api$api-$fault.bin"
     Pull-AppFile $emergencyRemote $local
     $validation = & cargo run -q -p tbdiag-phase0 --locked --offline -- emergency $local 2>&1
+    $validatorExit = $LASTEXITCODE
+    $chainMarker = $null
+    if ($fault -eq 'early_chain') {
+        $chainLocal = Join-Path $runtimeDirectory "api$api-chain-marker.bin"
+        Pull-AppFile "$dataDirectory/no_backup/tracebox-chain-marker.bin" $chainLocal
+        $chainMarker = [IO.File]::ReadAllBytes($chainLocal)[0]
+    }
     $emergencyResults += [ordered]@{
         fault = $fault
-        validator_exit = $LASTEXITCODE
+        validator_exit = $validatorExit
         validator_output = ($validation -join "`n")
-        process_log = (
-            Invoke-Adb logcat '-d' '-v' brief |
-                Select-String 'exited due to signal|exiting due to SIG_DFL' |
-                Select-Object -Last 3 |
-                ForEach-Object ToString
-        )
+        chain_marker = $chainMarker
+        process_death_observed = (Get-ProcessId $package) -eq 0
+        process_log = Get-DeathLog
     }
 }
 
@@ -459,13 +523,22 @@ $checks = [ordered]@{
     deterministic_stalls =
         @($stallMeasurements | Where-Object { $_.frames -gt 0 }).Count -eq 10
     watchdog_rate_limit = @($stallMeasurements | Where-Object snapshot).Count -eq 1
-    seeded_raw = $privacySummary.raw_seed_matches -ge 1
-    seeded_summary = $privacySummary.summary_seed_matches -eq 0
-    internal_identity = $internalIdMatches -eq 0
+    stream_profile = $summaryParserExit -eq 0 -and
+        $privacySummary.stream_profile_valid
+    seeded_raw = $summaryParserExit -eq 0 -and
+        $privacySummary.raw_seed_matches -ge 1
+    seeded_summary = $summaryParserExit -eq 0 -and
+        $privacySummary.summary_seed_matches -eq 0
+    internal_identity = $hasEmergencyIdentity -and
+        $summaryParserExit -eq 0 -and
+        $privacySummary.raw_identity_matches -eq 0 -and
+        $privacySummary.summary_identity_matches -eq 0
     quota_count = @($quotaResults | Where-Object { $_ }).Count -eq 8 -and
         $quotaResults[-1] -eq $false -and $quotaDumpCount -eq 8
     timeout_cancellation =
-        @($timeoutMeasurements | Where-Object { $_.elapsed_ms -le 3000 }).Count -eq 10
+        @($timeoutMeasurements | Where-Object {
+                $_.elapsed_us -ge 1900000 -and $_.elapsed_us -le 2000000
+            }).Count -eq 10
     fatal_capture =
         @($fatalMeasurements | Where-Object artifact_created).Count -eq 30 -and
         (Percentile $fatalValues 0.95) -le 2000
@@ -473,11 +546,30 @@ $checks = [ordered]@{
         $lifecycle.death_notified -and $lifecycle.reconnected -and
         $lifecycle.crash_loop_blocked
     emergency_faults =
-        $emergencyResults[0].validator_exit -eq 0 -and
-        $emergencyResults[1].validator_exit -eq 0 -and
-        $emergencyResults[2].validator_exit -ne 0 -and
-        $emergencyResults[3].validator_exit -ne 0 -and
-        $emergencyResults[4].validator_exit -ne 0
+        @($emergencyResults | Where-Object {
+                $_.fault -eq 'handler_unavailable_fatal' -and
+                $_.validator_exit -eq 0 -and $_.slot_sequence -eq 1 -and
+                $_.flags -eq 3 -and $_.raw_dump_delta -eq 0 -and
+                $_.process_death_observed -and $_.process_log.Count -gt 0
+            }).Count -eq 1 -and
+        @($emergencyResults | Where-Object {
+                $_.fault -in @('early_abort', 'early_stack') -and
+                $_.validator_exit -eq 0 -and $_.process_death_observed -and
+                $_.process_log.Count -gt 0
+            }).Count -eq 2 -and
+        @($emergencyResults | Where-Object {
+                $_.fault -eq 'early_recursive' -and $_.validator_exit -ne 0 -and
+                $_.process_death_observed -and $_.process_log.Count -gt 0
+            }).Count -eq 1 -and
+        @($emergencyResults | Where-Object {
+                $_.fault -eq 'early_chain' -and $_.validator_exit -eq 0 -and
+                $_.chain_marker -eq 1 -and $_.process_death_observed -and
+                $_.process_log.Count -gt 0
+            }).Count -eq 1 -and
+        @($emergencyResults | Where-Object {
+                $_.fault -in @('emergency_short', 'emergency_failed') -and
+                $_.validator_exit -ne 0
+            }).Count -eq 2
 }
 $passed = @($checks.Values | Where-Object { -not $_ }).Count -eq 0
 $result = [ordered]@{
@@ -551,8 +643,18 @@ $result = [ordered]@{
     privacy = [ordered]@{
         raw_seed_matches = $privacySummary.raw_seed_matches
         summary_seed_matches = $privacySummary.summary_seed_matches
-        internal_id_binary_matches = $internalIdMatches
+        raw_identity_matches = $privacySummary.raw_identity_matches
+        summary_identity_matches = $privacySummary.summary_identity_matches
+        identity_encodings_scanned = $privacySummary.identity_encodings_scanned
         emergency_identity_established = $hasEmergencyIdentity
+        emergency_identity_validator_exit = $identityValidatorExit
+        emergency_identity_validator_output = $identityValidation -join "`n"
+        summary_parser_exit = $summaryParserExit
+        summary_parser_output = $summaryParserOutput
+        stream_profile_valid = $privacySummary.stream_profile_valid
+        unexpected_stream_types = $privacySummary.unexpected_stream_types
+        duplicate_stream_types = $privacySummary.duplicate_stream_types
+        missing_required_stream_types = $privacySummary.missing_required_stream_types
         stream_inventory = $privacySummary.streams
     }
     timeout_cancellation = $timeoutMeasurements

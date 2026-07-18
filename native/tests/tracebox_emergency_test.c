@@ -23,8 +23,13 @@ int main(void) {
                                     5) == 0);
   assert(memcmp(record.bytes, "TBEMERG1", 8) == 0);
   assert(record.bytes[8] == 1);
+  assert(record.bytes[12] == 0);
+  assert(record.bytes[13] == 1);
   assert(record.bytes[16] == 0x5a);
   assert(record.bytes[48] == 7);
+  for (size_t index = 128; index < 244; ++index) {
+    assert(record.bytes[index] == 0);
+  }
   assert(record.bytes[248] == 0x50);
   assert(record.bytes[255] == 0x54);
   return 0;

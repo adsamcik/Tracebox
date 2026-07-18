@@ -154,8 +154,10 @@ class MainActivity : Activity() {
                 Log.i(TAG, "emergency_failed_result=$result")
             }
             "nonfatal" -> Thread {
+                val started = SystemClock.elapsedRealtimeNanos()
                 val result = NativeRuntime.requestNonFatal(REASON_ANR_CANDIDATE, 2_000)
-                Log.i(TAG, "nonfatal_captured=$result")
+                val elapsed = SystemClock.elapsedRealtimeNanos() - started
+                Log.i(TAG, "nonfatal_captured=$result elapsed_us=${elapsed / 1_000}")
             }.start()
             "seeded" -> Thread {
                 val result = NativeRuntime.requestSeededNonFatalForTest()
@@ -171,14 +173,29 @@ class MainActivity : Activity() {
             "reconnect" -> {
                 startService(Intent(this, HandlerService::class.java))
                 Thread {
+                    val connected =
+                        NativeRuntime.connectClient(
+                            "${noBackupFilesDir.absolutePath}/handler.sock",
+                            PROCESS_ROLE_MAIN,
+                        )
+                    Log.i(TAG, "main_reconnected=$connected")
+                }.start()
+            }
+            "connect_hung_handler" -> Thread {
+                val started = SystemClock.elapsedRealtimeNanos()
                 val connected =
                     NativeRuntime.connectClient(
                         "${noBackupFilesDir.absolutePath}/handler.sock",
                         PROCESS_ROLE_MAIN,
                     )
-                Log.i(TAG, "main_reconnected=$connected")
-                }.start()
-            }
+                val elapsed = SystemClock.elapsedRealtimeNanos() - started
+                Log.i(
+                    TAG,
+                    "hung_registration_connected=$connected " +
+                        "outcome=${NativeRuntime.lastRegistrationOutcomeForTest()} " +
+                        "elapsed_us=${elapsed / 1_000}",
+                )
+            }.start()
             "crash_handler" ->
                 startService(
                     Intent(this, HandlerService::class.java)

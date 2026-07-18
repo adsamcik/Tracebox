@@ -1,7 +1,5 @@
 #include "tracebox/emergency.h"
 
-#include <string.h>
-
 static void tb_store_u32(uint8_t* destination, uint32_t value) {
   destination[0] = (uint8_t)value;
   destination[1] = (uint8_t)(value >> 8);
@@ -12,6 +10,20 @@ static void tb_store_u32(uint8_t* destination, uint32_t value) {
 static void tb_store_u64(uint8_t* destination, uint64_t value) {
   for (size_t index = 0; index < 8; ++index) {
     destination[index] = (uint8_t)(value >> (index * 8));
+  }
+}
+
+static void tb_zero_bytes(uint8_t* destination, size_t length) {
+  for (size_t index = 0; index < length; ++index) {
+    destination[index] = 0;
+  }
+}
+
+static void tb_copy_bytes(uint8_t* destination,
+                          const uint8_t* source,
+                          size_t length) {
+  for (size_t index = 0; index < length; ++index) {
+    destination[index] = source[index];
   }
 }
 
@@ -44,11 +56,12 @@ int tb_emergency_initialize_v1(tb_emergency_record_v1* record,
     return -1;
   }
 
-  memset(record->bytes, 0, sizeof(record->bytes));
-  memcpy(record->bytes, "TBEMERG1", 8);
+  static const uint8_t magic[8] = {'T', 'B', 'E', 'M', 'E', 'R', 'G', '1'};
+  tb_zero_bytes(record->bytes, sizeof(record->bytes));
+  tb_copy_bytes(record->bytes, magic, sizeof(magic));
   tb_store_u32(&record->bytes[8], 1);
   tb_store_u32(&record->bytes[12], TB_EMERGENCY_RECORD_SIZE);
-  memcpy(&record->bytes[16], process_instance_id, 32);
+  tb_copy_bytes(&record->bytes[16], process_instance_id, 32);
   tb_store_u64(&record->bytes[48], slot_sequence);
   tb_store_u64(&record->bytes[56], policy_epoch);
   tb_store_u64(&record->bytes[64], monotonic_time_ns);
