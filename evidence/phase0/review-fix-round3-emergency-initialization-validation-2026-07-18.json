@@ -1,0 +1,85 @@
+{
+  "requirement_id": "PHASE0-REVIEW-FIX-ROUND3-EMERGENCY-INITIALIZATION",
+  "scope": "Targeted validation of the per-process emergency initialization gate; not Phase 0 certification",
+  "phase0_state": "INCOMPLETE",
+  "reviewed_implementation_commit": "69c20a06da70ba77c2e1511bb6a0c42deb40fb2a",
+  "start_time_utc": "2026-07-18T20:13:41.6301800Z",
+  "end_time_utc": "2026-07-18T20:17:02.5887034Z",
+  "duration_ms": 200959,
+  "exit_status": 0,
+  "matrix_cell": "HOST_WINDOWS_NT_AND_API30_X86_64_4096_TARGETED_EMERGENCY_INITIALIZATION",
+  "tools": {
+    "powershell": "7.6.3",
+    "git": "git version 2.49.0.windows.1",
+    "cmake": "cmake version 4.3.3",
+    "ctest": "ctest version 4.3.3",
+    "java": "openjdk version \"21.0.8\" 2025-07-15 LTS",
+    "gradle": "9.6.1",
+    "adb": "Android Debug Bridge version 1.0.41"
+  },
+  "commands": [
+    {
+      "command": "cmake -S native -B native\\build; cmake --build native\\build --target tracebox_emergency_initialization_test --config Debug; ctest --test-dir native\\build -R '^tracebox_emergency_initialization_test$' --output-on-failure",
+      "start_time_utc": "2026-07-18T20:13:41.6301800Z",
+      "end_time_utc": "2026-07-18T20:13:53.1374791Z",
+      "duration_ms": 11507,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "tools\\crashpad\\Build-Crashpad.ps1",
+      "start_time_utc": "2026-07-18T20:14:06.6400693Z",
+      "end_time_utc": "2026-07-18T20:14:17.4777238Z",
+      "duration_ms": 10792,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "gradlew.bat :test-apps:phase0-fixture:assembleQualificationRelease --dependency-verification strict --no-daemon",
+      "start_time_utc": "2026-07-18T20:14:37.8501537Z",
+      "end_time_utc": "2026-07-18T20:15:06.4935245Z",
+      "duration_ms": 28623,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "adb -s emulator-5554 root; adb -s emulator-5554 install -r test-apps\\phase0-fixture\\build\\outputs\\apk\\qualificationRelease\\phase0-fixture-qualificationRelease.apk; adb -s emulator-5554 shell pm clear dev.tracebox.phase0; adb -s emulator-5554 shell am start -W -n dev.tracebox.phase0/.MainActivity --es tracebox.action handler_startup_fatal; adb -s emulator-5554 exec-out cat /data/user/0/dev.tracebox.phase0/no_backup/tracebox-emergency-2.bin; cargo run -q -p tbdiag-phase0 --locked --offline -- emergency evidence\\runtime\\api30-handler-startup-fatal.bin",
+      "start_time_utc": "2026-07-18T20:16:55.0313727Z",
+      "end_time_utc": "2026-07-18T20:17:02.5887034Z",
+      "duration_ms": 7557,
+      "exit_status": 0,
+      "status": "PASS"
+    }
+  ],
+  "assertions": {
+    "native_initialization_gate": {
+      "first_successful_initialization_reset_count": 1,
+      "fatal_style_record_survives_concurrent_redundant_initialization": true,
+      "concurrent_redundant_callers": 8,
+      "concurrent_redundant_callers_reset_count": 1,
+      "mismatched_role_rejected_without_initializer": true,
+      "new_spawned_process_reset_count": 1
+    },
+    "crashpad_overlay": {
+      "emergency_initialization_header_copied": true,
+      "x86_64_library_sha256": "18513a88bdd08fbd5b13f3bc886d82823640bbd52009989fd0424a1d5b3f6232",
+      "arm64_v8a_library_sha256": "aa54cae23b6b03db032cd0ede803f16f0bb2095923c94b2b22cf93a2a7ad08ae"
+    },
+    "qualification_apk_sha256": "020b3d89b9c99f76db21e0290c452c7e8e65257c4fc1cba1cf7218f5b931a9ce",
+    "api30_handler_startup_fatal": {
+      "serial": "emulator-5554",
+      "api_level": 30,
+      "abi": "x86_64",
+      "handler_slot_count": 1,
+      "handler_slot_bytes": 256,
+      "validator_exit_status": 0,
+      "record_magic": "TBEMERG1",
+      "record_sequence": 1,
+      "record_process_role": 2,
+      "record_flags": 1,
+      "record_completion": "0x5442454D434F4D50",
+      "result": "PASS"
+    }
+  },
+  "result": "PASS"
+}

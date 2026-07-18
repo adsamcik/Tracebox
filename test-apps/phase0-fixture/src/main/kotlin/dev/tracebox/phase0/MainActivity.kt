@@ -35,6 +35,13 @@ class MainActivity : Activity() {
         when (intent.getStringExtra(ACTION_EXTRA)) {
             "early_abort" -> NativeRuntime.crashForTest(0)
             "early_stack" -> NativeRuntime.stackOverflowForTest()
+            "handler_startup_fatal" -> {
+                startService(
+                    Intent(this, HandlerService::class.java)
+                        .setAction(HandlerService.ACTION_CRASH),
+                )
+                return
+            }
         }
         startService(Intent(this, HandlerService::class.java))
         startService(Intent(this, WorkerService::class.java))

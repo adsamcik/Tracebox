@@ -49,6 +49,8 @@ Copy-Item (Join-Path $root 'native\emergency\tracebox_emergency.c') `
     (Join-Path $overlay 'emergency\tracebox_emergency.c')
 Copy-Item (Join-Path $root 'native\include\tracebox\emergency.h') `
     (Join-Path $overlay 'include\tracebox\emergency.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\emergency_initialization.h') `
+    (Join-Path $overlay 'include\tracebox\emergency_initialization.h')
 
 $env:PATH = 'C:\Program Files\Git\usr\bin;' + $env:PATH
 $targets = @(

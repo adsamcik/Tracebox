@@ -32,6 +32,7 @@
 #include "handler/handler_main.h"
 #include "snapshot/sanitized/sanitization_information.h"
 #include "tracebox/emergency.h"
+#include "tracebox/emergency_initialization.h"
 #include "util/file/file_io.h"
 #include "util/linux/exception_handler_client.h"
 #include "util/linux/exception_handler_protocol.h"
@@ -71,6 +72,7 @@ std::array<struct sigaction, kHandledSignals.size()> g_previous_actions{};
 std::array<struct sigaction, kHandledSignals.size()> g_default_actions{};
 int g_chain_test_fd = -1;
 volatile sig_atomic_t g_chain_test_count = 0;
+tracebox::EmergencyInitializationGate g_emergency_initialization;
 
 enum class RegistrationOutcome : int32_t {
   kSuccess = 0,
@@ -753,27 +755,33 @@ bool ResetEmergencySlot(int fd) {
 }
 
 bool InitializeEmergency(const std::string& directory, uint32_t process_role) {
-  if (directory.empty() ||
-      getrandom(g_process_id.data(), g_process_id.size(), 0) !=
-          static_cast<ssize_t>(g_process_id.size())) {
+  if (directory.empty()) {
     return false;
   }
-  const std::string path =
-      directory + "/tracebox-emergency-" + std::to_string(process_role) + ".bin";
-  const int fd = open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_DSYNC, 0600);
-  if (fd < 0 || ftruncate(fd, TB_EMERGENCY_RECORD_SIZE) != 0 ||
-      !ResetEmergencySlot(fd)) {
-    if (fd >= 0) {
-      close(fd);
-    }
-    return false;
-  }
-  if (g_emergency_fd >= 0) {
-    close(g_emergency_fd);
-  }
-  g_emergency_fd = fd;
-  g_process_role = process_role;
-  return InstallEmergencyHandlers();
+  return g_emergency_initialization.Initialize(
+      directory, process_role, [&directory, process_role] {
+        if (getrandom(g_process_id.data(), g_process_id.size(), 0) !=
+            static_cast<ssize_t>(g_process_id.size())) {
+          return false;
+        }
+        const std::string path = directory + "/tracebox-emergency-" +
+                                 std::to_string(process_role) + ".bin";
+        const int fd =
+            open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_DSYNC, 0600);
+        if (fd < 0 || ftruncate(fd, TB_EMERGENCY_RECORD_SIZE) != 0 ||
+            !ResetEmergencySlot(fd)) {
+          if (fd >= 0) {
+            close(fd);
+          }
+          return false;
+        }
+        if (g_emergency_fd >= 0) {
+          close(g_emergency_fd);
+        }
+        g_emergency_fd = fd;
+        g_process_role = process_role;
+        return InstallEmergencyHandlers();
+      });
 }
 
 int RunHandler(const std::string& socket_path,
