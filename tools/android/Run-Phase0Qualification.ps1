@@ -361,8 +361,8 @@ $checks = [ordered]@{
     heartbeat_rate = $heartbeatPerMinute -le 30
     ineligible_heartbeat = $ineligibleEnd.posted - $ineligibleStart.posted -eq 0
     nonfatal_capture = @($pauseMeasurements | Where-Object captured).Count -eq 30
-    nonfatal_deadline = ($elapsedValues | Measure-Object -Maximum).Maximum -le 2_000_000
-    target_pause = ($pauseValues | Measure-Object -Maximum).Maximum -le 100_000
+    nonfatal_deadline = ($elapsedValues | Measure-Object -Maximum).Maximum -le 2000000
+    target_pause = ($pauseValues | Measure-Object -Maximum).Maximum -le 100000
     deterministic_stalls =
         @($stallMeasurements | Where-Object { $_.frames -gt 0 }).Count -eq 10
     watchdog_rate_limit = @($stallMeasurements | Where-Object snapshot).Count -eq 1
@@ -372,7 +372,7 @@ $checks = [ordered]@{
     quota_count = @($quotaResults | Where-Object { $_ }).Count -eq 8 -and
         $quotaResults[-1] -eq $false -and $quotaDumpCount -eq 8
     timeout_cancellation =
-        @($timeoutMeasurements | Where-Object { $_.elapsed_ms -le 3_000 }).Count -eq 10
+        @($timeoutMeasurements | Where-Object { $_.elapsed_ms -le 3000 }).Count -eq 10
     emergency_faults =
         $emergencyResults[0].validator_exit -eq 0 -and
         $emergencyResults[1].validator_exit -eq 0 -and
