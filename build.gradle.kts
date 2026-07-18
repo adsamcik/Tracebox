@@ -31,3 +31,13 @@ tasks.register("phase1Check") {
         ":tooling:tracebox-gradle-plugin:identityCaptureTest",
     )
 }
+
+tasks.register("phase2Check") {
+    group = "verification"
+    description = "Runs Phase 2 runtime and persistence fault-injection tests."
+    dependsOn(
+        ":android:tracebox-core:testDebugUnitTest",
+        ":android:tracebox-storage:testDebugUnitTest",
+        ":android:tracebox-directboot:testDebugUnitTest",
+    )
+}
