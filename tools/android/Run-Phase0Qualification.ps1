@@ -428,6 +428,8 @@ $fallbackAppPid = Get-ProcessId $package
 $fallbackDumpCountBefore = [int]((Invoke-Adb shell `
         "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
 Start-Action terminate_handler
+Start-Sleep 4
+Start-Action alive
 Wait-Log 'handler_alive=false' 10 | Out-Null
 Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
 Send-Fault fatal

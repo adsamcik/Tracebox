@@ -194,6 +194,8 @@ Reset-And-Launch
 $fallbackAppPid = Get-ProcessId $package
 $fallbackDumpCountBefore = Count-Dumps
 Start-Action terminate_handler
+Start-Sleep 4
+Start-Action alive
 Wait-Log 'handler_alive=false' 10 | Out-Null
 Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
 Send-Fault fatal
