@@ -4,6 +4,7 @@ members = [
     "rust/tracebox-phase0",
     "rust/tracebox-sys",
     "rust/tracebox",
+    "rust/tracebox-identity",
 ]
 resolver = "3"
 

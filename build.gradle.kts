@@ -22,3 +22,12 @@ tasks.register("phase0Check") {
         ":benchmarks:phase0-benchmark:assembleRelease",
     )
 }
+
+tasks.register("phase1Check") {
+    group = "verification"
+    description = "Runs the Phase 1 Kotlin API and build identity contract tests."
+    dependsOn(
+        ":android:tracebox-api:testDebugUnitTest",
+        ":tooling:tracebox-gradle-plugin:identityCaptureTest",
+    )
+}

@@ -22,6 +22,7 @@ include(
     ":android:tracebox-anr-exit",
     ":android:tracebox-native",
     ":android:tracebox-api",
+    ":tooling:tracebox-gradle-plugin",
     ":benchmarks:phase0-benchmark",
     ":test-apps:phase0-fixture",
 )
