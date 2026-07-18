@@ -50,7 +50,7 @@ Every public struct begins with `struct_size:u32` and `abi_version:u32`. Symbols
 
 ## Crashpad and handler
 
-ADRs 0002 and 0003 are normative. Raw minidumps are C2 quarantine objects. Structural summaries are canonical and ID-free in their body. The handler is one private blocked process with no uploader, polling, watchdog, network dependency, or ordinary writer.
+ADRs 0002 and 0003 are normative. Every Crashpad source archive is authenticated against a locked byte size and SHA-256 and all entries are proven relative, non-link, non-device regular files or directories before any destination write; extracted and post-patch trees remain independently hash-verified. Raw minidumps are C2 quarantine objects. Structural summaries are canonical and ID-free in their body. The handler is one private blocked process with no uploader, polling, watchdog, network dependency, or ordinary writer.
 
 ## Policy and deletion
 

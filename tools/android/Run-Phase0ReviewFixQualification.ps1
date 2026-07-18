@@ -111,6 +111,14 @@ function Reset-And-Launch {
     Wait-Log 'worker_connected=true' 10 | Out-Null
 }
 
+function Restart-Without-Clear {
+    Invoke-Adb shell am force-stop $package | Out-Null
+    Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
+    Invoke-Adb shell am start '-W' '-n' $component | Out-Null
+    Wait-Log 'main_connected=true' 10 | Out-Null
+    Wait-Log 'worker_connected=true' 10 | Out-Null
+}
+
 if (-not (Test-Path $apk)) {
     throw "Missing qualification APK: $apk"
 }
@@ -190,6 +198,22 @@ if ($identityEstablished) {
     }
 }
 
+Restart-Without-Clear
+$restartLocal = Join-Path $runtimeDirectory "api$api-review-restart-reset.bin"
+Pull-AppFile $emergencyRemote $restartLocal
+$restartValidation = & cargo run -q -p tbdiag-phase0 --locked --offline -- `
+    emergency $restartLocal 2>&1
+$restartValidatorExit = $LASTEXITCODE
+$restartBytes = [IO.File]::ReadAllBytes($restartLocal)
+$restartReset = [ordered]@{
+    prior_record_validator_exit = $identityValidatorExit
+    restarted_record_validator_exit = $restartValidatorExit
+    restarted_record_validator_output = $restartValidation -join "`n"
+    restarted_record_all_zero =
+        @($restartBytes | Where-Object { $_ -ne 0 }).Count -eq 0
+    pm_clear_used = $false
+}
+
 Reset-And-Launch
 $fallbackAppPid = Get-ProcessId $package
 $fallbackDumpCountBefore = Count-Dumps
@@ -255,6 +279,11 @@ $checks = [ordered]@{
         $summaryParserExit -eq 0 -and $privacy.identity_encodings_scanned -ge 5 -and
         $privacy.raw_identity_matches -eq 0 -and
         $privacy.summary_identity_matches -eq 0
+    emergency_slot_reset_on_process_restart =
+        $restartReset.prior_record_validator_exit -eq 0 -and
+        $restartReset.restarted_record_validator_exit -ne 0 -and
+        $restartReset.restarted_record_all_zero -and
+        -not $restartReset.pm_clear_used
     unexpected_streams_rejected =
         $summaryParserExit -eq 0 -and -not $privacy.stream_profile_valid -and
         $privacy.unexpected_stream_types.Count -gt 0
@@ -321,6 +350,7 @@ $result = [ordered]@{
         identity_encodings_scanned = $privacy.identity_encodings_scanned
         stream_inventory = $privacy.streams
     }
+    emergency_restart_reset = $restartReset
     handler_unavailable_fallback = $fallback
     previous_signal_action = $chain
     assertions = $checks

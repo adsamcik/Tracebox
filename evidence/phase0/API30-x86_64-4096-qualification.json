@@ -6,7 +6,14 @@
   "start_time_utc": "2026-07-18T16:42:57.5674096Z",
   "end_time_utc": "2026-07-18T17:07:32.7632933Z",
   "timeout_seconds": 7200,
-  "exit_status": 0,
+  "exit_status": 2,
+  "exit_status_correction": {
+    "correction_date": "2026-07-18",
+    "original_recorded_exit_status": 0,
+    "corrected_exit_status": 2,
+    "basis": "The preserved result is FAIL and Run-Phase0Qualification.ps1 exits 2 when any frozen check fails. This is a metadata-only correction; the API 30 measurements were not rerun or altered.",
+    "reviewed_head_before_correction": "ed7ae2190466fa0cf99098c52b63063fcfff98f9"
+  },
   "endpoint": {
     "serial": "emulator-5554",
     "api": 30,

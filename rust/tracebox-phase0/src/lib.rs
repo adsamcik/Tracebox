@@ -5,6 +5,11 @@ pub const PROCESS_INSTANCE_ID_SIZE: usize = 32;
 
 const EMERGENCY_RECORD_SIZE_U32: u32 = 256;
 const REQUIRED_MINIDUMP_STREAMS: [u32; 5] = [3, 4, 6, 7, 15];
+const THREAD_ENTRY_SIZE: usize = 48;
+const MODULE_ENTRY_SIZE: usize = 108;
+const MEMORY_DESCRIPTOR_SIZE: usize = 16;
+const EXCEPTION_STREAM_SIZE: usize = 168;
+const SYSTEM_INFO_STREAM_SIZE: usize = 56;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmergencyRecordError {
@@ -154,10 +159,8 @@ pub fn summarize_minidump(bytes: &[u8]) -> Result<MinidumpSummary, MinidumpError
         let rva = read_u32(bytes, entry + 8)?;
         let stream_start = usize::try_from(rva).map_err(|_| MinidumpError::InvalidStream)?;
         let stream_size = usize::try_from(size).map_err(|_| MinidumpError::InvalidStream)?;
-        checked_range(bytes, stream_start, stream_size)?;
-        if stream_size < minimum_stream_size(stream_type) {
-            return Err(MinidumpError::InvalidStream);
-        }
+        let stream = checked_range(bytes, stream_start, stream_size)?;
+        validate_interpreted_stream(stream_type, stream)?;
         if !is_allowed_stream(stream_type) {
             summary.unexpected_stream_types.push(stream_type);
         }
@@ -176,17 +179,14 @@ pub fn summarize_minidump(bytes: &[u8]) -> Result<MinidumpSummary, MinidumpError
             rva,
         });
         match stream_type {
-            3 => summary.thread_count = Some(read_u32(bytes, stream_start)?),
-            4 => summary.module_count = Some(read_u32(bytes, stream_start)?),
-            5 => summary.memory_range_count = Some(read_u32(bytes, stream_start)?),
+            3 => summary.thread_count = Some(read_u32(stream, 0)?),
+            4 => summary.module_count = Some(read_u32(stream, 0)?),
+            5 => summary.memory_range_count = Some(read_u32(stream, 0)?),
             6 => {
-                summary.exception_code = Some(read_u32(bytes, stream_start + 8)?);
+                summary.exception_code = Some(read_u32(stream, 8)?);
             }
             7 => {
-                summary.processor_architecture = Some(u16::from_le_bytes([
-                    bytes[stream_start],
-                    bytes[stream_start + 1],
-                ]));
+                summary.processor_architecture = Some(u16::from_le_bytes([stream[0], stream[1]]));
             }
             _ => {}
         }
@@ -363,13 +363,30 @@ fn write_optional(output: &mut String, name: &str, value: Option<u64>) {
     }
 }
 
-const fn minimum_stream_size(stream_type: u32) -> usize {
+fn validate_interpreted_stream(stream_type: u32, stream: &[u8]) -> Result<(), MinidumpError> {
     match stream_type {
-        3..=5 => 4,
-        6 => 12,
-        7 => 2,
-        _ => 0,
+        3 => validate_counted_list(stream, THREAD_ENTRY_SIZE),
+        4 => validate_counted_list(stream, MODULE_ENTRY_SIZE),
+        5 => validate_counted_list(stream, MEMORY_DESCRIPTOR_SIZE),
+        6 if stream.len() < EXCEPTION_STREAM_SIZE => Err(MinidumpError::InvalidStream),
+        7 if stream.len() < SYSTEM_INFO_STREAM_SIZE => Err(MinidumpError::InvalidStream),
+        _ => Ok(()),
     }
+}
+
+fn validate_counted_list(stream: &[u8], entry_size: usize) -> Result<(), MinidumpError> {
+    let declared_count = read_u32(stream, 0).map_err(|_| MinidumpError::InvalidStream)?;
+    let count = usize::try_from(declared_count).map_err(|_| MinidumpError::InvalidStream)?;
+    let entries_size = count
+        .checked_mul(entry_size)
+        .ok_or(MinidumpError::InvalidStream)?;
+    let required_size = 4_usize
+        .checked_add(entries_size)
+        .ok_or(MinidumpError::InvalidStream)?;
+    if stream.len() < required_size {
+        return Err(MinidumpError::InvalidStream);
+    }
+    Ok(())
 }
 
 const fn is_allowed_stream(stream_type: u32) -> bool {
@@ -527,30 +544,28 @@ mod tests {
 
     #[test]
     fn inventories_bounded_minidump() {
-        let mut bytes = vec![0_u8; 114];
-        bytes[0..4].copy_from_slice(b"MDMP");
-        bytes[8..12].copy_from_slice(&5_u32.to_le_bytes());
-        bytes[12..16].copy_from_slice(&32_u32.to_le_bytes());
-        bytes[32..36].copy_from_slice(&3_u32.to_le_bytes());
-        bytes[36..40].copy_from_slice(&4_u32.to_le_bytes());
-        bytes[40..44].copy_from_slice(&92_u32.to_le_bytes());
-        bytes[44..48].copy_from_slice(&4_u32.to_le_bytes());
-        bytes[48..52].copy_from_slice(&4_u32.to_le_bytes());
-        bytes[52..56].copy_from_slice(&96_u32.to_le_bytes());
-        bytes[56..60].copy_from_slice(&6_u32.to_le_bytes());
-        bytes[60..64].copy_from_slice(&12_u32.to_le_bytes());
-        bytes[64..68].copy_from_slice(&100_u32.to_le_bytes());
-        bytes[68..72].copy_from_slice(&7_u32.to_le_bytes());
-        bytes[72..76].copy_from_slice(&2_u32.to_le_bytes());
-        bytes[76..80].copy_from_slice(&112_u32.to_le_bytes());
-        bytes[80..84].copy_from_slice(&15_u32.to_le_bytes());
-        bytes[84..88].copy_from_slice(&0_u32.to_le_bytes());
-        bytes[88..92].copy_from_slice(&112_u32.to_le_bytes());
-        bytes[92..96].copy_from_slice(&2_u32.to_le_bytes());
+        let mut threads = vec![0_u8; 4 + 2 * THREAD_ENTRY_SIZE];
+        threads[0..4].copy_from_slice(&2_u32.to_le_bytes());
+        let mut modules = vec![0_u8; 4 + MODULE_ENTRY_SIZE];
+        modules[0..4].copy_from_slice(&1_u32.to_le_bytes());
+        let mut exception = vec![0_u8; EXCEPTION_STREAM_SIZE];
+        exception[8..12].copy_from_slice(&0xdead_beef_u32.to_le_bytes());
+        let mut system_info = vec![0_u8; SYSTEM_INFO_STREAM_SIZE];
+        system_info[0..2].copy_from_slice(&9_u16.to_le_bytes());
+        let bytes = minidump_with_streams(&[
+            (3, threads),
+            (4, modules),
+            (6, exception),
+            (7, system_info),
+            (15, Vec::new()),
+        ]);
 
         let summary = summarize_minidump(&bytes).expect("valid minidump");
         assert_eq!(summary.streams[0].name, "ThreadListStream");
         assert_eq!(summary.thread_count, Some(2));
+        assert_eq!(summary.module_count, Some(1));
+        assert_eq!(summary.exception_code, Some(0xdead_beef));
+        assert_eq!(summary.processor_architecture, Some(9));
         assert!(summary.stream_profile_valid());
     }
 
@@ -585,14 +600,9 @@ mod tests {
 
     #[test]
     fn minidump_corruption_smoke_is_bounded() {
-        let mut bytes = vec![0_u8; 64];
-        bytes[0..4].copy_from_slice(b"MDMP");
-        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
-        bytes[12..16].copy_from_slice(&32_u32.to_le_bytes());
-        bytes[32..36].copy_from_slice(&3_u32.to_le_bytes());
-        bytes[36..40].copy_from_slice(&4_u32.to_le_bytes());
-        bytes[40..44].copy_from_slice(&60_u32.to_le_bytes());
-        bytes[60..64].copy_from_slice(&1_u32.to_le_bytes());
+        let mut threads = vec![0_u8; 4 + THREAD_ENTRY_SIZE];
+        threads[0..4].copy_from_slice(&1_u32.to_le_bytes());
+        let mut bytes = minidump_with_streams(&[(3, threads)]);
 
         let mut state = 0x9e37_79b9_u32;
         for _ in 0..10_000 {
@@ -620,27 +630,85 @@ mod tests {
     }
 
     #[test]
-    fn rejects_short_streams_before_list_count_reads() {
-        for stream_type in [3_u32, 4, 5] {
-            let bytes = single_stream_minidump(stream_type, 3, 44, 47);
+    fn rejects_every_incomplete_interpreted_stream_extent() {
+        for (stream_type, complete_size) in [
+            (3_u32, 4),
+            (4, 4),
+            (5, 4),
+            (6, EXCEPTION_STREAM_SIZE),
+            (7, SYSTEM_INFO_STREAM_SIZE),
+        ] {
+            for declared_size in 0..complete_size {
+                let bytes = single_stream_minidump(stream_type, declared_size, complete_size, None);
+                assert_eq!(
+                    summarize_minidump(&bytes),
+                    Err(MinidumpError::InvalidStream),
+                    "type={stream_type} declared={declared_size}"
+                );
+            }
+            let bytes = single_stream_minidump(stream_type, complete_size, complete_size, None);
+            summarize_minidump(&bytes)
+                .unwrap_or_else(|error| panic!("type={stream_type} exact boundary: {error:?}"));
+        }
+    }
+
+    #[test]
+    fn validates_counted_list_extents_against_declared_length() {
+        for (stream_type, entry_size) in [
+            (3_u32, THREAD_ENTRY_SIZE),
+            (4, MODULE_ENTRY_SIZE),
+            (5, MEMORY_DESCRIPTOR_SIZE),
+        ] {
+            let required_size = 4 + 2 * entry_size;
+            for declared_size in 4..required_size {
+                let bytes =
+                    single_stream_minidump(stream_type, declared_size, required_size, Some(2));
+                assert_eq!(
+                    summarize_minidump(&bytes),
+                    Err(MinidumpError::InvalidStream),
+                    "type={stream_type} declared={declared_size}"
+                );
+            }
+            let bytes = single_stream_minidump(stream_type, required_size, required_size, Some(2));
+            summarize_minidump(&bytes)
+                .unwrap_or_else(|error| panic!("type={stream_type} exact list extent: {error:?}"));
+
+            let undersized =
+                single_stream_minidump(stream_type, required_size, required_size, Some(3));
             assert_eq!(
-                summarize_minidump(&bytes),
+                summarize_minidump(&undersized),
+                Err(MinidumpError::InvalidStream)
+            );
+            let excessive = single_stream_minidump(stream_type, 4, 4, Some(u32::MAX));
+            assert_eq!(
+                summarize_minidump(&excessive),
                 Err(MinidumpError::InvalidStream)
             );
         }
-        assert_eq!(
-            summarize_minidump(&single_stream_minidump(6, 11, 44, 55)),
-            Err(MinidumpError::InvalidStream)
-        );
-        assert_eq!(
-            summarize_minidump(&single_stream_minidump(7, 1, 44, 45)),
-            Err(MinidumpError::InvalidStream)
-        );
+    }
+
+    #[test]
+    fn rejects_every_file_truncation_inside_declared_stream() {
+        for (stream_type, complete_size, count) in [
+            (3_u32, 4 + THREAD_ENTRY_SIZE, Some(1)),
+            (4, 4 + MODULE_ENTRY_SIZE, Some(1)),
+            (5, 4 + MEMORY_DESCRIPTOR_SIZE, Some(1)),
+            (6, EXCEPTION_STREAM_SIZE, None),
+            (7, SYSTEM_INFO_STREAM_SIZE, None),
+        ] {
+            let complete = single_stream_minidump(stream_type, complete_size, complete_size, count);
+            for length in 44..complete.len() {
+                assert!(
+                    summarize_minidump(&complete[..length]).is_err(),
+                    "type={stream_type} length={length}"
+                );
+            }
+        }
     }
 
     #[test]
     fn accepts_stream_ending_at_file_boundary() {
-        let bytes = single_stream_minidump(3, 4, 44, 48);
+        let bytes = single_stream_minidump(3, 4, 4, Some(0));
         let summary = summarize_minidump(&bytes).expect("boundary stream is valid");
         assert_eq!(summary.thread_count, Some(0));
     }
@@ -720,17 +788,53 @@ mod tests {
 
     fn single_stream_minidump(
         stream_type: u32,
-        declared_size: u32,
-        rva: u32,
-        total_size: usize,
+        declared_size: usize,
+        actual_size: usize,
+        count: Option<u32>,
     ) -> Vec<u8> {
-        let mut bytes = vec![0_u8; total_size];
+        let mut bytes = vec![0_u8; 44 + actual_size];
         bytes[0..4].copy_from_slice(b"MDMP");
         bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
         bytes[12..16].copy_from_slice(&32_u32.to_le_bytes());
         bytes[32..36].copy_from_slice(&stream_type.to_le_bytes());
-        bytes[36..40].copy_from_slice(&declared_size.to_le_bytes());
-        bytes[40..44].copy_from_slice(&rva.to_le_bytes());
+        bytes[36..40].copy_from_slice(
+            &u32::try_from(declared_size)
+                .expect("test stream size fits u32")
+                .to_le_bytes(),
+        );
+        bytes[40..44].copy_from_slice(&44_u32.to_le_bytes());
+        if let Some(count) = count {
+            bytes[44..48].copy_from_slice(&count.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn minidump_with_streams(streams: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let directory_size = streams.len() * 12;
+        let mut bytes = vec![0_u8; 32 + directory_size];
+        bytes[0..4].copy_from_slice(b"MDMP");
+        bytes[8..12].copy_from_slice(
+            &u32::try_from(streams.len())
+                .expect("test stream count fits u32")
+                .to_le_bytes(),
+        );
+        bytes[12..16].copy_from_slice(&32_u32.to_le_bytes());
+        for (index, (stream_type, stream)) in streams.iter().enumerate() {
+            let entry = 32 + index * 12;
+            let rva = bytes.len();
+            bytes[entry..entry + 4].copy_from_slice(&stream_type.to_le_bytes());
+            bytes[entry + 4..entry + 8].copy_from_slice(
+                &u32::try_from(stream.len())
+                    .expect("test stream size fits u32")
+                    .to_le_bytes(),
+            );
+            bytes[entry + 8..entry + 12].copy_from_slice(
+                &u32::try_from(rva)
+                    .expect("test stream RVA fits u32")
+                    .to_le_bytes(),
+            );
+            bytes.extend_from_slice(stream);
+        }
         bytes
     }
 }

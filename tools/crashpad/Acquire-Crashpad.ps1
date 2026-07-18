@@ -3,6 +3,7 @@ param([switch] $Force)
 $ErrorActionPreference = 'Stop'
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'CrashpadArchive.ps1')
 $lockPath = Join-Path $root 'third_party\crashpad\source-lock.json'
 $checkout = Join-Path $root 'third_party\crashpad\checkout'
 $downloads = Join-Path $root '.bootstrap\crashpad-acquire'
@@ -70,6 +71,10 @@ if (-not $Force -and (Test-Path $verifiedManifest)) {
 }
 
 foreach ($component in $lock.components) {
+    if ($component.archive_size -le 0 -or
+        $component.archive_sha256 -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "Source lock is missing archive authentication: $($component.name)"
+    }
     $archive = Join-Path $downloads "$($component.name).tar.gz"
     if (-not (Test-Path $archive)) {
         & curl.exe -fsSL $component.url -o $archive
@@ -79,14 +84,11 @@ foreach ($component in $lock.components) {
     }
 
     $destination = Join-Path $checkout $component.destination
-    if (Test-Path $destination) {
-        Remove-Item $destination -Recurse -Force
-    }
-    New-Item -ItemType Directory -Force $destination | Out-Null
-    & tar.exe -xzf $archive -C $destination
-    if ($LASTEXITCODE -ne 0) {
-        throw "Extraction failed: $($component.name)"
-    }
+    Expand-AuthenticatedTarGzip `
+        $archive `
+        $destination `
+        $component.archive_size `
+        $component.archive_sha256 | Out-Null
     $actualTreeHash = Get-TreeHash $destination
     if ($actualTreeHash -ne $component.tree_sha256) {
         throw "Source tree verification failed: $($component.name)"
@@ -119,6 +121,8 @@ $manifest = foreach ($component in $lock.components) {
     [ordered]@{
         name = $component.name
         revision = $component.revision
+        archive_size = $component.archive_size
+        archive_sha256 = $component.archive_sha256
         tree_sha256 = $component.tree_sha256
         destination = $component.destination
         license = $component.license

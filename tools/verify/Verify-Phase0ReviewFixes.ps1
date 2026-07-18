@@ -23,8 +23,10 @@ $timer = [Diagnostics.Stopwatch]::StartNew()
 foreach ($scriptPath in @(
         'tools\android\Run-Phase0Qualification.ps1',
         'tools\android\Run-Phase0ReviewFixQualification.ps1',
+        'tools\crashpad\CrashpadArchive.ps1',
         'tools\crashpad\Acquire-Crashpad.ps1',
-        'tools\crashpad\Test-AcquireCrashpadTamper.ps1'
+        'tools\crashpad\Test-AcquireCrashpadTamper.ps1',
+        'tools\crashpad\Test-CrashpadArchiveSecurity.ps1'
     )) {
     $errors = $null
     [Management.Automation.Language.Parser]::ParseFile(
@@ -71,6 +73,18 @@ if ($tamper.result -ne 'PASS' -or -not $tamper.cached_reuse_rejected) {
 Add-CommandResult 'tools\crashpad\Test-AcquireCrashpadTamper.ps1' $timer
 
 $timer = [Diagnostics.Stopwatch]::StartNew()
+$archiveSecurity =
+    & "$root\tools\crashpad\Test-CrashpadArchiveSecurity.ps1" |
+    ConvertFrom-Json
+$timer.Stop()
+if ($archiveSecurity.result -ne 'PASS' -or
+    -not $archiveSecurity.tampered_archive_rejected_before_write -or
+    $archiveSecurity.malicious_entries_rejected_before_write.Count -ne 8) {
+    throw 'Crashpad archive authentication/security regression failed'
+}
+Add-CommandResult 'tools\crashpad\Test-CrashpadArchiveSecurity.ps1' $timer
+
+$timer = [Diagnostics.Stopwatch]::StartNew()
 & "$root\tools\crashpad\Build-Crashpad.ps1" | Out-Null
 $timer.Stop()
 Add-CommandResult 'tools\crashpad\Build-Crashpad.ps1' $timer
@@ -87,6 +101,11 @@ Add-CommandResult `
 $emergencySource = Get-Content 'native\emergency\tracebox_emergency.c' -Raw
 $bridgeSource = Get-Content 'native\crashpad\overlay\tracebox_bridge.cc' -Raw
 $cliSource = Get-Content 'rust\tbdiag-phase0\src\main.rs' -Raw
+$qualificationSource =
+    Get-Content 'tools\android\Run-Phase0Qualification.ps1' -Raw
+$sourceLock =
+    Get-Content 'third_party\crashpad\source-lock.json' -Raw |
+    ConvertFrom-Json
 $staticAssertions = [ordered]@{
     emergency_signal_path_has_no_memset_or_memcpy =
         $emergencySource -notmatch '\b(memset|memcpy)\s*\('
@@ -94,8 +113,19 @@ $staticAssertions = [ordered]@{
         $bridgeSource -notmatch 'CLOCK_REALTIME'
     registration_receive_is_nonblocking =
         $bridgeSource -match 'recvmsg\(socket_fd, &message, MSG_DONTWAIT\)'
+    emergency_slot_reset_is_durable =
+        $bridgeSource -match 'ResetEmergencySlot\(fd\)' -and
+        $bridgeSource -match 'fdatasync\(fd\)'
     summary_seed_count_is_computed =
         $cliSource -notmatch '"summary_seed_matches": 0'
+    qualification_exit_status_is_derived =
+        $qualificationSource -match
+        'exit_status = if \(\$passed\) \{ 0 \} else \{ 2 \}'
+    archive_locks_are_complete =
+        @($sourceLock.components | Where-Object {
+                $_.archive_size -le 0 -or
+                $_.archive_sha256 -notmatch '^[0-9a-f]{64}$'
+            }).Count -eq 0
 }
 if (@($staticAssertions.Values | Where-Object { -not $_ }).Count -ne 0) {
     throw 'Static review-fix assertion failed'
@@ -117,8 +147,8 @@ $apk = Join-Path $root `
     'test-apps\phase0-fixture\build\outputs\apk\qualificationRelease\phase0-fixture-qualificationRelease.apk'
 $ended = (Get-Date).ToUniversalTime()
 $result = [ordered]@{
-    requirement_id = 'PHASE0-REVIEW-FIX-HOST'
-    scope = 'targeted host/native/Rust structural regression; not Phase 0 certification'
+    requirement_id = 'PHASE0-REVIEW-FIX-ROUND2-HOST'
+    scope = 'round-2 targeted host/native/Rust/acquisition regression; not Phase 0 certification'
     phase0_state = 'INCOMPLETE'
     reviewed_implementation_commit = (git rev-parse HEAD).Trim()
     start_time_utc = $started.ToString('o')
@@ -135,7 +165,7 @@ $result = [ordered]@{
     }
     commands = $commands
     assertions = [ordered]@{
-        rust_tests = '12 passed; 0 failed'
+        rust_parser_tests = '14 passed; 0 failed'
         crashpad_tamper_rejected = $tamper.cached_reuse_rejected
         crashpad_original_sha256 = $tamper.original_sha256
         crashpad_tampered_sha256 = $tamper.tampered_sha256
@@ -143,6 +173,7 @@ $result = [ordered]@{
         mutable_manifest_post_patch_sha256 =
             $tamper.mutable_manifest_post_patch_sha256
         tracked_post_patch_sha256 = $tamper.tracked_post_patch_sha256
+        archive_authentication = $archiveSecurity
         native_x86_64_sha256 = (
             Get-FileHash `
                 (Join-Path $root 'android\tracebox-native\src\main\jniLibs\x86_64\libtracebox_crashpad.so') `
@@ -161,6 +192,7 @@ $result = [ordered]@{
     result = 'PASS'
 }
 
-$evidence = Join-Path $root 'evidence\phase0\review-fix-host-validation.json'
+$evidence =
+    Join-Path $root 'evidence\phase0\review-fix-round2-host-validation.json'
 $result | ConvertTo-Json -Depth 10 | Set-Content $evidence -Encoding utf8
 Write-Output $evidence

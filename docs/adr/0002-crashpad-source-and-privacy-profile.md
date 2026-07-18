@@ -9,7 +9,7 @@ Accepted by implementation assignment
 This ADR freezes section-27 decisions 1, 2, and 11.
 
 - Crashpad is pinned to upstream commit `efdc820b087c20eec9e32cb5e5b1a63dcf73a724`.
-- Source is acquired only from immutable `chromium.googlesource.com` commit archives. The archive and every required DEPS archive are SHA-256 verified before extraction.
+- Source is acquired only from immutable `chromium.googlesource.com` commit archives. The byte size and SHA-256 of the archive and every required DEPS archive are locked and verified from the same read handle before extraction. A complete preflight rejects absolute paths, drive prefixes, traversal, duplicate paths, links, devices, FIFOs, and every entry type other than regular files and directories before the destination is created. Extracted trees and the complete post-patch checkout remain independently hash-verified.
 - Local patches are ordered files under `third_party/crashpad/patches/series`. A patch changes only Android build integration, uploader exclusion, hard bounds, page compatibility, or Tracebox capture hooks. Every patch records rationale, upstream status, and source-file hashes.
 - Updating Crashpad requires a new reviewed pin, refreshed provenance and licenses, a clean patch rebase, and the complete Phase 0 feasibility matrix.
 
@@ -32,4 +32,3 @@ Raw storage is credential-encrypted app-private `noBackupFilesDir`, at most 8 ar
 ## Rationale
 
 The pin is current, immutable, Apache-2.0 licensed, and supports the required Android architecture. The fixed stream inventory preserves useful unwinding while treating all opaque memory as sensitive. The quotas are stricter than the package bounds and do not expand collection.
-

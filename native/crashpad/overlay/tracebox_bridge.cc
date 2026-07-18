@@ -734,6 +734,24 @@ bool RequestDumpWithTimeout(int timeout_millis, uint64_t deadline_ns) {
   return completed;
 }
 
+bool ResetEmergencySlot(int fd) {
+  std::array<uint8_t, TB_EMERGENCY_RECORD_SIZE> empty{};
+  size_t written = 0;
+  while (written < empty.size()) {
+    const ssize_t result =
+        pwrite(fd, empty.data() + written, empty.size() - written, written);
+    if (result > 0) {
+      written += static_cast<size_t>(result);
+      continue;
+    }
+    if (result < 0 && errno == EINTR) {
+      continue;
+    }
+    return false;
+  }
+  return fdatasync(fd) == 0;
+}
+
 bool InitializeEmergency(const std::string& directory, uint32_t process_role) {
   if (directory.empty() ||
       getrandom(g_process_id.data(), g_process_id.size(), 0) !=
@@ -743,7 +761,8 @@ bool InitializeEmergency(const std::string& directory, uint32_t process_role) {
   const std::string path =
       directory + "/tracebox-emergency-" + std::to_string(process_role) + ".bin";
   const int fd = open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_DSYNC, 0600);
-  if (fd < 0 || ftruncate(fd, TB_EMERGENCY_RECORD_SIZE) != 0) {
+  if (fd < 0 || ftruncate(fd, TB_EMERGENCY_RECORD_SIZE) != 0 ||
+      !ResetEmergencySlot(fd)) {
     if (fd >= 0) {
       close(fd);
     }
