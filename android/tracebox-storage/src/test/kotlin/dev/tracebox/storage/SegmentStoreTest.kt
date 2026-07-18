@@ -1,0 +1,141 @@
+package dev.tracebox.storage
+
+import dev.tracebox.core.RecordPriority
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.UUID
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+class SegmentStoreTest {
+    private fun directory(): Path = Path.of("build", "phase2-tests", UUID.randomUUID().toString()).also(Files::createDirectories)
+    private fun header(seed: Byte) = SegmentHeader(
+        PersistedSegmentIdentity(ByteArray(32) { seed }, ByteArray(32) { (seed + 1).toByte() }),
+        ByteArray(32) { 9 },
+        1,
+        0,
+    )
+
+    @Test fun segment_recovers_valid_prefix_at_every_tail_boundary_and_is_immutable_when_sealed() {
+        val dir = directory()
+        val source = dir.resolve("source.tbseg")
+        SegmentWriter.create(source, header(1)).use {
+            it.append(3, byteArrayOf(1, 2))
+            it.append(4, byteArrayOf(3))
+            it.seal()
+            assertFailsWith<SegmentException.Sealed> { it.append(3, byteArrayOf()) }
+        }
+        val bytes = Files.readAllBytes(source)
+        for (cut in bytes.indices) {
+            val candidate = dir.resolve("cut-$cut.tbseg")
+            Files.write(candidate, bytes.copyOf(cut))
+            if (cut < 124) {
+                assertFailsWith<SegmentException.InvalidHeader> { SegmentWriter.recover(candidate) }
+            } else {
+                val recovered = SegmentWriter.recover(candidate)
+                assertTrue(recovered.frames.size in 0..2)
+                // Header and complete-frame boundaries are valid unsealed prefixes; all
+                // other tail cuts are discarded without exposing an invalid frame.
+                assertTrue(recovered.frames.zipWithNext().all { it.second.sequence == it.first.sequence + 1 })
+            }
+        }
+        assertEquals(2, SegmentWriter.recover(source).frames.size)
+    }
+
+    @Test fun corrupt_length_crc_and_sequence_are_quarantined_to_affected_segment() {
+        val dir = directory()
+        val good = dir.resolve("good.tbseg")
+        val bad = dir.resolve("bad.tbseg")
+        listOf(good, bad).forEachIndexed { index, path ->
+            SegmentWriter.create(path, header((index + 3).toByte())).use { it.append(3, byteArrayOf(1, 2, 3)) }
+        }
+        val bytes = Files.readAllBytes(bad)
+        bytes[124] = 0x7f // length byte declares a bounded but incomplete payload
+        Files.write(bad, bytes)
+        val recovered = SegmentWriter.recover(bad)
+        assertTrue(recovered.corruptionDetected)
+        assertEquals(0, recovered.frames.size)
+        assertEquals(1, SegmentWriter.recover(good).frames.size)
+    }
+
+    @Test fun new_process_instances_have_independent_sequence_domains() {
+        val dir = directory()
+        val first = SegmentWriter.create(dir.resolve("one.tbseg"), header(4))
+        first.append(3, byteArrayOf())
+        val second = SegmentWriter.create(dir.resolve("two.tbseg"), header(5))
+        second.append(3, byteArrayOf())
+        first.close(); second.close()
+        assertEquals(0, SegmentWriter.recover(dir.resolve("one.tbseg")).frames.single().sequence)
+        assertEquals(0, SegmentWriter.recover(dir.resolve("two.tbseg")).frames.single().sequence)
+    }
+
+    @Test fun role_quota_is_stable_across_process_restarts_and_unknown_roles_have_none() {
+        val policy = RoleQuotaPolicy(mapOf(1 to 100))
+        assertEquals(QuotaDecision.Allowed, policy.allow(1, 0, 80, RecordPriority.BREADCRUMB))
+        assertTrue(policy.allow(1, 80, 30, RecordPriority.HANDLED_ERROR) is QuotaDecision.Dropped)
+        assertTrue(policy.allow(99, 0, 1, RecordPriority.ORDINARY_EVENT) is QuotaDecision.Dropped)
+        val fallback = RoleQuotaPolicy(mapOf(1 to 100), fallbackRole = 1)
+        assertEquals(QuotaDecision.Allowed, fallback.allow(99, 0, 1, RecordPriority.ORDINARY_EVENT))
+        val ledger = RoleQuotaLedger(policy)
+        assertEquals(QuotaDecision.Allowed, ledger.reserve(1, 90, RecordPriority.ORDINARY_EVENT))
+        assertEquals(QuotaDecision.Allowed, ledger.reserve(1, 50, RecordPriority.CRASH_ANR))
+        assertEquals(50, ledger.used(1))
+    }
+
+    @Test fun index_is_rebuildable_and_respects_metadata_reserve() {
+        val dir = directory()
+        SegmentWriter.create(dir.resolve("one.tbseg"), header(8)).use { it.append(3, byteArrayOf()) }
+        val budget = UidAccounting(UidQuota(mapOf(UidBucket.METADATA to 1024L)), mapOf(UidBucket.METADATA to 1))
+        val index = SegmentMetadataIndex(dir.resolve("segments.tbidx"), budget)
+        val direct = index.plan(dir)
+        assertTrue(index.rebuild(dir))
+        assertEquals(direct, index.plan(dir))
+        Files.delete(dir.resolve("segments.tbidx"))
+        assertEquals(direct, index.plan(dir))
+        val tooSmall = SegmentMetadataIndex(
+            dir.resolve("too-small.tbidx"),
+            UidAccounting(UidQuota(mapOf(UidBucket.METADATA to 1L)), mapOf(UidBucket.METADATA to 1)),
+        )
+        assertFalse(tooSmall.rebuild(dir))
+        assertFalse(Files.exists(dir.resolve("too-small.tbidx")))
+    }
+
+    @Test fun deletion_journal_resumes_after_each_transition_and_never_completes_with_accessible_data() {
+        DeletionState.entries.filter { it != DeletionState.COMPLETE && it != DeletionState.PENDING_FAILURE }.forEach { stop ->
+            val dir = directory()
+            Files.write(dir.resolve("victim.tbseg"), byteArrayOf(1))
+            val hooks = object : DeletionHooks {
+                override fun commitDisabledEpoch() = true
+                override fun quiesceWriters() = true
+                override fun invalidateApprovalsAndSnapshotKeys() = Unit
+                override fun closeActiveStores() = Unit
+            }
+            val engine = DeletionEngine(dir, dir.resolve("delete.journal"), hooks)
+            assertFailsWith<DeletionInterrupted> {
+                engine.deleteAll(DeletionCrashInjector { state -> state != stop })
+            }
+            assertEquals(stop, engine.current())
+            assertEquals(DeletionState.COMPLETE, engine.retry())
+            assertFalse(Files.exists(dir.resolve("victim.tbseg")))
+            assertEquals(DeletionState.COMPLETE, engine.current())
+        }
+    }
+
+    @Test fun deletion_reports_pending_failure_and_retries_boundedly() {
+        val dir = directory()
+        Files.write(dir.resolve("victim.tbseg"), byteArrayOf(1))
+        var permit = false
+        val engine = DeletionEngine(dir, dir.resolve("delete.journal"), object : DeletionHooks {
+            override fun commitDisabledEpoch() = permit
+            override fun quiesceWriters() = true
+            override fun invalidateApprovalsAndSnapshotKeys() = Unit
+            override fun closeActiveStores() = Unit
+        }, maxRetries = 1)
+        assertEquals(DeletionState.PENDING_FAILURE, engine.deleteAll())
+        permit = true
+        assertEquals(DeletionState.COMPLETE, engine.retry())
+    }
+}

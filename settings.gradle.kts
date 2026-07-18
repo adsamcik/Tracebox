@@ -23,6 +23,7 @@ include(
     ":android:tracebox-native",
     ":android:tracebox-api",
     ":android:tracebox-core",
+    ":android:tracebox-storage",
     ":tooling:tracebox-gradle-plugin",
     ":benchmarks:phase0-benchmark",
     ":test-apps:phase0-fixture",
