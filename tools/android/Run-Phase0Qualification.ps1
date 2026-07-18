@@ -144,7 +144,7 @@ function Reset-And-Launch {
     Invoke-Adb shell am force-stop $package | Out-Null
     Invoke-Adb shell pm clear $package | Out-Null
     Invoke-Adb logcat -c | Out-Null
-    Invoke-Adb shell am start -W -n $component | Out-Null
+    Invoke-Adb shell am start '-W' -n $component | Out-Null
     Wait-Log 'main_connected=true' | Out-Null
     Wait-Log 'worker_connected=true' | Out-Null
 }
@@ -207,7 +207,7 @@ $ineligibleStart = Get-WatchdogStats
 Start-Sleep ($IneligibleMinutes * 60)
 $ineligibleEnd = Get-WatchdogStats
 
-Invoke-Adb shell am start -W -n $component | Out-Null
+Invoke-Adb shell am start '-W' -n $component | Out-Null
 Start-Sleep 2
 
 $pauseMeasurements = @()
