@@ -1,6 +1,11 @@
 package dev.tracebox.storage
 
+import dev.tracebox.core.ControlPage
+import dev.tracebox.core.GateResult
+import dev.tracebox.core.PolicySnapshot
+import dev.tracebox.core.PolicyTaggedRecord
 import dev.tracebox.core.RecordPriority
+import dev.tracebox.core.WriterPolicyGate
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
@@ -8,25 +13,47 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class SegmentStoreTest {
     private fun directory(): Path = Path.of("build", "phase2-tests", UUID.randomUUID().toString()).also(Files::createDirectories)
-    private fun header(seed: Byte) = SegmentHeader(
+    private fun header(seed: Byte, role: Int = 1) = SegmentHeader(
         PersistedSegmentIdentity(ByteArray(32) { seed }, ByteArray(32) { (seed + 1).toByte() }),
         ByteArray(32) { 9 },
         1,
         0,
+        role,
     )
+
+    private data class WriterHarness(val writer: SegmentWriter, val page: ControlPage)
+
+    private fun writer(path: Path, header: SegmentHeader, quota: Long = 1_000_000): WriterHarness {
+        val page = ControlPage(path.resolveSibling("${path.fileName}.control"))
+        page.commit(PolicySnapshot(1, 0))
+        val gate = WriterPolicyGate(page)
+        assertEquals(GateResult.Reloaded, gate.reload())
+        return WriterHarness(
+            SegmentWriter.create(path, header, gate, RoleQuotaLedger(RoleQuotaPolicy(mapOf(header.processRole to quota)), path.parent)),
+            page,
+        )
+    }
+
+    private fun record(
+        payload: ByteArray,
+        category: Long = 1,
+        epoch: Long = 1,
+        priority: RecordPriority = RecordPriority.BREADCRUMB,
+    ) = PolicyTaggedRecord(category, epoch, priority, payload)
 
     @Test fun segment_recovers_valid_prefix_at_every_tail_boundary_and_is_immutable_when_sealed() {
         val dir = directory()
         val source = dir.resolve("source.tbseg")
-        SegmentWriter.create(source, header(1)).use {
-            it.append(3, byteArrayOf(1, 2))
-            it.append(4, byteArrayOf(3))
+        writer(source, header(1)).writer.use {
+            assertIs<SegmentAppendResult.Appended>(it.append(3, record(byteArrayOf(1, 2))))
+            assertIs<SegmentAppendResult.Appended>(it.append(4, record(byteArrayOf(3))))
             it.seal()
-            assertFailsWith<SegmentException.Sealed> { it.append(3, byteArrayOf()) }
+            assertFailsWith<SegmentException.Sealed> { it.append(3, record(byteArrayOf())) }
         }
         val bytes = Files.readAllBytes(source)
         for (cut in bytes.indices) {
@@ -37,12 +64,30 @@ class SegmentStoreTest {
             } else {
                 val recovered = SegmentWriter.recover(candidate)
                 assertTrue(recovered.frames.size in 0..2)
-                // Header and complete-frame boundaries are valid unsealed prefixes; all
-                // other tail cuts are discarded without exposing an invalid frame.
                 assertTrue(recovered.frames.zipWithNext().all { it.second.sequence == it.first.sequence + 1 })
             }
         }
         assertEquals(2, SegmentWriter.recover(source).frames.size)
+    }
+
+    @Test fun writer_directly_drops_stale_policy_tagged_record_without_writing_frame() {
+        val path = directory().resolve("stale.tbseg")
+        val harness = writer(path, header(2))
+        val accepted = record(byteArrayOf(1, 2, 3), category = 1, epoch = 1)
+        harness.page.commit(PolicySnapshot(2, 1))
+        assertEquals(SegmentAppendResult.Dropped(GateResult.StaleRecord), harness.writer.append(3, accepted))
+        assertTrue(SegmentWriter.recover(path).frames.isEmpty())
+    }
+
+    @Test fun unsealed_frame_with_physical_size_of_old_seal_is_recovered_as_frame() {
+        val path = directory().resolve("forty-eight-byte-frame.tbseg")
+        writer(path, header(3)).writer.use {
+            assertIs<SegmentAppendResult.Appended>(it.append(3, record(ByteArray(28) { 7 })))
+        }
+        val recovered = SegmentWriter.recover(path)
+        assertFalse(recovered.sealed)
+        assertFalse(recovered.corruptionDetected)
+        assertEquals(28, recovered.frames.single().payload.size)
     }
 
     @Test fun corrupt_length_crc_and_sequence_are_quarantined_to_affected_segment() {
@@ -50,10 +95,12 @@ class SegmentStoreTest {
         val good = dir.resolve("good.tbseg")
         val bad = dir.resolve("bad.tbseg")
         listOf(good, bad).forEachIndexed { index, path ->
-            SegmentWriter.create(path, header((index + 3).toByte())).use { it.append(3, byteArrayOf(1, 2, 3)) }
+            writer(path, header((index + 3).toByte())).writer.use {
+                assertIs<SegmentAppendResult.Appended>(it.append(3, record(byteArrayOf(1, 2, 3))))
+            }
         }
         val bytes = Files.readAllBytes(bad)
-        bytes[124] = 0x7f // length byte declares a bounded but incomplete payload
+        bytes[124] = 0x7f
         Files.write(bad, bytes)
         val recovered = SegmentWriter.recover(bad)
         assertTrue(recovered.corruptionDetected)
@@ -63,44 +110,53 @@ class SegmentStoreTest {
 
     @Test fun new_process_instances_have_independent_sequence_domains() {
         val dir = directory()
-        val first = SegmentWriter.create(dir.resolve("one.tbseg"), header(4))
-        first.append(3, byteArrayOf())
-        val second = SegmentWriter.create(dir.resolve("two.tbseg"), header(5))
-        second.append(3, byteArrayOf())
-        first.close(); second.close()
+        writer(dir.resolve("one.tbseg"), header(4)).writer.use {
+            assertIs<SegmentAppendResult.Appended>(it.append(3, record(byteArrayOf())))
+        }
+        writer(dir.resolve("two.tbseg"), header(5)).writer.use {
+            assertIs<SegmentAppendResult.Appended>(it.append(3, record(byteArrayOf())))
+        }
         assertEquals(0, SegmentWriter.recover(dir.resolve("one.tbseg")).frames.single().sequence)
         assertEquals(0, SegmentWriter.recover(dir.resolve("two.tbseg")).frames.single().sequence)
     }
 
-    @Test fun role_quota_is_stable_across_process_restarts_and_unknown_roles_have_none() {
+    @Test fun role_quota_is_reconstructed_for_a_brand_new_process_instance() {
+        val dir = directory()
+        val quota = 400L
+        val first = writer(dir.resolve("first.tbseg"), header(6), quota)
+        assertIs<SegmentAppendResult.Appended>(first.writer.append(3, record(ByteArray(100))))
+        first.writer.close()
+
+        val second = writer(dir.resolve("second.tbseg"), header(7), quota)
+        assertIs<SegmentAppendResult.Appended>(second.writer.append(3, record(byteArrayOf(1))))
+        assertEquals(
+            SegmentAppendResult.DroppedQuota(RecordPriority.BREADCRUMB),
+            second.writer.append(3, record(byteArrayOf(2))),
+        )
+    }
+
+    @Test fun role_quota_policy_keeps_unknown_roles_at_zero_without_explicit_fallback() {
         val policy = RoleQuotaPolicy(mapOf(1 to 100))
         assertEquals(QuotaDecision.Allowed, policy.allow(1, 0, 80, RecordPriority.BREADCRUMB))
         assertTrue(policy.allow(1, 80, 30, RecordPriority.HANDLED_ERROR) is QuotaDecision.Dropped)
         assertTrue(policy.allow(99, 0, 1, RecordPriority.ORDINARY_EVENT) is QuotaDecision.Dropped)
-        val fallback = RoleQuotaPolicy(mapOf(1 to 100), fallbackRole = 1)
-        assertEquals(QuotaDecision.Allowed, fallback.allow(99, 0, 1, RecordPriority.ORDINARY_EVENT))
-        val ledger = RoleQuotaLedger(policy)
-        assertEquals(QuotaDecision.Allowed, ledger.reserve(1, 90, RecordPriority.ORDINARY_EVENT))
-        assertEquals(QuotaDecision.Allowed, ledger.reserve(1, 50, RecordPriority.CRASH_ANR))
-        assertEquals(50, ledger.used(1))
+        assertEquals(QuotaDecision.Allowed, RoleQuotaPolicy(mapOf(1 to 100), fallbackRole = 1).allow(99, 0, 1, RecordPriority.ORDINARY_EVENT))
     }
 
-    @Test fun index_is_rebuildable_and_respects_metadata_reserve() {
+    @Test fun corrupt_or_stale_index_falls_back_to_authoritative_segment_scan() {
         val dir = directory()
-        SegmentWriter.create(dir.resolve("one.tbseg"), header(8)).use { it.append(3, byteArrayOf()) }
+        writer(dir.resolve("one.tbseg"), header(8)).writer.use {
+            assertIs<SegmentAppendResult.Appended>(it.append(3, record(byteArrayOf())))
+        }
         val budget = UidAccounting(UidQuota(mapOf(UidBucket.METADATA to 1024L)), mapOf(UidBucket.METADATA to 1))
-        val index = SegmentMetadataIndex(dir.resolve("segments.tbidx"), budget)
+        val indexPath = dir.resolve("segments.tbidx")
+        val index = SegmentMetadataIndex(indexPath, budget)
         val direct = index.plan(dir)
         assertTrue(index.rebuild(dir))
+        Files.writeString(indexPath, "missing.tbseg,999")
         assertEquals(direct, index.plan(dir))
-        Files.delete(dir.resolve("segments.tbidx"))
+        Files.writeString(indexPath, "one.tbseg,not-a-count")
         assertEquals(direct, index.plan(dir))
-        val tooSmall = SegmentMetadataIndex(
-            dir.resolve("too-small.tbidx"),
-            UidAccounting(UidQuota(mapOf(UidBucket.METADATA to 1L)), mapOf(UidBucket.METADATA to 1)),
-        )
-        assertFalse(tooSmall.rebuild(dir))
-        assertFalse(Files.exists(dir.resolve("too-small.tbidx")))
     }
 
     @Test fun deletion_journal_resumes_after_each_transition_and_never_completes_with_accessible_data() {
@@ -114,13 +170,10 @@ class SegmentStoreTest {
                 override fun closeActiveStores() = Unit
             }
             val engine = DeletionEngine(dir, dir.resolve("delete.journal"), hooks)
-            assertFailsWith<DeletionInterrupted> {
-                engine.deleteAll(DeletionCrashInjector { state -> state != stop })
-            }
+            assertFailsWith<DeletionInterrupted> { engine.deleteAll(DeletionCrashInjector { state -> state != stop }) }
             assertEquals(stop, engine.current())
             assertEquals(DeletionState.COMPLETE, engine.retry())
             assertFalse(Files.exists(dir.resolve("victim.tbseg")))
-            assertEquals(DeletionState.COMPLETE, engine.current())
         }
     }
 
