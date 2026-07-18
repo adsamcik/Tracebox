@@ -15,12 +15,28 @@ class DirectBootTest {
         val dir = directory()
         val mirror = DenyMirror(dir.resolve("active"), dir.resolve("pending"))
         val store = DirectBootStore(dir.resolve("c0.records"), mirror)
-        val record = C0DirectBootRecord(ByteArray(32), 1, 2, 3, 4, 5)
+        val record = C0DirectBootRecord(ByteArray(32), 1, 2, 3, 4, 5, 1)
         assertEquals(DirectBootWriteResult.DISABLED, store.append(record))
         mirror.writePending(DenyState(1, false, 0))
         mirror.promotePending()
         assertEquals(DirectBootWriteResult.REJECTED_NON_C0, store.appendClassified(PrivacyClass.C1, record))
         assertEquals(DirectBootWriteResult.WRITTEN, store.append(record))
+    }
+
+    @Test fun tightening_denies_only_the_targeted_c0_category() {
+        val dir = directory()
+        val mirror = DenyMirror(dir.resolve("active"), dir.resolve("pending"))
+        val store = DirectBootStore(dir.resolve("c0.records"), mirror)
+        mirror.writePending(DenyState(2, false, 1))
+        mirror.promotePending()
+        assertEquals(
+            DirectBootWriteResult.DENIED,
+            store.append(C0DirectBootRecord(ByteArray(32), 1, 2, 3, 4, 5, 1)),
+        )
+        assertEquals(
+            DirectBootWriteResult.WRITTEN,
+            store.append(C0DirectBootRecord(ByteArray(32), 1, 2, 3, 4, 5, 2)),
+        )
     }
 
     @Test fun tightening_is_at_least_as_restrictive_after_every_crash_boundary() {

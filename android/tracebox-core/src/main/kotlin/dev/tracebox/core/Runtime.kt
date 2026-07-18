@@ -282,7 +282,10 @@ class BoundedPolicyQueue(private val capacity: Int, private val health: HealthCo
     fun barrier(snapshot: PolicySnapshot): Int {
         paused = true
         val before = entries.size
-        entries.removeAll { it.acceptedEpoch != snapshot.epoch || !snapshot.permits(it.categoryMask) }
+        entries.removeAll { !snapshot.permits(it.categoryMask) }
+        for (index in entries.indices) {
+            entries[index] = entries[index].copy(acceptedEpoch = snapshot.epoch)
+        }
         val dropped = before - entries.size
         repeat(dropped) { health.increment(HealthCode.BARRIER_PURGED) }
         return dropped

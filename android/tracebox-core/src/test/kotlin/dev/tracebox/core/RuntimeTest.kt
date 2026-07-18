@@ -51,19 +51,21 @@ class RuntimeTest {
         }
     }
 
-    @Test fun bounded_queue_prioritizes_and_barrier_preserves_allowed_records() {
+    @Test fun barrier_retags_permitted_records_across_a_real_epoch_transition() {
         val health = HealthCounters()
-        val queue = BoundedPolicyQueue(2, health)
+        val queue = BoundedPolicyQueue(3, health)
         fun record(mask: Long, priority: RecordPriority, epoch: Long = 1) =
             PolicyTaggedRecord(mask, epoch, priority, byteArrayOf())
-        repeat(100) { queue.enqueue(record(0, RecordPriority.ORDINARY_EVENT)) }
-        assertTrue(queue.size() <= 2)
-        queue.enqueue(record(0, RecordPriority.CRASH_ANR))
-        queue.enqueue(record(1, RecordPriority.POLICY_HEALTH))
-        assertTrue(queue.size() <= 2)
-        val dropped = queue.barrier(PolicySnapshot(1, 1))
-        assertTrue(dropped >= 1)
+        assertEquals(QueueResult.Enqueued, queue.enqueue(record(0, RecordPriority.BREADCRUMB)))
+        assertEquals(QueueResult.Enqueued, queue.enqueue(record(1, RecordPriority.POLICY_HEALTH)))
+        assertEquals(QueueResult.Enqueued, queue.enqueue(record(2, RecordPriority.CRASH_ANR)))
+        val dropped = queue.barrier(PolicySnapshot(2, 1))
+        assertEquals(1, dropped)
         queue.resume()
-        assertEquals(RecordPriority.CRASH_ANR, queue.dequeue()?.priority)
+        val first = queue.dequeue()!!
+        val second = queue.dequeue()!!
+        assertEquals(setOf(RecordPriority.BREADCRUMB, RecordPriority.CRASH_ANR), setOf(first.priority, second.priority))
+        assertEquals(2, first.acceptedEpoch)
+        assertEquals(2, second.acceptedEpoch)
     }
 }

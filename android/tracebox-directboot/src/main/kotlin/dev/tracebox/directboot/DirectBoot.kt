@@ -16,12 +16,17 @@ data class C0DirectBootRecord(
     val readinessCode: Int,
     val signalOrExitReason: Int,
     val statusCode: Int,
+    /** One or more generated C0 category bits represented by this record. */
+    val categoryMask: Long,
 ) {
-    init { require(schemaFingerprint.size == 32) }
+    init {
+        require(schemaFingerprint.size == 32)
+        require(categoryMask != 0L) { "C0 records require a category" }
+    }
 }
 
 /** Immediate typed rejection for any attempted C1/C2 write to device-protected storage. */
-enum class DirectBootWriteResult { WRITTEN, REJECTED_NON_C0, DISABLED }
+enum class DirectBootWriteResult { WRITTEN, REJECTED_NON_C0, DENIED, DISABLED }
 enum class PrivacyClass { C0, C1, C2 }
 
 /** Device-protected C0 store whose typed API accepts only [C0DirectBootRecord]. */
@@ -29,6 +34,7 @@ class DirectBootStore(private val records: Path, private val mirror: DenyMirror)
     fun append(record: C0DirectBootRecord): DirectBootWriteResult {
         val policy = mirror.effective() ?: return DirectBootWriteResult.DISABLED
         if (policy.disabled) return DirectBootWriteResult.DISABLED
+        if ((policy.c0DenyMask and record.categoryMask) != 0L) return DirectBootWriteResult.DENIED
         Files.createDirectories(records.parent)
         FileChannel.open(records, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND).use {
             it.write(ByteBuffer.wrap(encode(record)))
@@ -42,9 +48,9 @@ class DirectBootStore(private val records: Path, private val mirror: DenyMirror)
         if (privacy != PrivacyClass.C0) DirectBootWriteResult.REJECTED_NON_C0 else append(record)
 
     private fun encode(record: C0DirectBootRecord): ByteArray =
-        ByteBuffer.allocate(56).order(ByteOrder.LITTLE_ENDIAN).put(record.schemaFingerprint)
+        ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN).put(record.schemaFingerprint)
             .putInt(record.processRole).putLong(record.elapsedMillis).putInt(record.readinessCode)
-            .putInt(record.signalOrExitReason).putInt(record.statusCode).array()
+            .putInt(record.signalOrExitReason).putInt(record.statusCode).putLong(record.categoryMask).array()
 }
 
 /** Active/pending deny state. `disabled` and masks are combined conservatively on ambiguity. */
