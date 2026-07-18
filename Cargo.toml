@@ -2,6 +2,8 @@
 members = [
     "rust/tbdiag-phase0",
     "rust/tracebox-phase0",
+    "rust/tracebox-sys",
+    "rust/tracebox",
 ]
 resolver = "3"
 
