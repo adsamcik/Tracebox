@@ -3,6 +3,8 @@ package dev.tracebox.phase0
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import dev.tracebox.nativecapture.NativeRuntime
@@ -38,6 +40,10 @@ class HandlerService : Service() {
         when (intent?.action) {
             ACTION_CRASH -> NativeRuntime.crashForTest(0)
             ACTION_HANG -> NativeRuntime.hangForTest()
+            ACTION_TERMINATE ->
+                Handler(Looper.getMainLooper()).post {
+                    NativeRuntime.terminateHandlerForTest()
+                }
         }
         return START_NOT_STICKY
     }
@@ -67,6 +73,7 @@ class HandlerService : Service() {
         const val TAG = "TraceboxPhase0"
         const val ACTION_CRASH = "dev.tracebox.phase0.CRASH_HANDLER"
         const val ACTION_HANG = "dev.tracebox.phase0.HANG_HANDLER"
+        const val ACTION_TERMINATE = "dev.tracebox.phase0.TERMINATE_HANDLER"
         const val MAX_STARTS_PER_WINDOW = 3
         const val START_WINDOW_MILLIS = 600_000L
     }

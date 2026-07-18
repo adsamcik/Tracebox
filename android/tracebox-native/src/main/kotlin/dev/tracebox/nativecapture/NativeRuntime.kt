@@ -28,4 +28,6 @@ object NativeRuntime {
     external fun hangForTest()
 
     external fun recursiveSignalForTest()
+
+    external fun terminateHandlerForTest()
 }

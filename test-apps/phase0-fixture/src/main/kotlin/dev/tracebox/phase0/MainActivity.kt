@@ -189,6 +189,11 @@ class MainActivity : Activity() {
                     Intent(this, HandlerService::class.java)
                         .setAction(HandlerService.ACTION_HANG),
                 )
+            "terminate_handler" ->
+                startService(
+                    Intent(this, HandlerService::class.java)
+                        .setAction(HandlerService.ACTION_TERMINATE),
+                )
             "measure_nonfatal" -> measureNonFatalPause()
             "worker_nonfatal" ->
                 startService(

@@ -365,7 +365,7 @@ $lifecycle = [ordered]@{
 }
 Reset-And-Launch
 Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
-Start-Action crash_handler
+Start-Action terminate_handler
 Start-Sleep 4
 Start-Action alive
 $lifecycle.death_notified =

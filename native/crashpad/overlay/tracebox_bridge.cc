@@ -732,3 +732,10 @@ Java_dev_tracebox_nativecapture_NativeRuntime_recursiveSignalForTest(
   g_in_signal = 1;
   EmergencySignalHandler(SIGABRT, nullptr, nullptr);
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_tracebox_nativecapture_NativeRuntime_terminateHandlerForTest(
+    JNIEnv*,
+    jobject) {
+  kill(getpid(), SIGTERM);
+}
