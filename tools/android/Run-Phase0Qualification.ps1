@@ -376,12 +376,9 @@ $lifecycle.reconnected =
     (Wait-Log 'main_reconnected=true' 5) -match 'main_reconnected=true'
 Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
 Start-Action crash_handler
-Start-Sleep 4
 $lifecycle.crash_loop_blocked =
-    @(
-        Invoke-Adb logcat '-d' '-v' brief '-s' $tag |
-            Select-String 'handler_start_blocked=crash_loop'
-    ).Count -ge 1
+    (Wait-Log 'handler_start_blocked=crash_loop' 15) -match
+    'handler_start_blocked=crash_loop'
 
 $emergencyResults = @()
 foreach ($fault in @('early_abort', 'early_stack', 'early_recursive')) {
