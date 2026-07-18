@@ -16,6 +16,12 @@ data class AnrCandidate(
     val debuggerAffected: Boolean,
 )
 
+data class AnrWatchdogStats(
+    val postedGeneration: Long,
+    val acknowledgedGeneration: Long,
+    val eligible: Boolean,
+)
+
 fun interface NonFatalRequester {
     fun request(timeoutMillis: Int): Boolean
 }
@@ -30,10 +36,24 @@ class AnrWatchdog(
     private val eligible = AtomicBoolean(false)
     private val postedGeneration = AtomicLong()
     private val acknowledgedGeneration = AtomicLong()
+    private val lastAcknowledgedMillis = AtomicLong(clockMillis())
     private val lock = ReentrantLock()
     private val eligibilityChanged = lock.newCondition()
     private var worker: Thread? = null
     private var lastRequestMillis = Long.MIN_VALUE
+    private val startedAtMillis = clockMillis()
+    private val heartbeat =
+        object : Runnable {
+            override fun run() {
+                if (!running.get() || !eligible.get()) {
+                    return
+                }
+                acknowledgedGeneration.set(postedGeneration.get())
+                lastAcknowledgedMillis.set(clockMillis())
+                lock.withLock { eligibilityChanged.signalAll() }
+                scheduleHeartbeat(2_000)
+            }
+        }
 
     fun start() {
         if (!running.compareAndSet(false, true)) {
@@ -46,42 +66,66 @@ class AnrWatchdog(
     }
 
     fun setEligible(value: Boolean) {
-        eligible.set(value)
+        val changed = eligible.getAndSet(value) != value
+        if (!changed) {
+            return
+        }
+
+        mainHandler.removeCallbacks(heartbeat)
+        if (value && running.get()) {
+            lastAcknowledgedMillis.set(clockMillis())
+            scheduleHeartbeat(0)
+        }
         lock.withLock { eligibilityChanged.signalAll() }
     }
 
+    fun stats(): AnrWatchdogStats =
+        AnrWatchdogStats(
+            postedGeneration = postedGeneration.get(),
+            acknowledgedGeneration = acknowledgedGeneration.get(),
+            eligible = eligible.get(),
+        )
+
     override fun close() {
         running.set(false)
+        mainHandler.removeCallbacks(heartbeat)
         lock.withLock { eligibilityChanged.signalAll() }
-        worker?.interrupt()
         worker = null
     }
 
     private fun runLoop() {
+        var capturedGeneration = Long.MIN_VALUE
         while (running.get()) {
             awaitEligibility()
             if (!running.get()) {
                 return
             }
-
-            val generation = postedGeneration.incrementAndGet()
-            val postedAt = clockMillis()
-            mainHandler.post {
-                acknowledgedGeneration.accumulateAndGet(generation, ::maxOf)
-            }
-            Thread.sleep(3_000)
-            if (!eligible.get() || acknowledgedGeneration.get() >= generation) {
+            val observedGeneration = acknowledgedGeneration.get()
+            val acknowledgedAt = lastAcknowledgedMillis.get()
+            val remaining = acknowledgedAt + 5_000 - clockMillis()
+            if (remaining > 0) {
+                lock.withLock {
+                    if (running.get() && eligible.get() &&
+                        acknowledgedGeneration.get() == observedGeneration
+                    ) {
+                        eligibilityChanged.awaitNanos(remaining * 1_000_000)
+                    }
+                }
                 continue
             }
-
-            val delayed = clockMillis() - postedAt
-            if (delayed < 5_000) {
-                Thread.sleep(5_000 - delayed)
-            }
-            if (!eligible.get() || acknowledgedGeneration.get() >= generation) {
+            val startupRemaining = startedAtMillis + 10_000 - clockMillis()
+            if (startupRemaining > 0) {
+                lock.withLock {
+                    eligibilityChanged.awaitNanos(startupRemaining * 1_000_000)
+                }
                 continue
             }
-            captureCandidate(clockMillis() - postedAt)
+            if (capturedGeneration == observedGeneration) {
+                lock.withLock { eligibilityChanged.await() }
+                continue
+            }
+            capturedGeneration = observedGeneration
+            captureCandidate(clockMillis() - acknowledgedAt)
         }
     }
 
@@ -108,5 +152,10 @@ class AnrWatchdog(
             false
         }
         onCandidate(AnrCandidate(delayedMillis, frames, requested, debuggerAffected = false))
+    }
+
+    private fun scheduleHeartbeat(delayMillis: Long) {
+        postedGeneration.incrementAndGet()
+        mainHandler.postDelayed(heartbeat, delayMillis)
     }
 }

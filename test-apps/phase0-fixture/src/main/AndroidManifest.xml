@@ -6,7 +6,8 @@
         android:theme="@style/AppTheme">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -20,5 +21,8 @@
             android:name=".WorkerService"
             android:exported="false"
             android:process=":worker" />
+        <receiver
+            android:name=".FaultReceiver"
+            android:exported="true" />
     </application>
 </manifest>

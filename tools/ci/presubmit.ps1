@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 & "$PSScriptRoot\..\verify\Verify-Toolchains.ps1"
 & "$PSScriptRoot\..\verify\Verify-NoNetworkStatic.ps1"
 & "$PSScriptRoot\..\crashpad\Acquire-Crashpad.ps1"
+& "$PSScriptRoot\..\crashpad\Build-Crashpad.ps1"
 
 & "$PSScriptRoot\..\..\gradlew.bat" phase0Check --dependency-verification strict --no-daemon
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

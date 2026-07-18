@@ -9,7 +9,7 @@ Normative machine-readable pins are in `gradle/toolchains.lock.toml`, `gradle/ve
 | Kotlin | 2.2.10 built into AGP | AGP runtime dependency/Maven Central | Apache-2.0 | AGP 9.2 built-in Kotlin; separate Android plugin is forbidden |
 | JDK | Temurin 21.0.8+9 | Adoptium | GPL-2.0-with-classpath-exception | AGP-compatible LTS |
 | Android SDK | compile/target 37, min 30, Build Tools 37.0.0 | Google Android SDK | Android SDK License | Required support boundary |
-| NDK | 29.0.14206865 | Google Android SDK | Android SDK License | Current installed stable NDK with 16 KiB support |
+| NDK | 28.2.13676358 | Google Android SDK | Android SDK License | Complete LLVM archive toolset and 16 KiB support; NDK 29.0.14206865 omitted `llvm-ar.exe` on Windows |
 | CMake | 4.1.2 | Google Android SDK package | BSD-3-Clause | Pinned AGP external-native build |
 | Rust | 1.93.1 | static.rust-lang.org manifest hash | Apache-2.0 OR MIT | Stable edition-2024 toolchain and Android targets |
 | Crashpad | efdc820b087c20eec9e32cb5e5b1a63dcf73a724 | Chromium Gitiles immutable revision | Apache-2.0 | Current reviewed pin for Android feasibility |

@@ -20,7 +20,7 @@ if ($wrapper -ne '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9
 $requiredSdkPaths = @(
     "$env:ANDROID_HOME\platforms\android-37.0",
     "$env:ANDROID_HOME\build-tools\37.0.0",
-    "$env:ANDROID_HOME\ndk\29.0.14206865",
+    "$env:ANDROID_HOME\ndk\28.2.13676358",
     "$env:ANDROID_HOME\cmake\4.1.2"
 )
 foreach ($path in $requiredSdkPaths) {

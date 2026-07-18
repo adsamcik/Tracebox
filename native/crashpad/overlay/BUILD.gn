@@ -1,0 +1,22 @@
+import("//build/crashpad_buildconfig.gni")
+
+assert(crashpad_is_android)
+
+loadable_module("tracebox_crashpad") {
+  sources = [
+    "emergency/tracebox_emergency.c",
+    "tracebox_bridge.cc",
+  ]
+
+  include_dirs = [ "include" ]
+  public_configs = [ "//:crashpad_config" ]
+  deps = [
+    "//client",
+    "//handler",
+    "//third_party/mini_chromium:base",
+    "//util",
+  ]
+  libs = [ "log" ]
+
+  output_name = "tracebox_crashpad"
+}

@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "gn": {
+    "revision": "5e19d2fb166fbd4f6f32147fbb2f497091a54ad8",
+    "version": "2077 (5e19d2fb166f)",
+    "url": "https://chrome-infra-packages.appspot.com/dl/gn/gn/windows-amd64/+/git_revision:5e19d2fb166fbd4f6f32147fbb2f497091a54ad8",
+    "sha256": "78ebf5d11d97298d8dce53090c18ad7d3463d8e52698ce6691d9fdd9b7774f07",
+    "license": "BSD-3-Clause"
+  },
+  "ninja": {
+    "version": "1.12.1",
+    "path": "ANDROID_HOME/cmake/4.1.2/bin/ninja.exe",
+    "license": "Apache-2.0"
+  },
+  "posix_helpers": {
+    "provider": "Git for Windows",
+    "tested_version": "2.49.0.windows.1",
+    "path": "C:/Program Files/Git/usr/bin",
+    "purpose": "GN stamp/copy commands only"
+  }
+}

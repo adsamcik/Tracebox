@@ -1,0 +1,478 @@
+diff --git a/handler/BUILD.gn b/handler/BUILD.gn
+--- a/handler/BUILD.gn
++++ b/handler/BUILD.gn
+@@ -16,15 +16,19 @@
+ 
+ static_library("common") {
+   sources = [
+-    "crash_report_upload_rate_limit.cc",
+-    "crash_report_upload_rate_limit.h",
+-    "crash_report_upload_thread.cc",
+-    "crash_report_upload_thread.h",
+-    "minidump_to_upload_parameters.cc",
+-    "minidump_to_upload_parameters.h",
+     "user_stream_data_source.cc",
+     "user_stream_data_source.h",
+   ]
++  if (!crashpad_is_android) {
++    sources += [
++      "crash_report_upload_rate_limit.cc",
++      "crash_report_upload_rate_limit.h",
++      "crash_report_upload_thread.cc",
++      "crash_report_upload_thread.h",
++      "minidump_to_upload_parameters.cc",
++      "minidump_to_upload_parameters.h",
++    ]
++  }
+   if (crashpad_is_apple) {
+     sources += [
+       "mac/file_limit_annotation.cc",
+@@ -41,8 +45,10 @@
+     "../minidump",
+     "../snapshot",
+     "../util",
+-    "../util:net",
+   ]
++  if (!crashpad_is_android) {
++    deps += [ "../util:net" ]
++  }
+   if (crashpad_is_win) {
+     cflags = [ "/wd4201" ]  # nonstandard extension used : nameless struct/union
+   }
+@@ -53,9 +59,15 @@
+     sources = [
+       "handler_main.cc",
+       "handler_main.h",
+-      "prune_crash_reports_thread.cc",
+-      "prune_crash_reports_thread.h",
+-    ]
++    ]
++    if (!crashpad_is_android) {
++      sources += [
++        "prune_crash_reports_thread.cc",
++        "prune_crash_reports_thread.h",
++      ]
++    } else {
++      defines = [ "CRASHPAD_TRACEBOX_CAPTURE_ONLY=1" ]
++    }
+ 
+     if (crashpad_is_mac) {
+       sources += [
+diff --git a/handler/handler_main.cc b/handler/handler_main.cc
+--- a/handler/handler_main.cc
++++ b/handler/handler_main.cc
+@@ -41,10 +41,12 @@
+ #include "client/crash_report_database.h"
+ #include "client/crashpad_client.h"
+ #include "client/crashpad_info.h"
++#include "client/simple_string_dictionary.h"
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+ #include "client/prune_crash_reports.h"
+-#include "client/simple_string_dictionary.h"
+ #include "handler/crash_report_upload_thread.h"
+ #include "handler/prune_crash_reports_thread.h"
++#endif
+ #include "tools/tool_support.h"
+ #include "util/file/file_io.h"
+ #include "util/misc/address_types.h"
+@@ -92,11 +94,12 @@
+ 
+ namespace {
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY) &&                         \
++    (BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) ||                       \
++     BUILDFLAG(IS_CHROMEOS) ||                                         \
++     BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC))
+ #define ATTACHMENTS_SUPPORTED 1
+-#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
+-        // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)
++#endif
+ 
+ void Usage(const base::FilePath& me) {
+   // clang-format off
+@@ -146,6 +149,7 @@
+ #endif  // BUILDFLAG(IS_APPLE)
+       // clang-format off
+ "      --metrics-dir=DIR       store metrics files in DIR (only in Chromium)\n"
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+ "      --monitor-self          run a second handler to catch crashes in the first\n"
+ "      --monitor-self-annotation=KEY=VALUE\n"
+ "                              set a module annotation in the handler\n"
+@@ -157,6 +161,7 @@
+ "      --no-periodic-tasks     don't scan for new reports or prune the database\n"
+ "      --no-rate-limit         don't rate limit crash uploads\n"
+ "      --no-upload-gzip        don't use gzip compression when uploading\n"
++#endif
+   // clang-format on
+ #if BUILDFLAG(IS_ANDROID)
+       // clang-format off
+@@ -188,8 +193,10 @@
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
+         // BUILDFLAG(IS_ANDROID)
+       // clang-format off
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+ "      --url=URL               send crash reports to this Breakpad server URL,\n"
+ "                              only if uploads are enabled for the database\n"
++#endif
+   // clang-format on
+ #if BUILDFLAG(IS_CHROMEOS)
+       // clang-format off
+@@ -220,11 +227,15 @@
+ 
+ struct Options {
+   std::map<std::string, std::string> annotations;
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   std::map<std::string, std::string> monitor_self_annotations;
+   std::string url;
++#endif
+   base::FilePath database;
+   base::FilePath metrics_dir;
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   std::vector<std::string> monitor_self_arguments;
++#endif
+ #if BUILDFLAG(IS_APPLE)
+   std::string mach_service;
+   int handshake_fd;
+@@ -242,11 +253,13 @@
+   std::string pipe_name;
+   InitialClientData initial_client_data;
+ #endif  // BUILDFLAG(IS_APPLE)
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   bool identify_client_via_url;
+   bool monitor_self;
+   bool periodic_tasks;
+   bool rate_limit;
+   bool upload_gzip;
++#endif
+ #if BUILDFLAG(IS_CHROMEOS)
+   bool use_cros_crash_reporter = false;
+   base::FilePath minidump_dir_for_tests;
+@@ -363,6 +376,7 @@
+   Signals::RestoreHandlerAndReraiseSignalOnReturn(siginfo, nullptr);
+ }
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+ void ReinstallCrashHandler() {
+   // This is used to re-enable the metrics-recording crash handler after
+   // MonitorSelf() sets up a Crashpad exception handler. On macOS, the
+@@ -371,6 +385,7 @@
+   // On Linux, the signal handler installed by StartHandler() restores the
+   // previously installed signal handler by default.
+ }
++#endif
+ 
+ void InstallCrashHandler() {
+   Signals::InstallCrashHandlers(HandleCrashSignal, 0, nullptr);
+@@ -466,6 +481,7 @@
+ 
+ #endif  // BUILDFLAG(IS_APPLE)
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+ void MonitorSelf(const Options& options) {
+   base::FilePath executable_path;
+   if (!Paths::Executable(&executable_path)) {
+@@ -547,6 +563,7 @@
+  private:
+   std::unique_ptr<Stoppable> stoppable_;
+ };
++#endif
+ 
+ void InitCrashpadLogging() {
+   logging::LoggingSettings settings;
+@@ -598,6 +615,7 @@
+     kOptionMachService,
+ #endif  // BUILDFLAG(IS_APPLE)
+     kOptionMetrics,
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+     kOptionMonitorSelf,
+     kOptionMonitorSelfAnnotation,
+     kOptionMonitorSelfArgument,
+@@ -605,6 +623,7 @@
+     kOptionNoPeriodicTasks,
+     kOptionNoRateLimit,
+     kOptionNoUploadGzip,
++#endif
+ #if BUILDFLAG(IS_ANDROID)
+     kOptionNoWriteMinidumpToDatabase,
+ #endif  // BUILDFLAG(IS_ANDROID)
+@@ -619,7 +638,9 @@
+     kOptionSharedClientConnection,
+     kOptionTraceParentWithException,
+ #endif
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+     kOptionURL,
++#endif
+ #if BUILDFLAG(IS_CHROMEOS)
+     kOptionUseCrosCrashReporter,
+     kOptionMinidumpDirForTests,
+@@ -657,6 +678,7 @@
+     {"mach-service", required_argument, nullptr, kOptionMachService},
+ #endif  // BUILDFLAG(IS_APPLE)
+     {"metrics-dir", required_argument, nullptr, kOptionMetrics},
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+     {"monitor-self", no_argument, nullptr, kOptionMonitorSelf},
+     {"monitor-self-annotation",
+      required_argument,
+@@ -673,6 +695,7 @@
+     {"no-periodic-tasks", no_argument, nullptr, kOptionNoPeriodicTasks},
+     {"no-rate-limit", no_argument, nullptr, kOptionNoRateLimit},
+     {"no-upload-gzip", no_argument, nullptr, kOptionNoUploadGzip},
++#endif
+ #if BUILDFLAG(IS_ANDROID)
+     {"no-write-minidump-to-database",
+      no_argument,
+@@ -703,7 +726,9 @@
+      kOptionTraceParentWithException},
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
+         // BUILDFLAG(IS_ANDROID)
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+     {"url", required_argument, nullptr, kOptionURL},
++#endif
+ #if BUILDFLAG(IS_CHROMEOS)
+     {"use-cros-crash-reporter",
+      no_argument,
+@@ -727,13 +752,17 @@
+ #if BUILDFLAG(IS_APPLE)
+   options.handshake_fd = -1;
+ #endif
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   options.identify_client_via_url = true;
++#endif
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+   options.initial_client_fd = kInvalidFileHandle;
+ #endif
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   options.periodic_tasks = true;
+   options.rate_limit = true;
+   options.upload_gzip = true;
++#endif
+ #if BUILDFLAG(IS_ANDROID)
+   options.write_minidump_to_database = true;
+ #endif
+@@ -799,6 +828,7 @@
+             ToolSupport::CommandLineArgumentToFilePathStringType(optarg));
+         break;
+       }
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+       case kOptionMonitorSelf: {
+         options.monitor_self = true;
+         break;
+@@ -831,6 +861,7 @@
+         options.upload_gzip = false;
+         break;
+       }
++#endif
+ #if BUILDFLAG(IS_ANDROID)
+       case kOptionNoWriteMinidumpToDatabase: {
+         options.write_minidump_to_database = false;
+@@ -873,10 +904,12 @@
+       }
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
+         // BUILDFLAG(IS_ANDROID)
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+       case kOptionURL: {
+         options.url = optarg;
+         break;
+       }
++#endif
+ #if BUILDFLAG(IS_CHROMEOS)
+       case kOptionUseCrosCrashReporter: {
+         options.use_cros_crash_reporter = true;
+@@ -984,6 +1017,7 @@
+   }
+ #endif  // BUILDFLAG(IS_APPLE)
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   if (options.monitor_self) {
+     MonitorSelf(options);
+   }
+@@ -1007,6 +1041,7 @@
+                                       iterator.second.c_str());
+     }
+   }
++#endif
+ 
+   std::unique_ptr<CrashReportDatabase> database(
+       CrashReportDatabase::Initialize(options.database));
+@@ -1014,6 +1049,7 @@
+     return ExitFailure();
+   }
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   ScopedStoppable upload_thread;
+   if (!options.url.empty()) {
+     // TODO(scottmg): options.rate_limit should be removed when we have a
+@@ -1033,6 +1069,7 @@
+         CrashReportUploadThread::ProcessPendingReportsObservationCallback()));
+     upload_thread.Get()->Start();
+   }
++#endif
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+   std::unique_ptr<ExceptionHandlerServer::Delegate> exception_handler;
+@@ -1059,7 +1096,11 @@
+   } else {
+     exception_handler = std::make_unique<CrashReportExceptionHandler>(
+         database.get(),
++#if defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
++        nullptr,
++#else
+         static_cast<CrashReportUploadThread*>(upload_thread.Get()),
++#endif
+         &options.annotations,
+         &options.attachments,
+         true,
+@@ -1069,10 +1110,16 @@
+ #else
+   exception_handler = std::make_unique<CrashReportExceptionHandler>(
+       database.get(),
++#if defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
++      nullptr,
++#else
+       static_cast<CrashReportUploadThread*>(upload_thread.Get()),
++#endif
+       &options.annotations,
+ #if defined(ATTACHMENTS_SUPPORTED)
+       &options.attachments,
++#elif defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
++      nullptr,
+ #endif  // ATTACHMENTS_SUPPORTED
+ #if BUILDFLAG(IS_ANDROID)
+       options.write_minidump_to_database,
+@@ -1098,12 +1145,14 @@
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
+         // BUILDFLAG(IS_ANDROID)
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   ScopedStoppable prune_thread;
+   if (options.periodic_tasks) {
+     prune_thread.Reset(new PruneCrashReportThread(
+         database.get(), PruneCondition::GetDefault()));
+     prune_thread.Get()->Start();
+   }
++#endif
+ 
+ #if BUILDFLAG(IS_APPLE)
+   if (options.mach_service.empty()) {
+diff --git a/handler/linux/crash_report_exception_handler.h b/handler/linux/crash_report_exception_handler.h
+--- a/handler/linux/crash_report_exception_handler.h
++++ b/handler/linux/crash_report_exception_handler.h
+@@ -19,7 +19,9 @@
+ #include <string>
+ 
+ #include "client/crash_report_database.h"
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+ #include "handler/crash_report_upload_thread.h"
++#endif
+ #include "handler/linux/exception_handler_server.h"
+ #include "handler/user_stream_data_source.h"
+ #include "util/linux/exception_handler_protocol.h"
+@@ -29,6 +31,9 @@
+ 
+ namespace crashpad {
+ 
++#if defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
++class CrashReportUploadThread;
++#endif
+ class ProcessSnapshotLinux;
+ class ProcessSnapshotSanitized;
+ 
+@@ -110,7 +115,9 @@
+                           ProcessSnapshotSanitized* sanitized_snapshot);
+ 
+   CrashReportDatabase* database_;  // weak
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   CrashReportUploadThread* upload_thread_;  // weak
++#endif
+   const std::map<std::string, std::string>* process_annotations_;  // weak
+   const std::vector<base::FilePath>* attachments_;  // weak
+   bool write_minidump_to_database_;
+diff --git a/handler/linux/crash_report_exception_handler.cc b/handler/linux/crash_report_exception_handler.cc
+--- a/handler/linux/crash_report_exception_handler.cc
++++ b/handler/linux/crash_report_exception_handler.cc
+@@ -108,7 +108,9 @@
+     bool write_minidump_to_log,
+     const UserStreamDataSources* user_stream_data_sources)
+     : database_(database),
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+       upload_thread_(upload_thread),
++#endif
+       process_annotations_(process_annotations),
+       attachments_(attachments),
+       write_minidump_to_database_(write_minidump_to_database),
+@@ -239,23 +241,25 @@
+     }
+   }
+ 
+-  for (const auto& attachment : (*attachments_)) {
+-    FileReader file_reader;
+-    if (!file_reader.Open(attachment)) {
+-      LOG(ERROR) << "attachment " << attachment.value().c_str()
+-                 << " couldn't be opened, skipping";
+-      continue;
++  if (attachments_ != nullptr) {
++    for (const auto& attachment : (*attachments_)) {
++      FileReader file_reader;
++      if (!file_reader.Open(attachment)) {
++        LOG(ERROR) << "attachment " << attachment.value().c_str()
++                   << " couldn't be opened, skipping";
++        continue;
++      }
++
++      base::FilePath filename = attachment.BaseName();
++      FileWriter* file_writer = new_report->AddAttachment(filename.value());
++      if (file_writer == nullptr) {
++        LOG(ERROR) << "attachment " << filename.value().c_str()
++                   << " couldn't be created, skipping";
++        continue;
++      }
++
++      CopyFileContent(&file_reader, file_writer);
+     }
+-
+-    base::FilePath filename = attachment.BaseName();
+-    FileWriter* file_writer = new_report->AddAttachment(filename.value());
+-    if (file_writer == nullptr) {
+-      LOG(ERROR) << "attachment " << filename.value().c_str()
+-                 << " couldn't be created, skipping";
+-      continue;
+-    }
+-
+-    CopyFileContent(&file_reader, file_writer);
+   }
+ 
+   UUID uuid;
+@@ -268,9 +272,11 @@
+     return false;
+   }
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+   if (upload_thread_) {
+     upload_thread_->ReportPending(uuid);
+   }
++#endif
+ 
+   if (local_report_id != nullptr) {
+     *local_report_id = uuid;
+diff --git a/client/BUILD.gn b/client/BUILD.gn
+--- a/client/BUILD.gn
++++ b/client/BUILD.gn
+@@ -17,10 +17,14 @@
+ crashpad_static_library("client") {
+   sources = [
+     "crashpad_client.h",
+-    "prune_crash_reports.cc",
+-    "prune_crash_reports.h",
+     "simulate_crash.h",
+   ]
++  if (!crashpad_is_android) {
++    sources += [
++      "prune_crash_reports.cc",
++      "prune_crash_reports.h",
++    ]
++  }
+ 
+   if (crashpad_is_mac) {
+     sources += [

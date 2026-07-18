@@ -6,21 +6,29 @@ android {
     namespace = "dev.tracebox.nativecapture"
 
     defaultConfig {
-        externalNativeBuild {
-            cmake {
-                arguments += "-DANDROID_STL=c++_static"
-                cppFlags += listOf("-std=c++20", "-Wall", "-Wextra", "-Werror")
-            }
-        }
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
+}
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "4.1.2"
+val verifyCrashpadPrebuilt by tasks.registering {
+    val required = listOf(
+        file("src/main/jniLibs/arm64-v8a/libtracebox_crashpad.so"),
+        file("src/main/jniLibs/x86_64/libtracebox_crashpad.so"),
+    )
+    inputs.files(required)
+    doLast {
+        required.forEach {
+            check(it.isFile) {
+                "Missing ${it.path}; run tools\\crashpad\\Build-Crashpad.ps1"
+            }
         }
+    }
+}
+
+tasks.configureEach {
+    if (name == "preBuild") {
+        dependsOn(verifyCrashpadPrebuilt)
     }
 }

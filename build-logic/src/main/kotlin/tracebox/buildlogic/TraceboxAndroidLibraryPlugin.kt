@@ -15,7 +15,7 @@ class TraceboxAndroidLibraryPlugin : Plugin<Project> {
 
         extensions.configure<LibraryExtension> {
             compileSdk = 37
-            ndkVersion = "29.0.14206865"
+            ndkVersion = "28.2.13676358"
             defaultConfig {
                 minSdk = 30
             }

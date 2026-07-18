@@ -2,7 +2,7 @@ package dev.tracebox.nativecapture
 
 object NativeRuntime {
     init {
-        System.loadLibrary("tracebox_native")
+        System.loadLibrary("tracebox_crashpad")
     }
 
     external fun initializeEmergency(directory: String, processRole: Int): Boolean
@@ -13,7 +13,15 @@ object NativeRuntime {
 
     external fun requestNonFatal(reason: Int, timeoutMillis: Int): Boolean
 
+    external fun requestSeededNonFatalForTest(): Boolean
+
+    external fun isHandlerAlive(): Boolean
+
     external fun writeEmergencyForTest(signalNumber: Int): Boolean
 
     external fun crashForTest(kind: Int)
+
+    external fun stackOverflowForTest()
+
+    external fun hangForTest()
 }

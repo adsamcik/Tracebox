@@ -1,0 +1,21 @@
+diff --git a/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn b/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
+index b621dc1..f8e488f 100644
+--- a/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
++++ b/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
+@@ -493,8 +493,14 @@ toolchain("gcc_like_toolchain") {
+       clang_prefix = tool_prefix + android_api_level
+     }
+ 
+-    cc = ndk_bin_dir + clang_prefix + "-clang"
+-    cxx = ndk_bin_dir + clang_prefix + "-clang++"
++    if (host_os == "win") {
++      clang_wrapper_suffix = ".cmd"
++    } else {
++      clang_wrapper_suffix = ""
++    }
++
++    cc = ndk_bin_dir + clang_prefix + "-clang" + clang_wrapper_suffix
++    cxx = ndk_bin_dir + clang_prefix + "-clang++" + clang_wrapper_suffix
+     asm = cxx
+     ld = cxx
+     ar = ndk_bin_dir + "llvm-ar"
