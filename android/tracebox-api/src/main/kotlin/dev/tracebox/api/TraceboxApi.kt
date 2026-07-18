@@ -1,6 +1,7 @@
 package dev.tracebox.api
 
 import java.io.Closeable
+import kotlinx.coroutines.flow.StateFlow
 
 /** The recorder's observable capability state. */
 enum class Readiness { VOLATILE_CAPTURE, DURABLE, DEGRADED, CLOSED }
@@ -90,7 +91,7 @@ enum class PackageResult { CREATED, REJECTED, NOT_READY }
 /** The generated-only public Tracebox recording handle. */
 interface TraceboxHandle : Closeable {
     val diagnostics: Diagnostics
-    val readiness: Readiness
+    val readiness: StateFlow<Readiness>
     val packages: DiagnosticPackages
 
     fun updateProfile(profile: DiagnosticsProfile): PolicyUpdateResult
