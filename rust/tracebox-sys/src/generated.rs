@@ -8,3 +8,67 @@ pub enum EventId {
     Breadcrumb = 3,
     HandledError = 4,
 }
+
+/// Schema-defined C ABI input for event 1.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StructuralSummaryV1 {
+    /// Required ABI header.
+    pub header: crate::HeaderV1,
+    /// C0; maximum encoded size 5.
+    pub stream_count: u32,
+    /// C0; maximum encoded size 5.
+    pub thread_count: u32,
+    /// C0; maximum encoded size 5.
+    pub module_count: u32,
+    /// C0; maximum encoded size 5.
+    pub exception_code: u32,
+    /// C0; maximum encoded size 3.
+    pub processor_architecture: u16,
+}
+
+/// Schema-defined C ABI input for event 2.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmergencyRecordV1 {
+    /// Required ABI header.
+    pub header: crate::HeaderV1,
+    /// C0; maximum encoded size 10.
+    pub slot_sequence: u64,
+    /// C0; maximum encoded size 10.
+    pub policy_epoch: u64,
+    /// C0; maximum encoded size 5.
+    pub signal_number: i32,
+    /// C0; maximum encoded size 5.
+    pub signal_code: i32,
+    /// C0; maximum encoded size 5.
+    pub process_role: u32,
+    /// C0; maximum encoded size 5.
+    pub thread_role: u32,
+    /// C0; maximum encoded size 10.
+    pub flags: u64,
+}
+
+/// Schema-defined C ABI input for event 3.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BreadcrumbV1 {
+    /// Required ABI header.
+    pub header: crate::HeaderV1,
+    /// C1; maximum encoded size 5.
+    pub code: u32,
+    /// C1; maximum encoded size 10.
+    pub monotonic_time_ns: u64,
+}
+
+/// Schema-defined C ABI input for event 4.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandledErrorV1 {
+    /// Required ABI header.
+    pub header: crate::HeaderV1,
+    /// C1; maximum encoded size 5.
+    pub kind: u32,
+    /// C1; maximum encoded size 3.
+    pub frame_count: u16,
+}

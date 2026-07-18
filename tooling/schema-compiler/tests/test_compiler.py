@@ -37,6 +37,26 @@ class SchemaCompilerTests(unittest.TestCase):
             if golden.is_file():
                 self.assertEqual(golden.read_bytes(), (self.out / golden.relative_to(GOLDEN)).read_bytes())
 
+    def test_field_name_and_type_drive_every_contract_target(self):
+        schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
+        field = schema["events"][1]["fields"][2]
+        field["name"] = "signed_signal"
+        field["semantic_type"] = "i32"
+        result = self.compile(schema)
+        self.assertEqual(0, result.returncode, result.stderr)
+        targets = [
+            "android/tracebox-api/src/main/kotlin/dev/tracebox/api/generated/GeneratedSchema.kt",
+            "native/include/tracebox/generated_events.h",
+            "rust/tracebox-sys/src/generated.rs",
+            "schema/generated/tracebox_records.proto",
+        ]
+        rendered = [(self.out / target).read_text(encoding="utf-8") for target in targets]
+        self.assertTrue(all("signed_signal" in content for content in rendered))
+        self.assertIn("val signed_signal: Int", rendered[0])
+        self.assertIn("int32_t signed_signal", rendered[1])
+        self.assertIn("pub signed_signal: i32", rendered[2])
+        self.assertIn("int32 signed_signal", rendered[3])
+
     def test_prohibited_type_fails_at_generation(self):
         schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
         schema["events"][0]["fields"][0]["semantic_type"] = "prohibited_secret"

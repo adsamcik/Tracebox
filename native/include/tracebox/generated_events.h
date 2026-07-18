@@ -8,5 +8,41 @@ typedef enum {
   TB_EVENT_BREADCRUMB = 3,
   TB_EVENT_HANDLEDERROR = 4,
 } tb_event_id_v1;
-typedef enum { TB_PROCESS_ROLE_APP = 1, TB_THREAD_ROLE_UNKNOWN = 0 } tb_generated_role_v1;
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t stream_count; /* C0, max encoded 5 */
+  uint32_t thread_count; /* C0, max encoded 5 */
+  uint32_t module_count; /* C0, max encoded 5 */
+  uint32_t exception_code; /* C0, max encoded 5 */
+  uint16_t processor_architecture; /* C0, max encoded 3 */
+} tb_generated_structuralsummary_v1;
+tb_status_v1 tb_record_generated_structuralsummary_v1(const tb_generated_structuralsummary_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint64_t slot_sequence; /* C0, max encoded 10 */
+  uint64_t policy_epoch; /* C0, max encoded 10 */
+  int32_t signal_number; /* C0, max encoded 5 */
+  int32_t signal_code; /* C0, max encoded 5 */
+  uint32_t process_role; /* C0, max encoded 5 */
+  uint32_t thread_role; /* C0, max encoded 5 */
+  uint64_t flags; /* C0, max encoded 10 */
+} tb_generated_emergencyrecord_v1;
+tb_status_v1 tb_record_generated_emergencyrecord_v1(const tb_generated_emergencyrecord_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t code; /* C1, max encoded 5 */
+  uint64_t monotonic_time_ns; /* C1, max encoded 10 */
+} tb_generated_breadcrumb_v1;
+tb_status_v1 tb_record_generated_breadcrumb_v1(const tb_generated_breadcrumb_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t kind; /* C1, max encoded 5 */
+  uint16_t frame_count; /* C1, max encoded 3 */
+} tb_generated_handlederror_v1;
+tb_status_v1 tb_record_generated_handlederror_v1(const tb_generated_handlederror_v1* value, uint32_t recorder_ready);
+
 #endif

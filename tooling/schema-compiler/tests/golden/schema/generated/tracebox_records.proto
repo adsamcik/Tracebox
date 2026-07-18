@@ -2,26 +2,26 @@
 syntax = "proto3";
 package tracebox.generated;
 message StructuralSummary {
-  uint64 stream_count = 1;
-  uint64 thread_count = 2;
-  uint64 module_count = 3;
-  uint64 exception_code = 4;
-  uint64 processor_architecture = 5;
+  uint32 stream_count = 1; // max encoded size 5; privacy C0
+  uint32 thread_count = 2; // max encoded size 5; privacy C0
+  uint32 module_count = 3; // max encoded size 5; privacy C0
+  uint32 exception_code = 4; // max encoded size 5; privacy C0
+  uint32 processor_architecture = 5; // max encoded size 3; privacy C0
 }
 message EmergencyRecord {
-  uint64 slot_sequence = 1;
-  uint64 policy_epoch = 2;
-  uint64 signal_number = 3;
-  uint64 signal_code = 4;
-  uint64 process_role = 5;
-  uint64 thread_role = 6;
-  uint64 flags = 7;
+  uint64 slot_sequence = 1; // max encoded size 10; privacy C0
+  uint64 policy_epoch = 2; // max encoded size 10; privacy C0
+  int32 signal_number = 3; // max encoded size 5; privacy C0
+  int32 signal_code = 4; // max encoded size 5; privacy C0
+  uint32 process_role = 5; // max encoded size 5; privacy C0
+  uint32 thread_role = 6; // max encoded size 5; privacy C0
+  uint64 flags = 7; // max encoded size 10; privacy C0
 }
 message Breadcrumb {
-  uint64 code = 1;
-  uint64 monotonic_time_ns = 2;
+  uint32 code = 1; // max encoded size 5; privacy C1
+  uint64 monotonic_time_ns = 2; // max encoded size 10; privacy C1
 }
 message HandledError {
-  uint64 kind = 1;
-  uint64 frame_count = 2;
+  uint32 kind = 1; // max encoded size 5; privacy C1
+  uint32 frame_count = 2; // max encoded size 3; privacy C1
 }

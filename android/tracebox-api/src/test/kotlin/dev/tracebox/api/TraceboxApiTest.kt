@@ -1,36 +1,31 @@
 package dev.tracebox.api
 
+import dev.tracebox.api.generated.GeneratedDiagnostics
+import dev.tracebox.api.generated.GeneratedEventId
+import dev.tracebox.api.generated.GeneratedRecord
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class TraceboxApiTest {
     @Test
     fun breadcrumb_does_not_construct_a_value_when_disabled() {
-        val diagnostics = FakeDiagnostics(false, false)
-        GeneratedDiagnostics.breadcrumb(diagnostics, BreadcrumbCode.NAVIGATION, 1)
-        assertEquals(0, diagnostics.breadcrumbCount)
+        val diagnostics = FakeDiagnostics(false)
+        GeneratedDiagnostics.breadcrumb(diagnostics, 1u, 1uL)
+        assertEquals(0, diagnostics.recordCount)
     }
 
     @Test
-    fun handled_constructs_only_after_enablement() {
-        val diagnostics = FakeDiagnostics(false, true)
-        GeneratedDiagnostics.handled(diagnostics, HandledErrorKind.EXCEPTION, 2u)
-        assertEquals(1, diagnostics.handledCount)
+    fun generated_values_record_only_after_enablement() {
+        val diagnostics = FakeDiagnostics(true)
+        GeneratedDiagnostics.handledError(diagnostics, 1u, 2u)
+        assertEquals(1, diagnostics.recordCount)
     }
 
-    private class FakeDiagnostics(
-        private val breadcrumbs: Boolean,
-        private val handled: Boolean,
-    ) : Diagnostics {
-        var breadcrumbCount = 0
-        var handledCount = 0
-        override fun breadcrumbEnabled() = breadcrumbs
-        override fun handledEnabled() = handled
-        override fun breadcrumb(value: GeneratedBreadcrumb, context: DiagnosticContext?) {
-            breadcrumbCount += 1
-        }
-        override fun handled(value: GeneratedHandledError, throwable: Throwable?) {
-            handledCount += 1
+    private class FakeDiagnostics(private val enabled: Boolean) : Diagnostics {
+        var recordCount = 0
+        override fun eventEnabled(eventId: GeneratedEventId) = enabled
+        override fun record(value: GeneratedRecord, context: DiagnosticContext?) {
+            recordCount += 1
         }
     }
 }
