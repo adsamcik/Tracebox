@@ -1,0 +1,26 @@
+{
+  "phase": "Phase 2 review-fix validation",
+  "baseline_head": "93146977b661ac105030a9da87527d2b13e12996",
+  "completed_at": "2026-07-19T00:25:23.5954100+02:00",
+  "commands": [
+    {
+      "command": ".\\gradlew.bat phase2Check --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL in 21s; 55 actionable tasks executed.",
+      "test_counts": { "tracebox-core": 4, "tracebox-storage": 10, "tracebox-directboot": 4, "total": 18, "failures": 0, "errors": 0, "skipped": 0 }
+    }
+  ],
+  "review_findings": [
+    { "id": 1, "disposition": "APPLIED", "evidence": "SegmentWriter.append accepts PolicyTaggedRecord and invokes WriterPolicyGate before frame construction; writer_directly_drops_stale_policy_tagged_record_without_writing_frame passes." },
+    { "id": 2, "disposition": "APPLIED", "evidence": "BoundedPolicyQueue.barrier retains permitted records and retags them; barrier_retags_permitted_records_across_a_real_epoch_transition passes." },
+    { "id": 3, "disposition": "APPLIED", "evidence": "Seal uses a reserved 32-bit marker; unsealed_frame_with_physical_size_of_old_seal_is_recovered_as_frame passes." },
+    { "id": 4, "disposition": "APPLIED", "evidence": "RoleQuotaLedger serializes check-and-append under a file lock and reconstructs usage from role-tagged segment files; role_quota_is_reconstructed_for_a_brand_new_process_instance passes." },
+    { "id": 5, "disposition": "APPLIED", "evidence": "SegmentMetadataIndex compares readable index contents to the authoritative direct scan and falls back on malformed/stale data; corrupt_or_stale_index_falls_back_to_authoritative_segment_scan passes." },
+    { "id": 6, "disposition": "APPLIED", "evidence": "C0DirectBootRecord carries categoryMask and DirectBootStore enforces the effective mirror deny mask; tightening_denies_only_the_targeted_c0_category passes." }
+  ],
+  "remaining_phase2_scope": [
+    "R2.5 remains IN_PROGRESS because UID-wide accounting and handler ownership integration are Phase 3-dependent.",
+    "R2.7 remains IN_PROGRESS because schema generation and the production CE/global coordinator remain Phase 3-dependent.",
+    "R2.8 remains IN_PROGRESS because global handler quiescence and handler-store deletion remain Phase 3-dependent."
+  ]
+}
