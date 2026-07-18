@@ -1,17 +1,25 @@
 {
-  "requirement_ids": ["C1.3", "C1.6"],
-  "scope": "generated Kotlin recording surface and Gradle identity capture scaffold",
+  "requirement_ids": [
+    "C1.3",
+    "C1.6"
+  ],
+  "scope": "schema-generated Kotlin recording API and Gradle build-identity catalog capture",
   "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
-  "start_time_utc": "2026-07-18T20:41:00Z",
-  "end_time_utc": "2026-07-18T20:43:00Z",
-  "tool_version": {"gradle": "9.6.1", "kotlin": "2.3.21", "jvm": "21.0.8"},
+  "end_time_utc": "2026-07-18T21:56:00Z",
   "commands": [
     {
-      "command": "gradlew.bat :android:tracebox-api:testDebugUnitTest :tooling:tracebox-gradle-plugin:identityCaptureTest --no-daemon --no-configuration-cache",
+      "command": "gradlew.bat :android:tracebox-api:testDebugUnitTest --no-daemon --no-configuration-cache",
       "exit_status": 0,
-      "expected_assertions": ["disabled diagnostic does not construct a value", "enabled generated diagnostic records", "build identity includes deterministic schema fingerprint"],
-      "actual_assertions": ["TraceboxApiTest passed; identityCaptureTest passed"],
-      "artifacts": ["android/tracebox-api/build/test-results/testDebugUnitTest/", "tooling/tracebox-gradle-plugin/build/classes/java/test/"]
+      "actual_assertions": [
+        "generated diagnostics only record after enablement"
+      ]
+    },
+    {
+      "command": "gradlew.bat :tooling:tracebox-gradle-plugin:identityCaptureTest --no-daemon --no-configuration-cache",
+      "exit_status": 0,
+      "actual_assertions": [
+        "functional fixture applied dev.tracebox.identity and produced build/tracebox/build-identity.json from schema and applying-project provenance"
+      ]
     }
   ],
   "matrix_cell": "HOST_UNIT_STATIC",

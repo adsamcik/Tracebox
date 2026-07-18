@@ -1,20 +1,37 @@
 package dev.tracebox.gradle;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-/** Immutable identity captured for a build before later R8/ELF collection phases. */
-public record BuildIdentity(String applicationId, String variant, String buildId, String schemaFingerprint) {}
+/** Immutable identity captured from an applying Gradle project and its authoritative schema. */
+public record BuildIdentity(String projectPath, String variant, String buildId, String schemaFingerprint) {}
 
-/** Captures schema/build provenance without adding network or symbol transport behavior. */
+/** Captures schema/build provenance without adding network or Phase 5 symbol collection behavior. */
 final class BuildIdentityCapture {
     private BuildIdentityCapture() {}
 
-    static BuildIdentity capture(String applicationId, String variant, String buildId, byte[] schemaBytes) {
-        if (applicationId.isBlank() || variant.isBlank() || buildId.isBlank()) {
-            throw new IllegalArgumentException("build identity inputs must be non-empty");
+    static BuildIdentity capture(String projectPath, String variant, String provenance, byte[] schemaBytes) {
+        if (projectPath.isBlank() || variant.isBlank() || provenance.isBlank()) {
+            throw new IllegalArgumentException("captured build provenance must be non-empty");
         }
-        return new BuildIdentity(applicationId, variant, buildId, hex(sha256(schemaBytes)));
+        String schemaFingerprint = hex(sha256(schemaBytes));
+        String buildId = hex(sha256((projectPath + "\n" + variant + "\n" + provenance + "\n"
+                + schemaFingerprint).getBytes(StandardCharsets.UTF_8)));
+        return new BuildIdentity(projectPath, variant, buildId, schemaFingerprint);
+    }
+
+    static String toJson(BuildIdentity identity) {
+        return "{\n"
+                + "  \"projectPath\": \"" + escape(identity.projectPath()) + "\",\n"
+                + "  \"variant\": \"" + escape(identity.variant()) + "\",\n"
+                + "  \"buildId\": \"" + identity.buildId() + "\",\n"
+                + "  \"schemaFingerprint\": \"" + identity.schemaFingerprint() + "\"\n"
+                + "}\n";
+    }
+
+    private static String escape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static byte[] sha256(byte[] bytes) {

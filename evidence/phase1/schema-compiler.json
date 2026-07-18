@@ -1,24 +1,26 @@
 {
-  "requirement_ids": ["C1.1", "C1.2"],
-  "scope": "formal schema model, generation, golden outputs, and compile-fail rules",
+  "requirement_ids": [
+    "C1.1",
+    "C1.2",
+    "C1.3"
+  ],
+  "scope": "schema-driven Kotlin, C, Rust, protobuf, metadata, labels, and docs contracts",
   "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
-  "start_time_utc": "2026-07-18T20:31:00Z",
-  "end_time_utc": "2026-07-18T20:42:00Z",
-  "tool_version": {"python": "Python 3.12.10"},
+  "end_time_utc": "2026-07-18T21:56:00Z",
   "commands": [
     {
       "command": "python tooling\\schema-compiler\\compile_schema.py",
       "exit_status": 0,
-      "expected_assertions": ["one source produces all target artifacts"],
-      "actual_assertions": ["fingerprint=6cab7df4c1845824d3db406e5c4702727585556758764a05d43014c66dcfa92c"],
-      "artifacts": ["schema/generated/", "docs/generated/schema-reference.md", "native/include/tracebox/generated_events.h", "rust/tracebox-sys/src/generated.rs"]
+      "actual_assertions": [
+        "schema output regenerated from events.json"
+      ]
     },
     {
       "command": "python -m unittest tooling\\schema-compiler\\tests\\test_compiler.py -v",
       "exit_status": 0,
-      "expected_assertions": ["goldens match", "Prohibited type rejected", "unknown custom field rejected", "reused ID rejected"],
-      "actual_assertions": ["4 tests passed"],
-      "artifacts": ["tooling/schema-compiler/tests/golden/"]
+      "actual_assertions": [
+        "5 tests passed including field-name/type propagation through Kotlin, C, Rust, and protobuf goldens"
+      ]
     }
   ],
   "matrix_cell": "HOST_UNIT_STATIC",

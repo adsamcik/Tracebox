@@ -1,24 +1,25 @@
 {
-  "requirement_ids": ["C1.5", "C1.6"],
-  "scope": "generated raw bindings, unwind containment, and internal identity allocation",
+  "requirement_ids": [
+    "C1.5",
+    "C1.6"
+  ],
+  "scope": "exported C ABI unwind containment and opaque persist-before-use identities",
   "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
-  "start_time_utc": "2026-07-18T20:40:00Z",
-  "end_time_utc": "2026-07-18T20:43:00Z",
-  "tool_version": {"cargo": "cargo 1.93.1 (083ac5135 2025-12-15)", "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)"},
+  "end_time_utc": "2026-07-18T21:56:00Z",
   "commands": [
     {
       "command": "cargo test -p tracebox-sys -p tracebox -p tracebox-identity",
       "exit_status": 0,
-      "expected_assertions": ["panic does not unwind across boundary", "random IDs are unique and journaled", "summary is deterministic", "emergency sequence cannot be reused"],
-      "actual_assertions": ["3 unit tests passed"],
-      "artifacts": ["rust/tracebox-sys/", "rust/tracebox/", "rust/tracebox-identity/"]
+      "actual_assertions": [
+        "7 unit tests passed; exported_c_abi_boundary_contains_bridge_panic returned Dropped; identity persistence, deterministic summary, and reuse tests passed"
+      ]
     },
     {
       "command": "cargo clippy -p tracebox-sys -p tracebox -p tracebox-identity --all-targets -- -D warnings",
       "exit_status": 0,
-      "expected_assertions": ["no Clippy diagnostics"],
-      "actual_assertions": ["completed successfully"],
-      "artifacts": []
+      "actual_assertions": [
+        "no diagnostics"
+      ]
     }
   ],
   "matrix_cell": "HOST_UNIT_STATIC",

@@ -1,26 +1,17 @@
 {
   "requirement_id": "C1.4",
-  "scope": "size-prefixed C ABI and backwards-compatibility behavior",
+  "scope": "size-prefixed generated C ABI and raw emergency-record public view",
   "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
-  "start_time_utc": "2026-07-18T20:38:00Z",
-  "end_time_utc": "2026-07-18T20:41:00Z",
-  "tool_version": {"cmake": "4.3.3", "compiler": "MSVC 19.50.35725.0"},
+  "end_time_utc": "2026-07-18T21:56:00Z",
   "commands": [
     {
-      "command": "cmake -S native -B native\\build-phase1; cmake --build native\\build-phase1 --config Debug",
-      "exit_status": 0,
-      "expected_assertions": ["C and C++ public headers build"],
-      "actual_assertions": ["tracebox_emergency, tracebox_abi_test, and existing C++ initialization test built"],
-      "artifacts": ["native/build-phase1/Debug/tracebox_abi_test.exe"]
-    },
-    {
-      "command": "ctest --test-dir native\\build-phase1 -C Debug --output-on-failure",
-      "exit_status": 0,
-      "expected_assertions": ["old-sized struct accepted", "oversized and undersized structs rejected", "typed status codes returned"],
-      "actual_assertions": ["3/3 tests passed including tracebox_abi_test"],
-      "artifacts": ["native/tests/tracebox_abi_test.c"]
+      "command": "cmake -S native -B native\\build-review -G \"Visual Studio 17 2022\" -A x64",
+      "exit_status": 1,
+      "actual_assertions": [
+        "not run: this worktree host has no Visual Studio instance or alternate C compiler; no CMake/CTest PASS claim is made"
+      ]
     }
   ],
   "matrix_cell": "HOST_UNIT_STATIC",
-  "result": "PASS"
+  "result": "IN_PROGRESS"
 }

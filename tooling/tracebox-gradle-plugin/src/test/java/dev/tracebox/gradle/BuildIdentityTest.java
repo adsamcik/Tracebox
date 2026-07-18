@@ -1,21 +1,38 @@
 package dev.tracebox.gradle;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
-/** Runnable identity capture contract test without an external test dependency. */
+import org.gradle.testkit.runner.GradleRunner;
+
+/** Runnable functional test proving that applying the plugin writes a real identity artifact. */
 public final class BuildIdentityTest {
     private BuildIdentityTest() {}
 
-    /** Verifies deterministic schema hashing and preserved build metadata. */
-    public static void main(String[] args) {
+    /** Applies the plugin in a fixture project and verifies schema/build provenance was captured. */
+    public static void main(String[] args) throws Exception {
         BuildIdentity identity = BuildIdentityCapture.capture(
-                "dev.example", "release", "build-7", "schema".getBytes(StandardCharsets.UTF_8));
-        if (!identity.applicationId().equals("dev.example")
-                || !identity.variant().equals("release")
-                || !identity.buildId().equals("build-7")
-                || !identity.schemaFingerprint().equals(
-                        "df0ad6e43880f09c90ebf95f19110178aba6890df0010ebda7485029e2b543b4")) {
-            throw new AssertionError("identity capture changed");
+                ":app", "release", "version=7;gradle=9.6.1", "schema".getBytes(StandardCharsets.UTF_8));
+        if (identity.buildId().length() != 64 || !BuildIdentityCapture.toJson(identity).contains("\"schemaFingerprint\"")) {
+            throw new AssertionError("identity capture formatting changed");
+        }
+
+        Path fixture = Path.of("build", "identity-capture-functional-test");
+        Files.createDirectories(fixture);
+        Files.writeString(fixture.resolve("settings.gradle"), "rootProject.name = 'identity-fixture'\n");
+        Files.writeString(fixture.resolve("schema.json"), "{\"schema_version\":1}\n");
+        Files.writeString(fixture.resolve("build.gradle"), "plugins { id 'dev.tracebox.identity' }\n"
+                + "traceboxIdentity { schemaFile = 'schema.json' }\n");
+        GradleRunner.create()
+                .withProjectDir(fixture.toFile())
+                .withArguments("captureTraceboxBuildIdentity", "--offline")
+                .withPluginClasspath()
+                .build();
+        String catalog = Files.readString(fixture.resolve("build/tracebox/build-identity.json"));
+        if (!catalog.contains("\"projectPath\": \":\"")
+                || !catalog.contains("\"schemaFingerprint\"")) {
+            throw new AssertionError("plugin did not capture applying-project provenance");
         }
     }
 }

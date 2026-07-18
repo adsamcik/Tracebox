@@ -2,6 +2,10 @@ plugins {
     `java-gradle-plugin`
 }
 
+dependencies {
+    testImplementation(gradleTestKit())
+}
+
 gradlePlugin {
     plugins {
         create("traceboxIdentity") {
