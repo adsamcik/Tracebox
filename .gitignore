@@ -9,7 +9,8 @@ local.properties
 *.iml
 
 target/
-Cargo.lock
+.bootstrap/
+third_party/crashpad/checkout/
 
 *.keystore
 *.jks
@@ -17,5 +18,6 @@ Cargo.lock
 *.tmp
 
 captures/
+evidence/runtime/
 .DS_Store
 Thumbs.db

@@ -1,0 +1,44 @@
+format = 1
+
+[gradle]
+version = "9.6.1"
+url = "https://services.gradle.org/distributions/gradle-9.6.1-bin.zip"
+sha256 = "9c0f7faeeb306cb14e4279a3e084ca6b596894089a0638e68a07c945a32c9e14"
+license = "Apache-2.0"
+
+[agp]
+version = "9.2.0"
+provenance = "https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/9.2.0/"
+license = "Apache-2.0"
+
+[kotlin]
+version = "2.2.10"
+provenance = "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-gradle-plugin/2.2.10/"
+license = "Apache-2.0"
+
+[jdk]
+version = "21"
+tested_distribution = "Eclipse Temurin 21.0.8+9"
+provenance = "https://adoptium.net/temurin/releases/"
+license = "GPL-2.0-with-classpath-exception"
+
+[android]
+compile_sdk = "37.0"
+target_sdk = 37
+min_sdk = 30
+build_tools = "37.0.0"
+ndk = "29.0.14206865"
+cmake = "4.1.2"
+provenance = "https://developer.android.com/studio"
+license = "Android-SDK-License"
+
+[rust]
+version = "1.93.1"
+channel_manifest_sha256 = "4812a3c610bacc74eed12c89c312e540722dccccd867bd55096402da13b3a516"
+provenance = "https://static.rust-lang.org/dist/channel-rust-1.93.1.toml"
+license = "Apache-2.0 OR MIT"
+
+[crashpad]
+revision = "efdc820b087c20eec9e32cb5e5b1a63dcf73a724"
+provenance = "https://chromium.googlesource.com/crashpad/crashpad/+archive/efdc820b087c20eec9e32cb5e5b1a63dcf73a724.tar.gz"
+license = "Apache-2.0"

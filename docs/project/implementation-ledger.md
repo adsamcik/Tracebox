@@ -11,11 +11,11 @@
 
 | ID | Work | Dependencies | Acceptance/output | State | Satisfied by prior commit | Notes/evidence |
 |---|---|---|---|---|---|---|
-| F0.1 | Freeze terminology and invariants | — | Threat model, privacy classes, evidence grades, readiness states approved | PASS |  | Frozen by ADR-0002 through ADR-0007 and `specs/`. |
-| F0.2 | Pin toolchains and dependencies | F0.1 | Gradle, AGP, Kotlin, JDK, NDK, CMake, Rust, Crashpad revisions locked and verified | IN_PROGRESS |  | Toolchain provenance and reproducible build setup in progress. |
-| F0.3 | Crashpad privacy spike | F0.1;F0.2 | Raw stream inventory, structural-summary prototype, seeded-secret results | NOT_STARTED |  |  |
-| F0.4 | Android handler spike | F0.2 | Multi-client handler on API 30/37, page compatibility, restart/death evidence | NOT_STARTED |  |  |
-| F0.5 | Emergency fallback spike | F0.2 | Fixed signal record survives pre-Durable and Crashpad-unavailable faults | NOT_STARTED |  |  |
+| F0.1 | Freeze terminology and invariants | — | Threat model, privacy classes, evidence grades, readiness states approved | PASS | 76c57c4482ead7e45c900a170014761b692fd8fd | Frozen by ADR-0002 through ADR-0007 and `specs/`. |
+| F0.2 | Pin toolchains and dependencies | F0.1 | Gradle, AGP, Kotlin, JDK, NDK, CMake, Rust, Crashpad revisions locked and verified | PASS |  | Reproducible Gradle/Android/native/Rust foundations and verified Crashpad acquisition. |
+| F0.3 | Crashpad privacy spike | F0.1;F0.2 | Raw stream inventory, structural-summary prototype, seeded-secret results | IN_PROGRESS |  | Capture-only Crashpad integration and privacy inventory in progress. |
+| F0.4 | Android handler spike | F0.2 | Multi-client handler on API 30/37, page compatibility, restart/death evidence | IN_PROGRESS |  | Private handler implementation and endpoint matrix in progress. |
+| F0.5 | Emergency fallback spike | F0.2 | Fixed signal record survives pre-Durable and Crashpad-unavailable faults | IN_PROGRESS |  | Signal-safe Android fault corpus in progress. |
 | F0.6 | Live ANR spike | F0.3;F0.4 | Measured watchdog, candidate capture, nonfatal request, lifecycle, timeout/cancellation | NOT_STARTED |  |  |
 | F0.7 | Baseline artifact and PSS measurement | F0.3;F0.4;F0.5;F0.6 | Per-ABI size and handler/app resource evidence | NOT_STARTED |  |  |
 | C1.1 | Formal privacy/event schema | F0.1;F0.3 | Stable bounded privacy-classified schema | NOT_STARTED |  |  |

@@ -1,0 +1,35 @@
+{
+  "requirement_id": "F0.2-REPRODUCIBILITY",
+  "command": "gradlew.bat clean phase0Check --dependency-verification strict --no-daemon",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "tool_version": "Gradle 9.6.1",
+  "start_time_utc": "2026-07-18T09:13:25.8144593Z",
+  "end_time_utc": "2026-07-18T09:13:46.6324172Z",
+  "timeout_seconds": 600,
+  "exit_status": 0,
+  "expected_assertions": [
+    "five APK artifacts rebuilt",
+    "byte-identical SHA-256 after clean rebuild"
+  ],
+  "actual_assertions": {
+    "artifacts": 5,
+    "identical": true,
+    "differences": []
+  },
+  "artifact_paths": [
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk"
+  ],
+  "artifact_sha256": {
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk": "da2212787d58bf6816b6f6bdd67492e4001074e5c9ddb783a6fb4507bcc7e3bc",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk": "eb82483f536836c736e3022f36ac4d456baec3d19691bf098346033d8cd7b9e7",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk": "cdd040edc6b18309647785038158844f6a1cda97fbc693ae52270eea7df267ab",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk": "fcc18de957220fd96ea4e1b9c19b268e06262159a2aaf0ec89e621e60508dc32",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk": "a75e72ffdb252f3019ac8c7acc4bcd91e7cc0c0cbc4f4afc76456dbd951f70d6"
+  },
+  "matrix_cell": "HOST_REPRODUCIBLE_BUILD",
+  "result": "PASS"
+}
