@@ -32,16 +32,16 @@
 | R2.6 | Lazy metadata summaries/index | R2.4;R2.5 | Rebuildable index and index-free planning | PASS | 1ae57abc378f352afeb6d98488aa1d702bf8543d | Direct segment scan is authoritative; bounded index rebuild/delete fallback is tested. |
 | R2.7 | Direct Boot C0 module | C1.1;R2.2;R2.4 | C0-only DE store and two-phase deny mirror | IN_PROGRESS |  | Typed C0-only store and crash-safe pending/active mirror are tested; schema compiler generation and production CE/global coordinator wiring remain required. |
 | R2.8 | Crash-recoverable deletion engine | R2.2;R2.3;R2.4;R2.5;R2.6;R2.7 | Journaled deletion and bounded compaction | IN_PROGRESS |  | Phase 2 ordinary-segment/index deletion journal and fault resume are tested; handler stores, summary tombstones, and global quiesce await Phase 3. OS-owned ApplicationExitInfo is unaffected. |
-| X3.1 | Handler service and IPC | F0.4;C1.4;R2.1 | One handler and bounded local IPC | NOT_STARTED |  |  |
-| X3.2 | Production global policy coordinator | R2.2;R2.3;R2.8;X3.1 | Control page, census, leases, global barriers | NOT_STARTED |  |  |
-| X3.3 | Capture-only Crashpad integration | F0.3;C1.1;C1.6;R2.5;R2.8;X3.1;X3.2 | Private capture-only Crashpad lifecycle | NOT_STARTED |  |  |
-| X3.4 | Structural summary derivation and spool | X3.3;C1.2;C1.6;R2.5;R2.8 | Canonical summary staging and replay | NOT_STARTED |  |  |
-| X3.5 | Emergency writer production path | F0.5;R2.5 | Signal-safe emergency capture | NOT_STARTED |  |  |
-| X3.6 | Crash dispatch/coexistence state machine | X3.3;X3.4;X3.5 | Exactly one primary/fallback result | NOT_STARTED |  |  |
-| X3.7 | JVM uncaught exception capture | C1.2;R2.5 | Bounded JVM capture and exact chaining | NOT_STARTED |  |  |
-| X3.8 | Rust panic/fault integration | C1.5;X3.6 | Contained panic and native fault paths | NOT_STARTED |  |  |
-| X3.9 | Live ANR watchdog | F0.6;X3.3;R2.1;R2.5 | Adaptive bounded watchdog | NOT_STARTED |  |  |
-| X3.10 | Exit reconciliation | C1.6;R2.4;R2.5;R2.8;X3.6;X3.7;X3.8;X3.9 | Policy-safe idempotent OS exit import | NOT_STARTED |  |  |
+| X3.1 | Handler service and IPC | F0.4;C1.4;R2.1 | One handler and bounded local IPC | IN_PROGRESS |  | Production non-exported handler service and explicit-trigger/death readiness state are host-tested; transport protocol certification remains. |
+| X3.2 | Production global policy coordinator | R2.2;R2.3;R2.8;X3.1 | Control page, census, leases, global barriers | IN_PROGRESS |  | Durable census, lease probing, reboot fencing, and honest barrier outcomes are host-tested; CE/DE transaction and real multi-process Android validation remain. |
+| X3.3 | Capture-only Crashpad integration | F0.3;C1.1;C1.6;R2.5;R2.8;X3.1;X3.2 | Private capture-only Crashpad lifecycle | IN_PROGRESS |  | CE raw journal/quota/orphan cleanup path is host-tested; Crashpad lifecycle journal binding and deletion-engine integration remain. |
+| X3.4 | Structural summary derivation and spool | X3.3;C1.2;C1.6;R2.5;R2.8 | Canonical summary staging and replay | IN_PROGRESS |  | Deterministic canonical summary staging and idempotent replay are host-tested; Phase 1 Rust identity FFI and target segment acknowledgement are pending. |
+| X3.5 | Emergency writer production path | F0.5;R2.5 | Signal-safe emergency capture | IN_PROGRESS |  | Phase 0 signal-safe implementation was not changed; production ingestion into ordinary storage remains pending. |
+| X3.6 | Crash dispatch/coexistence state machine | X3.3;X3.4;X3.5 | Exactly one primary/fallback result | IN_PROGRESS |  | Typed Exclusive/BestEffortChain/DisableOnConflict decision core is host-tested; native signal dispatch binding remains pending. |
+| X3.7 | JVM uncaught exception capture | C1.2;R2.5 | Bounded JVM capture and exact chaining | IN_PROGRESS |  | Bounded no-message-default wrapper, cycle handling, recursion guard, and exact prior-handler chaining are host-tested; generated-record storage adapter is pending. |
+| X3.8 | Rust panic/fault integration | C1.5;X3.6 | Contained panic and native fault paths | IN_PROGRESS |  | Bounded global hook and cfg-gated unwind containment are cargo-tested; native structured-record bridge and abort artifact test need Android/native validation. |
+| X3.9 | Live ANR watchdog | F0.6;X3.3;R2.1;R2.5 | Adaptive bounded watchdog | IN_PROGRESS |  | Adaptive decision state machine, policy gate, false-positive suppression, rate limit, and non-confirmation are host-tested. Existing Android watchdog still needs wiring and device measurement; responsive-looper limitation is documented in design section 13.6. |
+| X3.10 | Exit reconciliation | C1.6;R2.4;R2.5;R2.8;X3.6;X3.7;X3.8;X3.9 | Policy-safe idempotent OS exit import | IN_PROGRESS |  | No ApplicationExitInfo adapter is complete; API 37 infrastructure remains UNAVAILABLE_EXTERNAL and no coverage claim is made. |
 | P4.1 | Snapshot selection and transformation | X3.2;R2.4;R2.5;R2.8;X3.10 | Frozen transformed snapshot | NOT_STARTED |  |  |
 | P4.2 | Deterministic CBOR manifest | P4.1 | Canonical manifest vectors | NOT_STARTED |  |  |
 | P4.3 | Constrained deterministic ZIP materialization | P4.1;P4.2 | Bounded deterministic tbdiag bytes | NOT_STARTED |  |  |

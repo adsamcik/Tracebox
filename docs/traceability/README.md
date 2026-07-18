@@ -1,4 +1,4 @@
-﻿# Traceability Index
+# Traceability Index
 
 Baseline: `dc87c6f9e2a6576cc554f7cb181ce80a02bf0802`
 

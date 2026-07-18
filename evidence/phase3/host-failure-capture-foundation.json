@@ -1,0 +1,32 @@
+{
+  "phase": "Phase 3 failure capture (incremental host evidence)",
+  "baseline_commit": "63b861b35902d0a5b501eb1e5d52d5ec1b2c44df",
+  "commands": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-core:testDebugUnitTest :android:tracebox-storage:testDebugUnitTest :android:tracebox-anr-exit:testDebugUnitTest :android:tracebox-native:testDebugUnitTest --no-daemon --offline",
+      "exit_status": 0,
+      "actual": "Core coordinator/JVM capture, raw/spool, ANR decision tests passed; native service compiled (no unit-test sources)."
+    },
+    {
+      "command": "cargo test --offline",
+      "working_directory": "rust\\tracebox",
+      "exit_status": 0,
+      "actual": "2 panic-boundary tests passed."
+    }
+  ],
+  "covered": [
+    "Handler death degrades readiness and reconnect requires an explicit trigger.",
+    "Coordinator census restart, live lease ambiguity, reboot fencing, missing acknowledgements, and no false global success.",
+    "Raw artifact journal/quota/orphan cleanup and structural-summary replay idempotency.",
+    "Exclusive, chain, and conflict-disabled dispatch decisions.",
+    "JVM bounded no-message capture, cause-cycle termination, recorder recursion containment, and exact previous-handler chaining.",
+    "Rust unwind-only containment and bounded hook representation.",
+    "ANR debugger/suspend/policy/duplicate suppression and candidate-only semantics."
+  ],
+  "limitations": [
+    "No emulator qualification was run.",
+    "Crashpad native protocol binding, emergency ingestion, cross-process Android barrier, full deletion integration, and ApplicationExitInfo reconciliation are incomplete.",
+    "API 37 AnrInfo remains UNAVAILABLE_EXTERNAL because the known API 37 emulator lane is unavailable."
+  ],
+  "result": "IN_PROGRESS"
+}

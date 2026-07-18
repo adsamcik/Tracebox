@@ -4,12 +4,15 @@ plugins {
 
 android {
     namespace = "dev.tracebox.nativecapture"
-
     defaultConfig {
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
+}
+
+dependencies {
+    implementation(project(":android:tracebox-core"))
 }
 
 val verifyCrashpadPrebuilt by tasks.registering {

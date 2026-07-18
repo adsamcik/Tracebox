@@ -7,5 +7,6 @@ android {
 }
 
 dependencies {
-    testImplementation(kotlin("test"))
+    implementation(project(":android:tracebox-core"))
+    testImplementation(kotlin("test-junit"))
 }
