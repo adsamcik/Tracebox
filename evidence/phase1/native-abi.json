@@ -13,5 +13,6 @@
     }
   ],
   "matrix_cell": "HOST_UNIT_STATIC",
-  "result": "IN_PROGRESS"
+  "result": "IN_PROGRESS",
+  "superseded_by": "evidence/phase1/native-abi-regression-fix.json records the actual successful MSVC build/CTest run once a compiler became available, including two real defects that run surfaced and their fixes."
 }

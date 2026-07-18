@@ -4,8 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "tracebox/generated_events.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,6 +20,19 @@ typedef enum {
   TB_STATUS_UNSUPPORTED_VERSION = 3,
   TB_STATUS_INVALID_ARGUMENT = 4,
 } tb_status_v1;
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
+/* generated_events.h uses tb_header_v1 and tb_status_v1, so it must be
+ * included only after both are defined above. It opens/closes its own
+ * extern "C" block for the declarations it contains. */
+#include "tracebox/generated_events.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* The schema-generated breadcrumb layout is the public v1 ABI type. */
 typedef tb_generated_breadcrumb_v1 tb_breadcrumb_v1;

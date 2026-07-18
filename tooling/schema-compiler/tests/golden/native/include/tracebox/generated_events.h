@@ -2,6 +2,12 @@
 #ifndef TRACEBOX_GENERATED_EVENTS_H_
 #define TRACEBOX_GENERATED_EVENTS_H_
 #include <stdint.h>
+/* Requires tb_header_v1 and tb_status_v1 from tracebox/abi.h, which are
+ * defined before this header is included there. Do not include this
+ * header directly; include tracebox/abi.h instead. */
+#ifdef __cplusplus
+extern "C" {
+#endif
 typedef enum {
   TB_EVENT_STRUCTURALSUMMARY = 1,
   TB_EVENT_EMERGENCYRECORD = 2,
@@ -44,5 +50,9 @@ typedef struct {
   uint16_t frame_count; /* C1, max encoded 3 */
 } tb_generated_handlederror_v1;
 tb_status_v1 tb_record_generated_handlederror_v1(const tb_generated_handlederror_v1* value, uint32_t recorder_ready);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

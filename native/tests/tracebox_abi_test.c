@@ -1,4 +1,5 @@
 #include "tracebox/abi.h"
+#include "tracebox/emergency.h"
 
 #include <assert.h>
 #include <stddef.h>

@@ -13,10 +13,15 @@ extern "C" {
 #define TB_EMERGENCY_RECORD_SIZE 256u
 #define TB_EMERGENCY_COMPLETION UINT64_C(0x5442454d434f4d50)
 
-/* The fixed 256-byte raw record is an internal on-disk format, not a public ABI struct.
- * It remains byte-for-byte stable for the Phase 0 signal-safe writer and reader. */
+/* The fixed 256-byte raw record is an internal on-disk format used by the
+ * Phase 0 signal-safe writer/reader. It remains byte-for-byte stable and is
+ * not itself a size/version-prefixed public ABI struct. */
+typedef struct {
+  uint8_t bytes[TB_EMERGENCY_RECORD_SIZE];
+} tb_emergency_record_v1;
 
-/* Public versioned view for new ABI consumers of the internal raw on-disk record. */
+/* Public versioned view for new ABI consumers of the internal raw on-disk
+ * record. Describes (does not replace) the fixed byte layout above. */
 typedef struct {
   tb_header_v1 header;
   const uint8_t* bytes;
@@ -24,8 +29,8 @@ typedef struct {
   uint32_t reserved_flags;
 } tb_emergency_record_view_v1;
 
-/* Initializes the internal fixed raw on-disk record. The caller provides exactly 256 bytes. */
-int tb_emergency_initialize_v1(uint8_t record[TB_EMERGENCY_RECORD_SIZE],
+/* Initializes the internal fixed raw on-disk record. */
+int tb_emergency_initialize_v1(tb_emergency_record_v1* record,
                                 const uint8_t process_instance_id[32],
                                 uint64_t slot_sequence,
                                 uint64_t policy_epoch,
