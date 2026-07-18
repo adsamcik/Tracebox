@@ -204,33 +204,33 @@ class MainActivity : Activity() {
     }
 
     private fun measureNonFatalPause() {
-        val running = AtomicBoolean(true)
-        val last = AtomicLong(SystemClock.elapsedRealtimeNanos())
-        val maximumGap = AtomicLong()
-        val sampler =
-            object : Runnable {
-                override fun run() {
-                    val now = SystemClock.elapsedRealtimeNanos()
-                    val gap = now - last.getAndSet(now)
-                    maximumGap.accumulateAndGet(gap, ::maxOf)
-                    if (running.get()) {
-                        status.post(this)
-                    }
-                }
-            }
-        status.post(sampler)
+        val done = AtomicBoolean(false)
+        val capturedResult = AtomicBoolean(false)
+        val elapsedNanos = AtomicLong()
         Thread {
             SystemClock.sleep(100)
             val started = SystemClock.elapsedRealtimeNanos()
-            val captured = NativeRuntime.requestNonFatal(REASON_ANR_CANDIDATE, 2_000)
-            val elapsed = SystemClock.elapsedRealtimeNanos() - started
-            running.set(false)
-            Log.i(
-                TAG,
-                "nonfatal_measure captured=$captured elapsed_us=${elapsed / 1_000} " +
-                    "main_pause_max_us=${maximumGap.get() / 1_000}",
+            capturedResult.set(
+                NativeRuntime.requestNonFatal(REASON_ANR_CANDIDATE, 2_000),
             )
+            elapsedNanos.set(SystemClock.elapsedRealtimeNanos() - started)
+            done.set(true)
         }.start()
+
+        var previous = SystemClock.elapsedRealtimeNanos()
+        var maximumGap = 0L
+        val deadline = previous + 3_000_000_000L
+        while (!done.get() && previous < deadline) {
+            val now = SystemClock.elapsedRealtimeNanos()
+            maximumGap = maxOf(maximumGap, now - previous)
+            previous = now
+        }
+        Log.i(
+            TAG,
+            "nonfatal_measure captured=${capturedResult.get()} " +
+                "elapsed_us=${elapsedNanos.get() / 1_000} " +
+                "main_pause_max_us=${maximumGap / 1_000}",
+        )
     }
 
     private companion object {

@@ -42,9 +42,11 @@ class FaultReceiver : BroadcastReceiver() {
                     TAG,
                     "watchdog_stats posted=${stats?.postedGeneration} " +
                         "acked=${stats?.acknowledgedGeneration} eligible=${stats?.eligible} " +
-                        "heartbeat_max_ns=${stats?.heartbeatMaxNanos}",
+                        "heartbeat_p99_ns=${stats?.heartbeatP99Nanos}",
                 )
             }
+            "reset_watchdog_stats" ->
+                Phase0WatchdogRegistry.watchdog?.resetMeasurementStats()
         }
     }
 

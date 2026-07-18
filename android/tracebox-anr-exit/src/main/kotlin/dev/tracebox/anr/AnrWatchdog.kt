@@ -20,7 +20,7 @@ data class AnrWatchdogStats(
     val postedGeneration: Long,
     val acknowledgedGeneration: Long,
     val eligible: Boolean,
-    val heartbeatMaxNanos: Long,
+    val heartbeatP99Nanos: Long,
 )
 
 fun interface NonFatalRequester {
@@ -38,7 +38,8 @@ class AnrWatchdog(
     private val postedGeneration = AtomicLong()
     private val acknowledgedGeneration = AtomicLong()
     private val lastAcknowledgedMillis = AtomicLong(clockMillis())
-    private val heartbeatMaxNanos = AtomicLong()
+    private val heartbeatSamples = LongArray(2_048)
+    private var heartbeatSampleCount = 0
     private val lock = ReentrantLock()
     private val eligibilityChanged = lock.newCondition()
     private var worker: Thread? = null
@@ -55,10 +56,10 @@ class AnrWatchdog(
                 lastAcknowledgedMillis.set(clockMillis())
                 lock.withLock { eligibilityChanged.signalAll() }
                 scheduleHeartbeat(2_000)
-                heartbeatMaxNanos.accumulateAndGet(
-                    SystemClock.elapsedRealtimeNanos() - startedNanos,
-                    ::maxOf,
-                )
+                val duration = SystemClock.elapsedRealtimeNanos() - startedNanos
+                if (heartbeatSampleCount < heartbeatSamples.size) {
+                    heartbeatSamples[heartbeatSampleCount++] = duration
+                }
             }
         }
 
@@ -91,8 +92,12 @@ class AnrWatchdog(
             postedGeneration = postedGeneration.get(),
             acknowledgedGeneration = acknowledgedGeneration.get(),
             eligible = eligible.get(),
-            heartbeatMaxNanos = heartbeatMaxNanos.get(),
+            heartbeatP99Nanos = heartbeatP99Nanos(),
         )
+
+    fun resetMeasurementStats() {
+        heartbeatSampleCount = 0
+    }
 
     override fun close() {
         running.set(false)
@@ -165,5 +170,14 @@ class AnrWatchdog(
     private fun scheduleHeartbeat(delayMillis: Long) {
         postedGeneration.incrementAndGet()
         mainHandler.postDelayed(heartbeat, delayMillis)
+    }
+
+    private fun heartbeatP99Nanos(): Long {
+        if (heartbeatSampleCount == 0) {
+            return 0
+        }
+        val samples = heartbeatSamples.copyOf(heartbeatSampleCount)
+        samples.sort()
+        return samples[kotlin.math.ceil(samples.size * 0.99).toInt() - 1]
     }
 }

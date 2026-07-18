@@ -28,9 +28,15 @@
 #include "base/files/file_path.h"
 #include "client/crashpad_client.h"
 #include "handler/handler_main.h"
+#include "snapshot/sanitized/sanitization_information.h"
 #include "tracebox/emergency.h"
 #include "util/file/file_io.h"
+#include "util/linux/exception_handler_client.h"
+#include "util/linux/exception_handler_protocol.h"
+#include "util/linux/exception_information.h"
+#include "util/misc/address_types.h"
 #include "util/misc/capture_context.h"
+#include "util/misc/from_pointer_cast.h"
 
 namespace {
 
@@ -372,6 +378,7 @@ struct DumpRequest {
   pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
   std::atomic<int> references{2};
   bool done = false;
+  bool success = false;
 };
 
 void ReleaseDumpRequest(DumpRequest* request) {
@@ -384,10 +391,43 @@ void ReleaseDumpRequest(DumpRequest* request) {
 
 void* RunDumpRequest(void* argument) {
   auto* request = static_cast<DumpRequest*>(argument);
+  int handler_socket = -1;
+  if (!crashpad::CrashpadClient::GetHandlerSocket(&handler_socket, nullptr)) {
+    pthread_mutex_lock(&request->mutex);
+    request->done = true;
+    pthread_cond_broadcast(&request->condition);
+    pthread_mutex_unlock(&request->mutex);
+    ReleaseDumpRequest(request);
+    return nullptr;
+  }
+
   crashpad::NativeCPUContext context;
   crashpad::CaptureContext(&context);
-  crashpad::CrashpadClient::DumpWithoutCrash(&context);
+  siginfo_t signal_info{};
+  signal_info.si_signo = SIGTRAP;
+  crashpad::ExceptionInformation exception_information{};
+  exception_information.siginfo_address =
+      crashpad::FromPointerCast<decltype(
+          exception_information.siginfo_address)>(&signal_info);
+  exception_information.context_address =
+      crashpad::FromPointerCast<decltype(
+          exception_information.context_address)>(&context);
+  exception_information.thread_id = gettid();
+
+  crashpad::SanitizationInformation sanitization{};
+  sanitization.target_module_address =
+      crashpad::FromPointerCast<crashpad::VMAddress>(&RunDumpRequest);
+  sanitization.sanitize_stacks = 1;
+
+  crashpad::ExceptionHandlerProtocol::ClientInformation client_information{};
+  client_information.exception_information_address =
+      crashpad::FromPointerCast<crashpad::VMAddress>(&exception_information);
+  client_information.sanitization_information_address =
+      crashpad::FromPointerCast<crashpad::VMAddress>(&sanitization);
+  crashpad::ExceptionHandlerClient client(handler_socket, true);
+  const bool success = client.RequestCrashDump(client_information) == 0;
   pthread_mutex_lock(&request->mutex);
+  request->success = success;
   request->done = true;
   pthread_cond_broadcast(&request->condition);
   pthread_mutex_unlock(&request->mutex);
@@ -423,7 +463,7 @@ bool RequestDumpWithTimeout(int timeout_millis) {
     wait_result =
         pthread_cond_timedwait(&request->condition, &request->mutex, &deadline);
   }
-  const bool completed = request->done;
+  const bool completed = request->done && request->success;
   pthread_mutex_unlock(&request->mutex);
 
   if (!completed) {

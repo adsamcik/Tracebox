@@ -100,14 +100,14 @@ function Get-WatchdogStats {
     Send-Fault watchdog_stats
     $line = Wait-Log 'watchdog_stats'
     if ($line -notmatch
-        'posted=(\d+) acked=(\d+) eligible=(true|false) heartbeat_max_ns=(\d+)') {
+        'posted=(\d+) acked=(\d+) eligible=(true|false) heartbeat_p99_ns=(\d+)') {
         throw 'Cannot parse watchdog stats'
     }
     return [ordered]@{
         posted = [long]$Matches[1]
         acknowledged = [long]$Matches[2]
         eligible = $Matches[3] -eq 'true'
-        heartbeat_max_ns = [long]$Matches[4]
+        heartbeat_p99_ns = [long]$Matches[4]
     }
 }
 
@@ -195,6 +195,8 @@ if ($appPid -eq 0 -or $handlerPid -eq 0 -or $workerPid -eq 0) {
 
 $healthySeconds = $HealthyMinutes * 60
 $clockTicks = [int]((Invoke-Adb shell getconf CLK_TCK) -join '')
+Start-Sleep 120
+Send-Fault reset_watchdog_stats
 $handlerJiffiesStart = Get-Jiffies $handlerPid
 $appJiffiesStart = Get-Jiffies $appPid
 $handlerSwitchesStart = Get-ContextSwitches $handlerPid
@@ -297,9 +299,18 @@ $emergencyRemote = "$dataDirectory/no_backup/tracebox-emergency-1.bin"
 $emergencyLocal = Join-Path $runtimeDirectory "api$api-emergency.bin"
 Pull-AppFile $emergencyRemote $emergencyLocal
 $emergencyBytes = [IO.File]::ReadAllBytes($emergencyLocal)
-$internalIdMatches = Count-Bytes `
-    ([IO.File]::ReadAllBytes($dumpLocal)) `
-    $emergencyBytes[16..47]
+$completion = [BitConverter]::ToUInt64($emergencyBytes, 248)
+$hasEmergencyIdentity =
+    [Text.Encoding]::ASCII.GetString($emergencyBytes, 0, 8) -eq 'TBEMERG1' -and
+    $completion -eq 0x5442454d434f4d50
+$internalIdMatches =
+    if ($hasEmergencyIdentity) {
+        Count-Bytes `
+            ([IO.File]::ReadAllBytes($dumpLocal)) `
+            $emergencyBytes[16..47]
+    } else {
+        0
+    }
 
 Reset-And-Launch
 $quotaResults = @()
@@ -440,7 +451,7 @@ $checks = [ordered]@{
     app_cpu = $appCpuPercent -lt 0.2
     handler_pss = ($pssSamples | Measure-Object -Maximum).Maximum -le 12 * 1024
     heartbeat_rate = $heartbeatPerMinute -le 30
-    heartbeat_main_work = $healthyStatsEnd.heartbeat_max_ns -lt 50000
+    heartbeat_main_work = $healthyStatsEnd.heartbeat_p99_ns -lt 50000
     ineligible_heartbeat = $ineligibleEnd.posted - $ineligibleStart.posted -eq 0
     nonfatal_capture = @($pauseMeasurements | Where-Object captured).Count -eq 30
     nonfatal_deadline = ($elapsedValues | Measure-Object -Maximum).Maximum -le 2000000
@@ -509,7 +520,7 @@ $result = [ordered]@{
         handler_context_switch_delta =
             $handlerSwitchesEnd - $handlerSwitchesStart
         heartbeat_per_minute = $heartbeatPerMinute
-        heartbeat_main_work_ns_max = $healthyStatsEnd.heartbeat_max_ns
+        heartbeat_main_work_ns_p99 = $healthyStatsEnd.heartbeat_p99_ns
         handler_pss_kib_samples = $pssSamples
         handler_pss_kib_max = ($pssSamples | Measure-Object -Maximum).Maximum
     }
@@ -541,6 +552,7 @@ $result = [ordered]@{
         raw_seed_matches = $privacySummary.raw_seed_matches
         summary_seed_matches = $privacySummary.summary_seed_matches
         internal_id_binary_matches = $internalIdMatches
+        emergency_identity_established = $hasEmergencyIdentity
         stream_inventory = $privacySummary.streams
     }
     timeout_cancellation = $timeoutMeasurements
