@@ -114,7 +114,7 @@ function Get-WatchdogStats {
 function Pull-AppFile {
     param([string] $RemotePath, [string] $LocalPath)
     $arguments = @(
-        '-s', $Serial, 'exec-out', 'run-as', $package, 'cat', $RemotePath
+        '-s', $Serial, 'exec-out', 'cat', $RemotePath
     )
     $process = Start-Process -FilePath (Get-Command adb).Source `
         -ArgumentList $arguments `
@@ -159,6 +159,8 @@ $abi = ((Invoke-Adb shell getprop ro.product.cpu.abi) -join '').Trim()
 if ($api -ne $ExpectedApi -or $pageSize -ne $ExpectedPageSize -or $abi -ne 'x86_64') {
     throw "Endpoint mismatch: API=$api page=$pageSize ABI=$abi"
 }
+Invoke-Adb root | Out-Null
+Invoke-Adb wait-for-device | Out-Null
 
 Invoke-Adb install '-r' $apk | Out-Null
 Invoke-Adb shell pm enable $package | Out-Null
@@ -278,8 +280,9 @@ Wait-Log 'worker_nonfatal_captured=true' 10 | Out-Null
 Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
 Start-Action seeded
 Wait-Log 'seeded_nonfatal_captured=true' 10 | Out-Null
+$dataDirectory = "/data/user/0/$package"
 $dumpPath = ((Invoke-Adb shell `
-        "run-as $package sh -c 'ls -t no_backup/crashpad-db/pending/*.dmp | head -1'") -join '').Trim()
+        "sh -c 'ls -t $dataDirectory/no_backup/crashpad-db/pending/*.dmp | head -1'") -join '').Trim()
 $runtimeDirectory = Join-Path $root 'evidence\runtime'
 New-Item -ItemType Directory -Force $runtimeDirectory | Out-Null
 $dumpLocal = Join-Path $runtimeDirectory "api$api-seeded.dmp"
@@ -290,7 +293,7 @@ $summaryJson = & cargo run -q -p tbdiag-phase0 --locked --offline -- `
 if ($LASTEXITCODE -ne 0) { throw 'Minidump summary failed' }
 $privacySummary = ($summaryJson -join "`n") | ConvertFrom-Json
 
-$emergencyRemote = 'no_backup/tracebox-emergency-1.bin'
+$emergencyRemote = "$dataDirectory/no_backup/tracebox-emergency-1.bin"
 $emergencyLocal = Join-Path $runtimeDirectory "api$api-emergency.bin"
 Pull-AppFile $emergencyRemote $emergencyLocal
 $emergencyBytes = [IO.File]::ReadAllBytes($emergencyLocal)
@@ -310,7 +313,7 @@ for ($iteration = 1; $iteration -le 9; $iteration++) {
     $quotaResults += $Matches[1] -eq 'true'
 }
 $quotaDumpCount = [int]((Invoke-Adb shell `
-        "run-as $package sh -c 'ls no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+        "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
 
 $fatalMeasurements = @()
 for ($iteration = 1; $iteration -le 30; $iteration++) {
@@ -322,14 +325,14 @@ for ($iteration = 1; $iteration -le 30; $iteration++) {
         Wait-Log 'main_connected=true' | Out-Null
     }
     $before = [int]((Invoke-Adb shell `
-            "run-as $package sh -c 'ls no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+            "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
     $crashStarted = Get-Date
     Send-Fault fatal
     $deadline = (Get-Date).AddSeconds(3)
     do {
         Start-Sleep -Milliseconds 50
         $after = [int]((Invoke-Adb shell `
-                "run-as $package sh -c 'ls no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+                "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
     } while ($after -le $before -and (Get-Date) -lt $deadline)
     $fatalMeasurements += [ordered]@{
         iteration = $iteration
