@@ -6,7 +6,7 @@
 
 `ENGINEERING_FEASIBILITY_PASS` is not reached.
 
-The available API 30 x86_64 lane executes the real handler, emergency, and ANR paths, but fails immutable startup, handler CPU, heartbeat, target-pause, timeout, and fatal-latency thresholds. The target-pause gate remained failing after three materially different approaches, recorded in `evidence/phase0/anr-target-pause-approaches.json`.
+The available API 30 x86_64 lane executes the real handler, emergency, and ANR paths, but its complete frozen run fails immutable startup, handler CPU, heartbeat, target-pause, timeout, and fatal-latency thresholds. A later targeted review-fix run corrected the timeout/fallback/privacy instrumentation defects without rerunning or replacing the frozen matrix. It also confirms that the captured minidump still violates the accepted stream profile. The target-pause gate remained failing after three materially different approaches, recorded in `evidence/phase0/anr-target-pause-approaches.json`.
 
 The mandatory API 37 x86_64 emulator cell also cannot provide trustworthy test infrastructure. The API 37.0 revision-6 16 KiB images repeatedly crash SurfaceFlinger in region sampling or fail to boot across the materially different emulator, renderer, feature, and image approaches recorded in `evidence/phase0/API37-x86_64-16384-environment-failure.json`.
 
@@ -45,8 +45,27 @@ The API 30 run stopped after the frozen thresholds below had already failed; it 
 | Deterministic six-second stalls | 10/10 | 10/10 | PASS |
 | Nonfatal watchdog rate limit | 1/10 min | 1 snapshot in 10 stalls | PASS |
 | Fatal capture p95 | <= 2 s | 6533 ms | FAIL |
-| Raw seeded secret / summary | present / absent | 1 / 0 | PASS |
+| Raw seeded secret / summary | present / absent | Historical 1 / hardcoded 0 | INVALID EVIDENCE |
+| Frozen stream profile | exact allowlist | `ThreadNamesStream`, `CrashpadInfoStream`, and `MemoryListStream` observed | FAIL |
 | Raw report bound | <= 8 | 8; ninth rejected | PASS |
+
+## Targeted review-fix regression
+
+This is not a complete Phase 0 rerun and does not change either required matrix
+cell. `evidence/phase0/API30-x86_64-4096-review-fix-qualification.json` records:
+
+| Assertion | API 30 result |
+|---|---:|
+| Registration connect/receive overall deadline | typed timeout, 1980.426 ms |
+| Hung-handler cancellation overall deadline | cancelled, 1992.712 ms |
+| Live process identity established before scanning | PASS |
+| Raw seeded secret / serialized summary | 1 / 0 |
+| Known identity encodings in raw / summary | 0 / 0 across 7 distinct byte encodings |
+| Unexpected stream rejection | PASS; profile remains invalid |
+| Handler unavailable fatal fallback | one valid record, sequence 1, flags 3, zero raw dump delta |
+| Prior signal action and default death | invoked once; signal death observed |
+
+No API 37 result is claimed by this targeted run.
 
 ## Host closeout checks
 
@@ -67,10 +86,10 @@ The presubmit result records that its configured checks completed successfully. 
 - handler death notification, explicit restart/reconnect, hang timeout/cancellation, and crash-loop start budget;
 - CE app-private raw-artifact quarantine with eight-report/16 MiB hard admission bounds;
 - actual nonfatal and fatal Crashpad capture paths;
-- fixed 256-byte emergency writer with preopened descriptor, alternate stack, recursion guard, CRC32C, completion marker, one positional write, and Android re-raise;
+- fixed 256-byte emergency writer with preopened descriptor, alternate stack, recursion guard, CRC32C, completion marker, one positional write, preserved prior actions, exactly-once chaining, and Android re-raise;
 - live main-looper watchdog with lifecycle suspension, five-second candidate semantics, bounded stack, ten-minute snapshot rate limit, and two-second request timeout;
-- bounded Rust minidump stream inventory and structural-summary parser;
-- seeded-secret and internal-identity scanning harness;
+- bounded Rust minidump parser with exact stream allowlist enforcement and fixed-field/per-stream extent validation;
+- non-vacuous seeded-secret and known internal-identity encoding scans over raw bytes and the actual serialized structural summary;
 - minified, debuggable-release, and debug fixtures plus benchmark APKs.
 
 ## Blocker resolution needed
@@ -82,5 +101,6 @@ Provide:
 3. a stable API 37 x86_64 16 KiB emulator image/emulator combination on which Android framework services remain available;
 4. a no-network build graph that passes the final static scan; and
 5. byte-identical full APK rebuilds for every artifact in the reproducibility claim.
+6. capture output that suppresses the three forbidden API 30 streams without losing the mandatory useful streams, unless a separately authorized requirement change replaces the frozen profile.
 
 Then rerun the complete frozen qualification command and affected host gates. Changing a threshold, required API/ABI/page-size lane, or mandatory Crashpad/ANR behavior requires separate explicit user acceptance and is not authorized by ADR-0008 or this status record.
