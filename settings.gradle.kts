@@ -21,6 +21,7 @@ rootProject.name = "tracebox"
 include(
     ":android:tracebox-anr-exit",
     ":android:tracebox-native",
+    ":android:tracebox-api",
     ":benchmarks:phase0-benchmark",
     ":test-apps:phase0-fixture",
 )
