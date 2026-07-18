@@ -31,7 +31,7 @@ function Wait-Log {
     param([string] $Pattern, [int] $TimeoutSeconds = 15)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $match = Invoke-Adb logcat -d -v brief -s $tag |
+        $match = Invoke-Adb logcat '-d' '-v' brief '-s' $tag |
             Select-String $Pattern |
             Select-Object -Last 1
         if ($match) {
@@ -44,17 +44,17 @@ function Wait-Log {
 
 function Start-Action {
     param([string] $Action)
-    Invoke-Adb shell am start -n $component --es tracebox.action $Action | Out-Null
+    Invoke-Adb shell am start '-n' $component '--es' tracebox.action $Action | Out-Null
 }
 
 function Send-Fault {
     param([string] $Action)
-    Invoke-Adb shell am broadcast -n $receiver --es tracebox.action $Action | Out-Null
+    Invoke-Adb shell am broadcast '-n' $receiver '--es' tracebox.action $Action | Out-Null
 }
 
 function Get-ProcessId {
     param([string] $ProcessName)
-    $line = Invoke-Adb shell ps -A |
+    $line = Invoke-Adb shell ps '-A' |
         Select-String "\s$([regex]::Escape($ProcessName))$" |
         Select-Object -First 1
     if (-not $line) {
@@ -95,7 +95,7 @@ function Get-PssKiB {
 }
 
 function Get-WatchdogStats {
-    Invoke-Adb logcat -c | Out-Null
+    Invoke-Adb logcat '-c' | Out-Null
     Send-Fault watchdog_stats
     $line = Wait-Log 'watchdog_stats'
     if ($line -notmatch
@@ -145,8 +145,8 @@ function Count-Bytes {
 function Reset-And-Launch {
     Invoke-Adb shell am force-stop $package | Out-Null
     Invoke-Adb shell pm clear $package | Out-Null
-    Invoke-Adb logcat -c | Out-Null
-    Invoke-Adb shell am start '-W' -n $component | Out-Null
+    Invoke-Adb logcat '-c' | Out-Null
+    Invoke-Adb shell am start '-W' '-n' $component | Out-Null
     Wait-Log 'main_connected=true' | Out-Null
     Wait-Log 'worker_connected=true' | Out-Null
 }
@@ -159,12 +159,12 @@ if ($api -ne $ExpectedApi -or $pageSize -ne $ExpectedPageSize -or $abi -ne 'x86_
     throw "Endpoint mismatch: API=$api page=$pageSize ABI=$abi"
 }
 
-Invoke-Adb install -r $apk | Out-Null
+Invoke-Adb install '-r' $apk | Out-Null
 Invoke-Adb shell pm enable $package | Out-Null
 $startupMeasurements = @()
 for ($iteration = 1; $iteration -le 30; $iteration++) {
     Reset-And-Launch
-    $logs = Invoke-Adb logcat -d -v brief -s $tag
+    $logs = Invoke-Adb logcat '-d' '-v' brief '-s' $tag
     $install = $logs | Select-String 'install_volatile_us=' | Select-Object -Last 1
     $durable = $logs | Select-String 'main_connected=true' | Select-Object -Last 1
     if ($install -notmatch 'install_volatile_us=(\d+)') {
@@ -196,7 +196,7 @@ $handlerJiffiesStart = Get-Jiffies $handlerPid
 $appJiffiesStart = Get-Jiffies $appPid
 $handlerSwitchesStart = Get-ContextSwitches $handlerPid
 $healthyStatsStart = Get-WatchdogStats
-Invoke-Adb logcat -c | Out-Null
+Invoke-Adb logcat '-c' | Out-Null
 $pssSamples = @()
 for ($minute = 0; $minute -lt $HealthyMinutes; $minute++) {
     Start-Sleep 60
@@ -208,7 +208,7 @@ for ($minute = 0; $minute -lt $HealthyMinutes; $minute++) {
     }
 }
 $falseCandidates = @(
-    Invoke-Adb logcat -d -v brief -s $tag | Select-String 'anr_candidate'
+    Invoke-Adb logcat '-d' '-v' brief '-s' $tag | Select-String 'anr_candidate'
 ).Count
 $healthyStatsEnd = Get-WatchdogStats
 $handlerJiffiesEnd = Get-Jiffies $handlerPid
@@ -229,7 +229,7 @@ $ineligibleStart = Get-WatchdogStats
 Start-Sleep ($IneligibleMinutes * 60)
 $ineligibleEnd = Get-WatchdogStats
 
-Invoke-Adb shell am start '-W' -n $component | Out-Null
+Invoke-Adb shell am start '-W' '-n' $component | Out-Null
 Start-Sleep 2
 
 $pauseMeasurements = @()
@@ -238,7 +238,7 @@ for ($iteration = 1; $iteration -le 30; $iteration++) {
         Reset-And-Launch
         Start-Sleep 2
     }
-    Invoke-Adb logcat -c | Out-Null
+    Invoke-Adb logcat '-c' | Out-Null
     Start-Action measure_nonfatal
     $line = Wait-Log 'nonfatal_measure' 10
     if ($line -notmatch 'captured=(true|false) elapsed_us=(\d+) main_pause_max_us=(\d+)') {
@@ -256,7 +256,7 @@ $stallMeasurements = @()
 Reset-And-Launch
 Start-Sleep 10
 for ($iteration = 1; $iteration -le 10; $iteration++) {
-    Invoke-Adb logcat -c | Out-Null
+    Invoke-Adb logcat '-c' | Out-Null
     Send-Fault stall
     $line = Wait-Log 'anr_candidate' 10
     if ($line -notmatch 'delay_ms=(\d+) frames=(\d+) snapshot=(true|false)') {
@@ -271,10 +271,10 @@ for ($iteration = 1; $iteration -le 10; $iteration++) {
     Start-Sleep 1
 }
 
-Invoke-Adb logcat -c | Out-Null
+Invoke-Adb logcat '-c' | Out-Null
 Start-Action worker_nonfatal
 Wait-Log 'worker_nonfatal_captured=true' 10 | Out-Null
-Invoke-Adb logcat -c | Out-Null
+Invoke-Adb logcat '-c' | Out-Null
 Start-Action seeded
 Wait-Log 'seeded_nonfatal_captured=true' 10 | Out-Null
 $dumpPath = ((Invoke-Adb shell `
@@ -300,7 +300,7 @@ $internalIdMatches = Count-Bytes `
 Reset-And-Launch
 $quotaResults = @()
 for ($iteration = 1; $iteration -le 9; $iteration++) {
-    Invoke-Adb logcat -c | Out-Null
+    Invoke-Adb logcat '-c' | Out-Null
     Start-Action nonfatal
     $line = Wait-Log 'nonfatal_captured=' 10
     if ($line -notmatch 'nonfatal_captured=(true|false)') {
@@ -316,8 +316,8 @@ for ($iteration = 1; $iteration -le 30; $iteration++) {
     if (($iteration - 1) % 8 -eq 0) {
         Reset-And-Launch
     } else {
-        Invoke-Adb logcat -c | Out-Null
-        Invoke-Adb shell am start '-W' -n $component | Out-Null
+        Invoke-Adb logcat '-c' | Out-Null
+        Invoke-Adb shell am start '-W' '-n' $component | Out-Null
         Wait-Log 'main_connected=true' | Out-Null
     }
     $before = [int]((Invoke-Adb shell `
@@ -342,7 +342,7 @@ for ($iteration = 1; $iteration -le 10; $iteration++) {
     Reset-And-Launch
     Start-Action hang_handler
     Start-Sleep 1
-    Invoke-Adb logcat -c | Out-Null
+    Invoke-Adb logcat '-c' | Out-Null
     $requestStart = Get-Date
     Start-Action nonfatal
     $line = Wait-Log 'nonfatal_captured=false' 6
@@ -360,22 +360,22 @@ $lifecycle = [ordered]@{
     crash_loop_blocked = $false
 }
 Reset-And-Launch
-Invoke-Adb logcat -c | Out-Null
+Invoke-Adb logcat '-c' | Out-Null
 Start-Action crash_handler
 Start-Sleep 4
 Start-Action alive
 $lifecycle.death_notified =
     (Wait-Log 'handler_alive=false' 5) -match 'handler_alive=false'
-Invoke-Adb logcat -c | Out-Null
+Invoke-Adb logcat '-c' | Out-Null
 Start-Action reconnect
 $lifecycle.reconnected =
     (Wait-Log 'main_reconnected=true' 5) -match 'main_reconnected=true'
-Invoke-Adb logcat -c | Out-Null
+Invoke-Adb logcat '-c' | Out-Null
 Start-Action crash_handler
 Start-Sleep 4
 $lifecycle.crash_loop_blocked =
     @(
-        Invoke-Adb logcat -d -v brief -s $tag |
+        Invoke-Adb logcat '-d' '-v' brief '-s' $tag |
             Select-String 'handler_start_blocked=crash_loop'
     ).Count -ge 1
 
@@ -383,7 +383,7 @@ $emergencyResults = @()
 foreach ($fault in @('early_abort', 'early_stack', 'early_recursive')) {
     Invoke-Adb shell am force-stop $package | Out-Null
     Invoke-Adb shell pm clear $package | Out-Null
-    Invoke-Adb logcat -c | Out-Null
+    Invoke-Adb logcat '-c' | Out-Null
     Send-Fault $fault
     Start-Sleep 2
     $local = Join-Path $runtimeDirectory "api$api-$fault.bin"
@@ -394,7 +394,7 @@ foreach ($fault in @('early_abort', 'early_stack', 'early_recursive')) {
         validator_exit = $LASTEXITCODE
         validator_output = ($validation -join "`n")
         process_log = (
-            Invoke-Adb logcat -d -v brief |
+            Invoke-Adb logcat '-d' '-v' brief |
                 Select-String 'exited due to signal|exiting due to SIG_DFL' |
                 Select-Object -Last 3 |
                 ForEach-Object ToString
@@ -404,7 +404,7 @@ foreach ($fault in @('early_abort', 'early_stack', 'early_recursive')) {
 
 foreach ($fault in @('emergency_short', 'emergency_failed')) {
     Reset-And-Launch
-    Invoke-Adb logcat -c | Out-Null
+    Invoke-Adb logcat '-c' | Out-Null
     Start-Action $fault
     Wait-Log "$fault" 5 | Out-Null
     $local = Join-Path $runtimeDirectory "api$api-$fault.bin"
