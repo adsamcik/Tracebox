@@ -2,7 +2,7 @@
 
 Tracebox uses Crashpad revision `efdc820b087c20eec9e32cb5e5b1a63dcf73a724`.
 
-Run `tools\crashpad\Acquire-Crashpad.ps1` to materialize the verified source under the ignored `third_party\crashpad\checkout` directory. `source-lock.json` records immutable archive URLs, revisions, sizes, SHA-256 digests, provenance, and licenses.
+Run `tools\crashpad\Acquire-Crashpad.ps1` to materialize the verified source under the ignored `third_party\crashpad\checkout` directory. `source-lock.json` records immutable archive URLs, revisions, sizes, SHA-256 digests, provenance, licenses, and the reviewed complete post-patch source-tree hash. Every cached reuse is rehashed against that tracked value; the mutable checkout manifest is never the trust anchor.
 
 Patches are never edited in-place in downloaded source and are never fetched dynamically. `patches/series` is the ordered allowlist. Every non-empty patch must:
 

@@ -140,6 +140,9 @@ $result = [ordered]@{
         crashpad_original_sha256 = $tamper.original_sha256
         crashpad_tampered_sha256 = $tamper.tampered_sha256
         crashpad_restored_sha256 = $tamper.restored_sha256
+        mutable_manifest_post_patch_sha256 =
+            $tamper.mutable_manifest_post_patch_sha256
+        tracked_post_patch_sha256 = $tamper.tracked_post_patch_sha256
         native_x86_64_sha256 = (
             Get-FileHash `
                 (Join-Path $root 'android\tracebox-native\src\main\jniLibs\x86_64\libtracebox_crashpad.so') `

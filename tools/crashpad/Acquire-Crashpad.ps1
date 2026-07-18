@@ -49,20 +49,19 @@ function Get-TreeHash {
 
 New-Item -ItemType Directory -Force $checkout, $downloads | Out-Null
 $verifiedManifest = Join-Path $checkout 'verified-sources.json'
-$generatedTreeExclusions = @(
-    'verified-sources.json',
-    'crashpad/out/',
-    'crashpad/tracebox_overlay/'
-)
+$generatedTreeExclusions = @($lock.post_patch_tree_excluded_generated_paths)
+$expectedPostPatchTreeHash = $lock.post_patch_tree_sha256
+if (-not $expectedPostPatchTreeHash -or $generatedTreeExclusions.Count -eq 0) {
+    throw 'Source lock is missing the reviewed post-patch tree profile'
+}
 if (-not $Force -and (Test-Path $verifiedManifest)) {
     $verified = Get-Content $verifiedManifest -Raw | ConvertFrom-Json
     if ($verified.source_lock_sha256 -eq $sourceLockHash -and
         $verified.patch_set_sha256 -eq $patchSetHash -and
-        $verified.components.Count -eq $lock.components.Count -and
-        $verified.post_patch_tree_sha256) {
+        $verified.components.Count -eq $lock.components.Count) {
         $actualPostPatchTreeHash =
             Get-TreeHash $checkout $generatedTreeExclusions
-        if ($actualPostPatchTreeHash -eq $verified.post_patch_tree_sha256) {
+        if ($actualPostPatchTreeHash -eq $expectedPostPatchTreeHash) {
             Write-Output "Reusing verified Crashpad checkout with $($lock.components.Count) components."
             return
         }
@@ -111,6 +110,11 @@ foreach ($relativePatch in $series) {
     }
 }
 
+$actualPostPatchTreeHash = Get-TreeHash $checkout $generatedTreeExclusions
+if ($actualPostPatchTreeHash -ne $expectedPostPatchTreeHash) {
+    throw 'Reconstructed Crashpad source does not match the reviewed post-patch tree hash'
+}
+
 $manifest = foreach ($component in $lock.components) {
     [ordered]@{
         name = $component.name
@@ -123,7 +127,7 @@ $manifest = foreach ($component in $lock.components) {
 [ordered]@{
     source_lock_sha256 = $sourceLockHash
     patch_set_sha256 = $patchSetHash
-    post_patch_tree_sha256 = Get-TreeHash $checkout $generatedTreeExclusions
+    post_patch_tree_sha256 = $expectedPostPatchTreeHash
     post_patch_tree_hash_algorithm =
         'sha256(UTF8(sorted(relative_path + LF + file_sha256 + LF)))'
     excluded_generated_paths = $generatedTreeExclusions
