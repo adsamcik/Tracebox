@@ -1,0 +1,64 @@
+{
+  "review_round": "Phase 1 review-fix implementer, round 2",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "baseline_commit": "82eafbbb7860bc06f51472b81fa486866856f534",
+  "tool_versions": {
+    "python": "3.12.10",
+    "cmake": "4.3.3",
+    "msvc": "19.50.35725.0 (Visual Studio 18 Community, VC Tools 14.50.35717)",
+    "gradle": "9.6.1",
+    "jvm": "Eclipse Adoptium 21.0.8+9-LTS"
+  },
+  "findings": [
+    {
+      "id": "major-1-generated-c-recording-contracts",
+      "disposition": "APPLIED",
+      "implementation": [
+        "tooling/schema-compiler/compile_schema.py emits native/generated/tracebox_generated_events.c",
+        "native/CMakeLists.txt compiles that source into tracebox_emergency",
+        "native/tests/tracebox_generated_events_link_test.c links and calls all four generated recording functions"
+      ],
+      "result": "MSVC linked tracebox_generated_events_link_test.exe successfully; CTest passed all 4 tests; dumpbin /symbols reports tb_record_generated_breadcrumb_v1 as an External symbol in tracebox_emergency.lib."
+    },
+    {
+      "id": "major-2-r8-elf-build-catalog",
+      "disposition": "PARTIALLY_APPLIED",
+      "implementation": [
+        "TraceboxIdentityPlugin registers Android variant capture tasks using SingleArtifact.OBFUSCATION_MAPPING_FILE and SingleArtifact.MERGED_NATIVE_LIBS.",
+        "BuildIdentityCapture hashes the real R8 mapping and emits r8MappingId plus r8MappingSha256.",
+        "The functional test builds test-apps:phase0-fixture:assembleRelease, then captures its generated mapping and the real libtracebox_crashpad.so artifacts."
+      ],
+      "result": "The generated catalog contained mapping SHA-256 cc8c81efa85b9e6561cd35d7a30f2f917a0251c6c65cb75b8a672263cc3f7e65 and two native artifact SHA-256 identities.",
+      "remaining_gap": "Neither real fixture native library has a .note.gnu.build-id section. The catalog explicitly labels its native identities source=sha256 rather than claiming GNU ELF build IDs. C1.6 is IN_PROGRESS in the ledger and traceability rows until native builds emit or otherwise provide a true ELF build ID."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python tooling\\schema-compiler\\compile_schema.py --schema schema\\events.json --out .",
+      "exit_status": 0,
+      "result": "Regenerated native/generated/tracebox_generated_events.c; schema fingerprint 6cab7df4c1845824d3db406e5c4702727585556758764a05d43014c66dcfa92c."
+    },
+    {
+      "command": "python -m pytest tooling\\schema-compiler\\tests -q",
+      "exit_status": 0,
+      "result": "5 passed in 1.28s."
+    },
+    {
+      "command": "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" && cmake -S native -B native\\build-reviewfix -G \"NMake Makefiles\" -DCMAKE_BUILD_TYPE=Release && cmake --build native\\build-reviewfix && ctest --test-dir native\\build-reviewfix --output-on-failure && dumpbin /symbols native\\build-reviewfix\\tracebox_emergency.lib | findstr /i tb_record_generated_breadcrumb_v1",
+      "exit_status": 0,
+      "result": "MSVC built the generated source, linked tracebox_generated_events_link_test.exe, CTest passed 4/4, and dumpbin found the generated breadcrumb recorder symbol."
+    },
+    {
+      "command": "gradlew.bat :tooling:tracebox-gradle-plugin:identityCaptureTest --no-daemon --no-configuration-cache --offline",
+      "exit_status": 0,
+      "result": "BUILD SUCCESSFUL; the task assembled the minified Phase 0 release fixture and functional capture verified real R8 mapping and native ELF artifact catalog fields."
+    },
+    {
+      "command": "tools\\traceability\\Initialize-Traceability.ps1; tools\\verify\\Verify-FoundationSpecs.ps1",
+      "exit_status": 0,
+      "result": "Traceability generation reported rows=1571; reverse_paths=14. Structural verification returned result PASS with 1571 traceability rows."
+    }
+  ],
+  "protected_phase0_files_modified": [],
+  "result": "PARTIALLY_APPLIED"
+}
