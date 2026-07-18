@@ -24,6 +24,7 @@ include(
     ":android:tracebox-api",
     ":android:tracebox-core",
     ":android:tracebox-storage",
+    ":android:tracebox-directboot",
     ":tooling:tracebox-gradle-plugin",
     ":benchmarks:phase0-benchmark",
     ":test-apps:phase0-fixture",
