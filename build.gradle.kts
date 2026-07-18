@@ -16,6 +16,7 @@ tasks.register("phase0Check") {
         ":android:tracebox-native:testDebugUnitTest",
         ":test-apps:phase0-fixture:assembleDebug",
         ":test-apps:phase0-fixture:assembleRelease",
+        ":test-apps:phase0-fixture:assembleQualificationRelease",
         ":test-apps:phase0-fixture:assembleDebuggableRelease",
         ":benchmarks:phase0-benchmark:assembleDebug",
         ":benchmarks:phase0-benchmark:assembleRelease",

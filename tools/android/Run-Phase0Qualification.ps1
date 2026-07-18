@@ -12,7 +12,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $root
-$apk = Join-Path $root 'test-apps\phase0-fixture\build\outputs\apk\release\phase0-fixture-release.apk'
+$apk = Join-Path $root `
+    'test-apps\phase0-fixture\build\outputs\apk\qualificationRelease\phase0-fixture-qualificationRelease.apk'
 $package = 'dev.tracebox.phase0'
 $component = "$package/.MainActivity"
 $receiver = "$package/.FaultReceiver"
