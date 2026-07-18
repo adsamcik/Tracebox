@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 enum {
-  TB_BREADCRUMB_V1_MIN_SIZE = offsetof(tb_breadcrumb_v1, reserved_flags),
+  TB_BREADCRUMB_V1_MIN_SIZE = offsetof(tb_breadcrumb_v1, monotonic_time_ns),
 };
 
 tb_status_v1 tb_validate_header_v1(const tb_header_v1* header,

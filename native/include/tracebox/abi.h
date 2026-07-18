@@ -23,11 +23,8 @@ typedef enum {
   TB_STATUS_INVALID_ARGUMENT = 4,
 } tb_status_v1;
 
-typedef struct {
-  tb_header_v1 header;
-  uint32_t code;
-  uint32_t reserved_flags;
-} tb_breadcrumb_v1;
+/* The schema-generated breadcrumb layout is the public v1 ABI type. */
+typedef tb_generated_breadcrumb_v1 tb_breadcrumb_v1;
 
 /* Validates a size-prefixed public structure without reading absent fields. */
 tb_status_v1 tb_validate_header_v1(const tb_header_v1* header,

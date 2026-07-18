@@ -4,11 +4,11 @@
 #include <string.h>
 
 int main(void) {
-  tb_emergency_record_v1 record;
+  uint8_t record[TB_EMERGENCY_RECORD_SIZE];
   uint8_t process_id[32];
   memset(process_id, 0x5a, sizeof(process_id));
 
-  assert(tb_emergency_initialize_v1(&record,
+  assert(tb_emergency_initialize_v1(record,
                                     process_id,
                                     7,
                                     11,
@@ -21,16 +21,16 @@ int main(void) {
                                     2,
                                     3,
                                     5) == 0);
-  assert(memcmp(record.bytes, "TBEMERG1", 8) == 0);
-  assert(record.bytes[8] == 1);
-  assert(record.bytes[12] == 0);
-  assert(record.bytes[13] == 1);
-  assert(record.bytes[16] == 0x5a);
-  assert(record.bytes[48] == 7);
+  assert(memcmp(record, "TBEMERG1", 8) == 0);
+  assert(record[8] == 1);
+  assert(record[12] == 0);
+  assert(record[13] == 1);
+  assert(record[16] == 0x5a);
+  assert(record[48] == 7);
   for (size_t index = 128; index < 244; ++index) {
-    assert(record.bytes[index] == 0);
+    assert(record[index] == 0);
   }
-  assert(record.bytes[248] == 0x50);
-  assert(record.bytes[255] == 0x54);
+  assert(record[248] == 0x50);
+  assert(record[255] == 0x54);
   return 0;
 }
