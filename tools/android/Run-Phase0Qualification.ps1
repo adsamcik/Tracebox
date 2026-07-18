@@ -98,13 +98,15 @@ function Get-WatchdogStats {
     Invoke-Adb logcat -c | Out-Null
     Send-Fault watchdog_stats
     $line = Wait-Log 'watchdog_stats'
-    if ($line -notmatch 'posted=(\d+) acked=(\d+) eligible=(true|false)') {
+    if ($line -notmatch
+        'posted=(\d+) acked=(\d+) eligible=(true|false) heartbeat_max_ns=(\d+)') {
         throw 'Cannot parse watchdog stats'
     }
     return [ordered]@{
         posted = [long]$Matches[1]
         acknowledged = [long]$Matches[2]
         eligible = $Matches[3] -eq 'true'
+        heartbeat_max_ns = [long]$Matches[4]
     }
 }
 
@@ -159,6 +161,26 @@ if ($api -ne $ExpectedApi -or $pageSize -ne $ExpectedPageSize -or $abi -ne 'x86_
 
 Invoke-Adb install -r $apk | Out-Null
 Invoke-Adb shell pm enable $package | Out-Null
+$startupMeasurements = @()
+for ($iteration = 1; $iteration -le 30; $iteration++) {
+    Reset-And-Launch
+    $logs = Invoke-Adb logcat -d -v brief -s $tag
+    $install = $logs | Select-String 'install_volatile_us=' | Select-Object -Last 1
+    $durable = $logs | Select-String 'main_connected=true' | Select-Object -Last 1
+    if ($install -notmatch 'install_volatile_us=(\d+)') {
+        throw 'Cannot parse VolatileCapture measurement'
+    }
+    $volatileUs = [long]$Matches[1]
+    if ($durable -notmatch 'durable_ms=(\d+)') {
+        throw 'Cannot parse startup measurement'
+    }
+    $durableMs = [long]$Matches[1]
+    $startupMeasurements += [ordered]@{
+        iteration = $iteration
+        volatile_us = $volatileUs
+        durable_ms = $durableMs
+    }
+}
 Reset-And-Launch
 
 $appPid = Get-ProcessId $package
@@ -289,6 +311,32 @@ for ($iteration = 1; $iteration -le 9; $iteration++) {
 $quotaDumpCount = [int]((Invoke-Adb shell `
         "run-as $package sh -c 'ls no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
 
+$fatalMeasurements = @()
+for ($iteration = 1; $iteration -le 30; $iteration++) {
+    if (($iteration - 1) % 8 -eq 0) {
+        Reset-And-Launch
+    } else {
+        Invoke-Adb logcat -c | Out-Null
+        Invoke-Adb shell am start '-W' -n $component | Out-Null
+        Wait-Log 'main_connected=true' | Out-Null
+    }
+    $before = [int]((Invoke-Adb shell `
+            "run-as $package sh -c 'ls no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+    $crashStarted = Get-Date
+    Send-Fault fatal
+    $deadline = (Get-Date).AddSeconds(3)
+    do {
+        Start-Sleep -Milliseconds 50
+        $after = [int]((Invoke-Adb shell `
+                "run-as $package sh -c 'ls no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+    } while ($after -le $before -and (Get-Date) -lt $deadline)
+    $fatalMeasurements += [ordered]@{
+        iteration = $iteration
+        elapsed_ms = [math]::Round(((Get-Date) - $crashStarted).TotalMilliseconds)
+        artifact_created = $after -eq $before + 1
+    }
+}
+
 $timeoutMeasurements = @()
 for ($iteration = 1; $iteration -le 10; $iteration++) {
     Reset-And-Launch
@@ -305,6 +353,31 @@ for ($iteration = 1; $iteration -le 10; $iteration++) {
     }
     Invoke-Adb shell am force-stop $package | Out-Null
 }
+
+$lifecycle = [ordered]@{
+    death_notified = $false
+    reconnected = $false
+    crash_loop_blocked = $false
+}
+Reset-And-Launch
+Invoke-Adb logcat -c | Out-Null
+Start-Action crash_handler
+Start-Sleep 4
+Start-Action alive
+$lifecycle.death_notified =
+    (Wait-Log 'handler_alive=false' 5) -match 'handler_alive=false'
+Invoke-Adb logcat -c | Out-Null
+Start-Action reconnect
+$lifecycle.reconnected =
+    (Wait-Log 'main_reconnected=true' 5) -match 'main_reconnected=true'
+Invoke-Adb logcat -c | Out-Null
+Start-Action crash_handler
+Start-Sleep 4
+$lifecycle.crash_loop_blocked =
+    @(
+        Invoke-Adb logcat -d -v brief -s $tag |
+            Select-String 'handler_start_blocked=crash_loop'
+    ).Count -ge 1
 
 $emergencyResults = @()
 foreach ($fault in @('early_abort', 'early_stack', 'early_recursive')) {
@@ -346,6 +419,9 @@ foreach ($fault in @('emergency_short', 'emergency_failed')) {
 
 $pauseValues = $pauseMeasurements.main_pause_us | Sort-Object
 $elapsedValues = $pauseMeasurements.elapsed_us | Sort-Object
+$volatileValues = $startupMeasurements.volatile_us | Sort-Object
+$durableValues = $startupMeasurements.durable_ms | Sort-Object
+$fatalValues = $fatalMeasurements.elapsed_ms | Sort-Object
 function Percentile {
     param([long[]] $Values, [double] $Percent)
     $index = [math]::Ceiling($Percent * $Values.Count) - 1
@@ -355,10 +431,15 @@ function Percentile {
 $ended = (Get-Date).ToUniversalTime()
 $checks = [ordered]@{
     false_positive_rate = $falseCandidates -eq 0
+    install_to_volatile =
+        (Percentile $volatileValues 0.95) -le 2000
+    time_to_durable =
+        (Percentile $durableValues 0.95) -le 500
     handler_cpu = $handlerCpuPercent -lt 0.05
     app_cpu = $appCpuPercent -lt 0.2
     handler_pss = ($pssSamples | Measure-Object -Maximum).Maximum -le 12 * 1024
     heartbeat_rate = $heartbeatPerMinute -le 30
+    heartbeat_main_work = $healthyStatsEnd.heartbeat_max_ns -lt 50000
     ineligible_heartbeat = $ineligibleEnd.posted - $ineligibleStart.posted -eq 0
     nonfatal_capture = @($pauseMeasurements | Where-Object captured).Count -eq 30
     nonfatal_deadline = ($elapsedValues | Measure-Object -Maximum).Maximum -le 2000000
@@ -373,6 +454,12 @@ $checks = [ordered]@{
         $quotaResults[-1] -eq $false -and $quotaDumpCount -eq 8
     timeout_cancellation =
         @($timeoutMeasurements | Where-Object { $_.elapsed_ms -le 3000 }).Count -eq 10
+    fatal_capture =
+        @($fatalMeasurements | Where-Object artifact_created).Count -eq 30 -and
+        (Percentile $fatalValues 0.95) -le 2000
+    handler_lifecycle =
+        $lifecycle.death_notified -and $lifecycle.reconnected -and
+        $lifecycle.crash_loop_blocked
     emergency_faults =
         $emergencyResults[0].validator_exit -eq 0 -and
         $emergencyResults[1].validator_exit -eq 0 -and
@@ -403,6 +490,16 @@ $result = [ordered]@{
         handler_pid = $handlerPid
         worker_pid = $workerPid
     }
+    startup = [ordered]@{
+        samples = $startupMeasurements.Count
+        volatile_us_p50 = Percentile $volatileValues 0.50
+        volatile_us_p95 = Percentile $volatileValues 0.95
+        volatile_us_p99 = Percentile $volatileValues 0.99
+        durable_ms_p50 = Percentile $durableValues 0.50
+        durable_ms_p95 = Percentile $durableValues 0.95
+        durable_ms_p99 = Percentile $durableValues 0.99
+        details = $startupMeasurements
+    }
     healthy = [ordered]@{
         minutes = $HealthyMinutes
         false_candidates = $falseCandidates
@@ -411,6 +508,7 @@ $result = [ordered]@{
         handler_context_switch_delta =
             $handlerSwitchesEnd - $handlerSwitchesStart
         heartbeat_per_minute = $heartbeatPerMinute
+        heartbeat_main_work_ns_max = $healthyStatsEnd.heartbeat_max_ns
         handler_pss_kib_samples = $pssSamples
         handler_pss_kib_max = ($pssSamples | Measure-Object -Maximum).Maximum
     }
@@ -445,6 +543,14 @@ $result = [ordered]@{
         stream_inventory = $privacySummary.streams
     }
     timeout_cancellation = $timeoutMeasurements
+    fatal = [ordered]@{
+        samples = $fatalMeasurements.Count
+        latency_ms_p50 = Percentile $fatalValues 0.50
+        latency_ms_p95 = Percentile $fatalValues 0.95
+        latency_ms_p99 = Percentile $fatalValues 0.99
+        details = $fatalMeasurements
+    }
+    handler_lifecycle = $lifecycle
     emergency = $emergencyResults
     quota = [ordered]@{
         attempts = $quotaResults

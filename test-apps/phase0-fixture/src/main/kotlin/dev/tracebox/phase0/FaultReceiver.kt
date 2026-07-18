@@ -31,6 +31,7 @@ class FaultReceiver : BroadcastReceiver() {
                 )
                 NativeRuntime.recursiveSignalForTest()
             }
+            "fatal" -> NativeRuntime.crashForTest(0)
             "stall" -> {
                 SystemClock.sleep(6_000)
                 Log.i(TAG, "receiver_stall_completed=true")
@@ -40,7 +41,8 @@ class FaultReceiver : BroadcastReceiver() {
                 Log.i(
                     TAG,
                     "watchdog_stats posted=${stats?.postedGeneration} " +
-                        "acked=${stats?.acknowledgedGeneration} eligible=${stats?.eligible}",
+                        "acked=${stats?.acknowledgedGeneration} eligible=${stats?.eligible} " +
+                        "heartbeat_max_ns=${stats?.heartbeatMaxNanos}",
                 )
             }
         }

@@ -21,7 +21,17 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        NativeRuntime.initializeEmergency(noBackupFilesDir.absolutePath, PROCESS_ROLE_MAIN)
+        val installStarted = SystemClock.elapsedRealtimeNanos()
+        val emergencyReady =
+            NativeRuntime.initializeEmergency(
+                noBackupFilesDir.absolutePath,
+                PROCESS_ROLE_MAIN,
+            )
+        Log.i(
+            TAG,
+            "install_volatile_us=${(SystemClock.elapsedRealtimeNanos() - installStarted) / 1_000} " +
+                "emergency_ready=$emergencyReady",
+        )
         when (intent.getStringExtra(ACTION_EXTRA)) {
             "early_abort" -> NativeRuntime.crashForTest(0)
             "early_stack" -> NativeRuntime.stackOverflowForTest()
@@ -35,7 +45,11 @@ class MainActivity : Activity() {
                         "${noBackupFilesDir.absolutePath}/handler.sock",
                         PROCESS_ROLE_MAIN,
                     )
-                Log.i(TAG, "main_connected=$connected")
+                Log.i(
+                    TAG,
+                    "main_connected=$connected " +
+                        "durable_ms=${(SystemClock.elapsedRealtimeNanos() - installStarted) / 1_000_000}",
+                )
             },
             "tracebox-main-client-connect",
         ).start()

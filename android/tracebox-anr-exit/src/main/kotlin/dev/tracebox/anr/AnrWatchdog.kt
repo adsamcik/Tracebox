@@ -20,6 +20,7 @@ data class AnrWatchdogStats(
     val postedGeneration: Long,
     val acknowledgedGeneration: Long,
     val eligible: Boolean,
+    val heartbeatMaxNanos: Long,
 )
 
 fun interface NonFatalRequester {
@@ -37,6 +38,7 @@ class AnrWatchdog(
     private val postedGeneration = AtomicLong()
     private val acknowledgedGeneration = AtomicLong()
     private val lastAcknowledgedMillis = AtomicLong(clockMillis())
+    private val heartbeatMaxNanos = AtomicLong()
     private val lock = ReentrantLock()
     private val eligibilityChanged = lock.newCondition()
     private var worker: Thread? = null
@@ -45,6 +47,7 @@ class AnrWatchdog(
     private val heartbeat =
         object : Runnable {
             override fun run() {
+                val startedNanos = SystemClock.elapsedRealtimeNanos()
                 if (!running.get() || !eligible.get()) {
                     return
                 }
@@ -52,6 +55,10 @@ class AnrWatchdog(
                 lastAcknowledgedMillis.set(clockMillis())
                 lock.withLock { eligibilityChanged.signalAll() }
                 scheduleHeartbeat(2_000)
+                heartbeatMaxNanos.accumulateAndGet(
+                    SystemClock.elapsedRealtimeNanos() - startedNanos,
+                    ::maxOf,
+                )
             }
         }
 
@@ -84,6 +91,7 @@ class AnrWatchdog(
             postedGeneration = postedGeneration.get(),
             acknowledgedGeneration = acknowledgedGeneration.get(),
             eligible = eligible.get(),
+            heartbeatMaxNanos = heartbeatMaxNanos.get(),
         )
 
     override fun close() {

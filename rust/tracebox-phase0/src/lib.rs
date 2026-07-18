@@ -8,6 +8,7 @@ pub enum EmergencyRecordError {
     InvalidMagic,
     InvalidVersion,
     Incomplete,
+    InvalidChecksum,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,10 @@ pub fn validate_emergency_record(record: &[u8]) -> Result<(), EmergencyRecordErr
     ]);
     if marker != 0x5442_454d_434f_4d50 {
         return Err(EmergencyRecordError::Incomplete);
+    }
+    let expected = u32::from_le_bytes([record[244], record[245], record[246], record[247]]);
+    if crc32c(&record[0..244]) != expected {
+        return Err(EmergencyRecordError::InvalidChecksum);
     }
     Ok(())
 }
@@ -164,6 +169,18 @@ fn checked_range(bytes: &[u8], offset: usize, length: usize) -> Result<&[u8], Mi
     bytes.get(offset..end).ok_or(MinidumpError::Truncated)
 }
 
+fn crc32c(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0_u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0x82f6_3b78 & mask);
+        }
+    }
+    !crc
+}
+
 const fn stream_name(stream_type: u32) -> &'static str {
     match stream_type {
         3 => "ThreadListStream",
@@ -191,6 +208,8 @@ mod tests {
         record[0..8].copy_from_slice(EMERGENCY_MAGIC);
         record[8..12].copy_from_slice(&1_u32.to_le_bytes());
         record[248..256].copy_from_slice(&0x5442_454d_434f_4d50_u64.to_le_bytes());
+        let checksum = crc32c(&record[0..244]);
+        record[244..248].copy_from_slice(&checksum.to_le_bytes());
         assert_eq!(validate_emergency_record(&record), Ok(()));
     }
 
@@ -227,5 +246,40 @@ mod tests {
             summarize_minidump(&bytes),
             Err(MinidumpError::TooManyStreams)
         );
+    }
+
+    #[test]
+    fn rejects_every_truncated_emergency_boundary() {
+        let mut record = [0_u8; EMERGENCY_RECORD_SIZE];
+        record[0..8].copy_from_slice(EMERGENCY_MAGIC);
+        record[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        record[248..256].copy_from_slice(&0x5442_454d_434f_4d50_u64.to_le_bytes());
+        let checksum = crc32c(&record[0..244]);
+        record[244..248].copy_from_slice(&checksum.to_le_bytes());
+        for length in 0..EMERGENCY_RECORD_SIZE {
+            assert!(validate_emergency_record(&record[..length]).is_err());
+        }
+    }
+
+    #[test]
+    fn minidump_corruption_smoke_is_bounded() {
+        let mut bytes = vec![0_u8; 64];
+        bytes[0..4].copy_from_slice(b"MDMP");
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&32_u32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&3_u32.to_le_bytes());
+        bytes[36..40].copy_from_slice(&4_u32.to_le_bytes());
+        bytes[40..44].copy_from_slice(&60_u32.to_le_bytes());
+        bytes[60..64].copy_from_slice(&1_u32.to_le_bytes());
+
+        let mut state = 0x9e37_79b9_u32;
+        for _ in 0..10_000 {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let index = usize::try_from(state).expect("u32 fits usize") % bytes.len();
+            let original = bytes[index];
+            bytes[index] ^= (state >> 24) as u8 | 1;
+            let _ = summarize_minidump(&bytes);
+            bytes[index] = original;
+        }
     }
 }
