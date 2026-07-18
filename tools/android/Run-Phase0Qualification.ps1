@@ -212,6 +212,10 @@ Start-Sleep 2
 
 $pauseMeasurements = @()
 for ($iteration = 1; $iteration -le 30; $iteration++) {
+    if (($iteration - 1) % 8 -eq 0) {
+        Reset-And-Launch
+        Start-Sleep 2
+    }
     Invoke-Adb logcat -c | Out-Null
     Start-Action measure_nonfatal
     $line = Wait-Log 'nonfatal_measure' 10
@@ -227,6 +231,7 @@ for ($iteration = 1; $iteration -le 30; $iteration++) {
 }
 
 $stallMeasurements = @()
+Reset-And-Launch
 Start-Sleep 10
 for ($iteration = 1; $iteration -le 10; $iteration++) {
     Invoke-Adb logcat -c | Out-Null
@@ -269,6 +274,20 @@ $emergencyBytes = [IO.File]::ReadAllBytes($emergencyLocal)
 $internalIdMatches = Count-Bytes `
     ([IO.File]::ReadAllBytes($dumpLocal)) `
     $emergencyBytes[16..47]
+
+Reset-And-Launch
+$quotaResults = @()
+for ($iteration = 1; $iteration -le 9; $iteration++) {
+    Invoke-Adb logcat -c | Out-Null
+    Start-Action nonfatal
+    $line = Wait-Log 'nonfatal_captured=' 10
+    if ($line -notmatch 'nonfatal_captured=(true|false)') {
+        throw 'Cannot parse quota capture result'
+    }
+    $quotaResults += $Matches[1] -eq 'true'
+}
+$quotaDumpCount = [int]((Invoke-Adb shell `
+        "run-as $package sh -c 'ls no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
 
 $timeoutMeasurements = @()
 for ($iteration = 1; $iteration -le 10; $iteration++) {
@@ -334,6 +353,34 @@ function Percentile {
 }
 
 $ended = (Get-Date).ToUniversalTime()
+$checks = [ordered]@{
+    false_positive_rate = $falseCandidates -eq 0
+    handler_cpu = $handlerCpuPercent -lt 0.05
+    app_cpu = $appCpuPercent -lt 0.2
+    handler_pss = ($pssSamples | Measure-Object -Maximum).Maximum -le 12 * 1024
+    heartbeat_rate = $heartbeatPerMinute -le 30
+    ineligible_heartbeat = $ineligibleEnd.posted - $ineligibleStart.posted -eq 0
+    nonfatal_capture = @($pauseMeasurements | Where-Object captured).Count -eq 30
+    nonfatal_deadline = ($elapsedValues | Measure-Object -Maximum).Maximum -le 2_000_000
+    target_pause = ($pauseValues | Measure-Object -Maximum).Maximum -le 100_000
+    deterministic_stalls =
+        @($stallMeasurements | Where-Object { $_.frames -gt 0 }).Count -eq 10
+    watchdog_rate_limit = @($stallMeasurements | Where-Object snapshot).Count -eq 1
+    seeded_raw = $privacySummary.raw_seed_matches -ge 1
+    seeded_summary = $privacySummary.summary_seed_matches -eq 0
+    internal_identity = $internalIdMatches -eq 0
+    quota_count = @($quotaResults | Where-Object { $_ }).Count -eq 8 -and
+        $quotaResults[-1] -eq $false -and $quotaDumpCount -eq 8
+    timeout_cancellation =
+        @($timeoutMeasurements | Where-Object { $_.elapsed_ms -le 3_000 }).Count -eq 10
+    emergency_faults =
+        $emergencyResults[0].validator_exit -eq 0 -and
+        $emergencyResults[1].validator_exit -eq 0 -and
+        $emergencyResults[2].validator_exit -ne 0 -and
+        $emergencyResults[3].validator_exit -ne 0 -and
+        $emergencyResults[4].validator_exit -ne 0
+}
+$passed = @($checks.Values | Where-Object { -not $_ }).Count -eq 0
 $result = [ordered]@{
     requirement_id = 'F0.3-F0.7'
     command = "tools\android\Run-Phase0Qualification.ps1 -Serial $Serial " +
@@ -399,10 +446,18 @@ $result = [ordered]@{
     }
     timeout_cancellation = $timeoutMeasurements
     emergency = $emergencyResults
+    quota = [ordered]@{
+        attempts = $quotaResults
+        retained_dumps = $quotaDumpCount
+    }
+    pass_checks = $checks
     matrix_cell = "API${api}_${abi}_${pageSize}B_MINIFIED_RELEASE"
-    result = 'PASS'
+    result = if ($passed) { 'PASS' } else { 'FAIL' }
 }
 
 $evidence = Join-Path $root "evidence\phase0\API$api-$abi-$pageSize-qualification.json"
 $result | ConvertTo-Json -Depth 10 | Set-Content $evidence -Encoding utf8
 Write-Output $evidence
+if (-not $passed) {
+    exit 2
+}

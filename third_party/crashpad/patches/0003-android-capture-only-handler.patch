@@ -402,7 +402,56 @@ diff --git a/handler/linux/crash_report_exception_handler.cc b/handler/linux/cra
        process_annotations_(process_annotations),
        attachments_(attachments),
        write_minidump_to_database_(write_minidump_to_database),
-@@ -239,23 +241,25 @@
+@@ -202,6 +204,31 @@
+     ProcessSnapshotSanitized* sanitized_snapshot,
+     bool write_minidump_to_log,
+     UUID* local_report_id) {
++#if defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
++  constexpr size_t kTraceboxMaximumReports = 8;
++  constexpr uint64_t kTraceboxMaximumBytes = 16 * 1024 * 1024;
++  std::vector<CrashReportDatabase::Report> pending_reports;
++  std::vector<CrashReportDatabase::Report> completed_reports;
++  if (database_->GetPendingReports(&pending_reports) !=
++          CrashReportDatabase::kNoError ||
++      database_->GetCompletedReports(&completed_reports) !=
++          CrashReportDatabase::kNoError) {
++    return false;
++  }
++  uint64_t retained_bytes = 0;
++  for (const auto& report : pending_reports) {
++    retained_bytes += report.total_size;
++  }
++  for (const auto& report : completed_reports) {
++    retained_bytes += report.total_size;
++  }
++  if (pending_reports.size() + completed_reports.size() >=
++          kTraceboxMaximumReports ||
++      retained_bytes >= kTraceboxMaximumBytes) {
++    return false;
++  }
++#endif
++
+   std::unique_ptr<CrashReportDatabase::NewReport> new_report;
+   CrashReportDatabase::OperationStatus database_status =
+       database_->PrepareNewCrashReport(&new_report);
+@@ -228,6 +255,16 @@
+         Metrics::CaptureResult::kMinidumpWriteFailed);
+     return false;
+   }
++#if defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
++  FileReaderInterface* report_reader = new_report->Reader();
++  const FileOffset report_size =
++      report_reader == nullptr ? -1 : report_reader->Seek(0, SEEK_END);
++  if (report_size < 0 ||
++      static_cast<uint64_t>(report_size) >
++          kTraceboxMaximumBytes - retained_bytes) {
++    return false;
++  }
++#endif
+ 
+   bool write_minidump_to_log_succeed = false;
+   if (write_minidump_to_log) {
+@@ -239,23 +276,25 @@
      }
    }
  
@@ -444,7 +493,7 @@ diff --git a/handler/linux/crash_report_exception_handler.cc b/handler/linux/cra
    }
  
    UUID uuid;
-@@ -268,9 +272,11 @@
+@@ -268,9 +307,11 @@
      return false;
    }
  

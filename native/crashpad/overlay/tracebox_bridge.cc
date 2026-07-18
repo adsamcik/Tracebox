@@ -1,5 +1,6 @@
 #include <jni.h>
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
@@ -21,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/files/file_path.h"
@@ -43,6 +45,7 @@ int g_shared_client_socket = -1;
 int g_emergency_fd = -1;
 uint32_t g_process_role = 0;
 std::array<uint8_t, 32> g_process_id{};
+std::array<char, 256> g_pending_directory{};
 uint64_t g_sequence = 0;
 using OverflowFunction = void (*)(uint64_t);
 volatile OverflowFunction g_overflow_function = nullptr;
@@ -348,6 +351,22 @@ bool ConnectControlSocket(const std::string& socket_path,
   return false;
 }
 
+int CountPendingReports() {
+  DIR* directory = opendir(g_pending_directory.data());
+  if (directory == nullptr) {
+    return -1;
+  }
+  int count = 0;
+  while (dirent* entry = readdir(directory)) {
+    const std::string_view name(entry->d_name);
+    if (name.ends_with(".dmp")) {
+      ++count;
+    }
+  }
+  closedir(directory);
+  return count;
+}
+
 struct DumpRequest {
   pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
   pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
@@ -553,6 +572,14 @@ Java_dev_tracebox_nativecapture_NativeRuntime_connectClient(
   if (socket_path.empty() || socket_path.size() >= sizeof(sockaddr_un::sun_path)) {
     return JNI_FALSE;
   }
+  const std::string pending =
+      ParentDirectory(socket_path) + "/crashpad-db/pending";
+  if (pending.size() >= g_pending_directory.size()) {
+    return JNI_FALSE;
+  }
+  std::memset(g_pending_directory.data(), 0, g_pending_directory.size());
+  std::memcpy(
+      g_pending_directory.data(), pending.c_str(), pending.size() + 1);
 
   int handler_socket = -1;
   pid_t handler_pid = -1;
@@ -586,7 +613,12 @@ Java_dev_tracebox_nativecapture_NativeRuntime_requestNonFatal(
     jobject,
     jint,
     jint timeout_millis) {
-  return RequestDumpWithTimeout(timeout_millis) ? JNI_TRUE : JNI_FALSE;
+  const int before = CountPendingReports();
+  if (before < 0 || !RequestDumpWithTimeout(timeout_millis)) {
+    return JNI_FALSE;
+  }
+  const int after = CountPendingReports();
+  return after > before ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -599,6 +631,10 @@ Java_dev_tracebox_nativecapture_NativeRuntime_requestSeededNonFatalForTest(
   if (!g_handler_alive.load(std::memory_order_acquire)) {
     return JNI_FALSE;
   }
+  const int before = CountPendingReports();
+  if (before < 0) {
+    return JNI_FALSE;
+  }
   crashpad::NativeCPUContext context;
   crashpad::CaptureContext(&context);
   crashpad::CrashpadClient::DumpWithoutCrash(&context);
@@ -606,7 +642,7 @@ Java_dev_tracebox_nativecapture_NativeRuntime_requestSeededNonFatalForTest(
   for (size_t index = 0; index < sizeof(seeded_secret); ++index) {
     checksum ^= static_cast<uint8_t>(seeded_secret[index]);
   }
-  return checksum != 0 ? JNI_TRUE : JNI_FALSE;
+  return checksum != 0 && CountPendingReports() > before ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
