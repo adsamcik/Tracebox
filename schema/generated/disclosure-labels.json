@@ -1,0 +1,6 @@
+{
+  "Breadcrumb": "breadcrumb: includes only C1 code, C1 monotonic_time_ns",
+  "EmergencyRecord": "emergency: includes only C0 slot_sequence, C0 policy_epoch, C0 signal_number, C0 signal_code, C0 process_role, C0 thread_role, C0 flags",
+  "HandledError": "handled_error: includes only C1 kind, C1 frame_count",
+  "StructuralSummary": "crash_summary: includes only C0 stream_count, C0 thread_count, C0 module_count, C0 exception_code, C0 processor_architecture"
+}
