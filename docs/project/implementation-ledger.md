@@ -18,12 +18,12 @@
 | F0.5 | Emergency fallback spike | F0.2 | Fixed signal record survives pre-Durable and Crashpad-unavailable faults | FAIL |  | Targeted API 30 proof covers a killed handler, exactly one valid fallback record, zero raw-dump delta, prior-action chaining exactly once, observable signal death, and restart without `pm clear` durably invalidating the prior-process slot before handler installation. The complete required matrix was not rerun and API 37 remains blocked. |
 | F0.6 | Live ANR spike | F0.3;F0.4 | Measured watchdog, candidate capture, nonfatal request, lifecycle, timeout/cancellation | FAIL |  | Targeted API 30 hung-handler cancellation now returns in 1992.712 ms, but the frozen target-pause matrix still fails historically, the complete protocol was not rerun, and API 37 is blocked. |
 | F0.7 | Baseline artifact and PSS measurement | F0.3;F0.4;F0.5;F0.6 | Per-ABI size and handler/app resource evidence | FAIL |  | Size/PSS pass; readiness, handler CPU, heartbeat, timeout, fatal latency, final static no-network, full APK reproducibility, and required API 37 evidence fail. |
-| C1.1 | Formal privacy/event schema | F0.1;F0.3 | Stable bounded privacy-classified schema | NOT_STARTED |  |  |
-| C1.2 | Schema model and compiler | C1.1 | Kotlin/C/C++/Rust/protobuf/docs generation and golden tests | NOT_STARTED |  |  |
-| C1.3 | Kotlin public API | C1.2 | Generated-only recording API | NOT_STARTED |  |  |
-| C1.4 | Versioned C ABI | C1.2 | Size-prefixed ABI and compatibility tests | NOT_STARTED |  |  |
-| C1.5 | Rust bindings/wrapper | C1.4 | Generated sys crate and safe wrapper | NOT_STARTED |  |  |
-| C1.6 | Identity and build contract | F0.2;C1.2 | Internal identities and build/symbol catalog | NOT_STARTED |  |  |
+| C1.1 | Formal privacy/event schema | F0.1;F0.3 | Stable bounded privacy-classified schema | PASS |  | `schema/events.json`; compiler rejects prohibited, unknown, reused, unbounded, and non-C0 Direct Boot fields. Evidence: `evidence/phase1/schema-compiler.json`. |
+| C1.2 | Schema model and compiler | C1.1 | Kotlin/C/C++/Rust/protobuf/docs generation and golden tests | PASS |  | One strict model generates Kotlin/C-compatible/Rust/protobuf/decoder/labels/docs; golden and compile-fail tests pass. Evidence: `evidence/phase1/schema-compiler.json`. |
+| C1.3 | Kotlin public API | C1.2 | Generated-only recording API | PASS |  | `android/tracebox-api` exposes bounded generated values and opaque approval input only. Evidence: `evidence/phase1/kotlin-api-and-identity.json`. |
+| C1.4 | Versioned C ABI | C1.2 | Size-prefixed ABI and compatibility tests | PASS |  | `native/include/tracebox/abi.h` uses v1 headers and typed statuses; compatibility tests pass. Evidence: `evidence/phase1/native-abi.json`. |
+| C1.5 | Rust bindings/wrapper | C1.4 | Generated sys crate and safe wrapper | PASS |  | `rust/tracebox-sys` and `rust/tracebox` compile; unwind boundary test returns `DROPPED`. Evidence: `evidence/phase1/rust-bindings-and-identities.json`. |
+| C1.6 | Identity and build contract | F0.2;C1.2 | Internal identities and build/symbol catalog | PASS |  | `rust/tracebox-identity` enforces persist-before-use; Gradle scaffold captures schema/build identity. Evidence: `evidence/phase1/kotlin-api-and-identity.json`; `evidence/phase1/rust-bindings-and-identities.json`. |
 | R2.1 | Lifecycle/readiness runtime | C1.3 | Install and four readiness states | NOT_STARTED |  |  |
 | R2.2 | Policy epoch protocol and local gate | F0.4;C1.1;R2.1 | Epoch revalidation and barrier protocol | NOT_STARTED |  |  |
 | R2.3 | Bounded queues, barrier, health codes | R2.2 | Fixed-capacity policy-aware queues | NOT_STARTED |  |  |
