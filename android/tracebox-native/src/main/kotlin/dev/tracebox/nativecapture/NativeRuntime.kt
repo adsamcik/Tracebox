@@ -19,9 +19,13 @@ object NativeRuntime {
 
     external fun writeEmergencyForTest(signalNumber: Int): Boolean
 
+    external fun writeEmergencyFaultForTest(mode: Int): Boolean
+
     external fun crashForTest(kind: Int)
 
     external fun stackOverflowForTest()
 
     external fun hangForTest()
+
+    external fun recursiveSignalForTest()
 }

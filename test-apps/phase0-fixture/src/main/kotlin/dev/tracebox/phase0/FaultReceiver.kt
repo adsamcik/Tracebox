@@ -24,6 +24,13 @@ class FaultReceiver : BroadcastReceiver() {
                 )
                 NativeRuntime.stackOverflowForTest()
             }
+            "early_recursive" -> {
+                NativeRuntime.initializeEmergency(
+                    context.noBackupFilesDir.absolutePath,
+                    PROCESS_ROLE_MAIN,
+                )
+                NativeRuntime.recursiveSignalForTest()
+            }
             "stall" -> {
                 SystemClock.sleep(6_000)
                 Log.i(TAG, "receiver_stall_completed=true")

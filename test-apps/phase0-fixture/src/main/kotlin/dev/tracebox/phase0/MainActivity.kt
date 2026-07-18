@@ -131,6 +131,14 @@ class MainActivity : Activity() {
                 val result = NativeRuntime.writeEmergencyForTest(6)
                 Log.i(TAG, "emergency_written=$result")
             }
+            "emergency_short" -> {
+                val result = NativeRuntime.writeEmergencyFaultForTest(1)
+                Log.i(TAG, "emergency_short_result=$result")
+            }
+            "emergency_failed" -> {
+                val result = NativeRuntime.writeEmergencyFaultForTest(2)
+                Log.i(TAG, "emergency_failed_result=$result")
+            }
             "nonfatal" -> Thread {
                 val result = NativeRuntime.requestNonFatal(REASON_ANR_CANDIDATE, 2_000)
                 Log.i(TAG, "nonfatal_captured=$result")

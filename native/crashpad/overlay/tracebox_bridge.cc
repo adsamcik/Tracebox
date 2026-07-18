@@ -625,6 +625,43 @@ Java_dev_tracebox_nativecapture_NativeRuntime_writeEmergencyForTest(
                                                                 : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_tracebox_nativecapture_NativeRuntime_writeEmergencyFaultForTest(
+    JNIEnv*,
+    jobject,
+    jint mode) {
+  if (g_emergency_fd < 0) {
+    return JNI_FALSE;
+  }
+  tb_emergency_record_v1 record;
+  if (tb_emergency_initialize_v1(&record,
+                                 g_process_id.data(),
+                                 __atomic_add_fetch(
+                                     &g_sequence, 1, __ATOMIC_RELAXED),
+                                 0,
+                                 MonotonicNanoseconds(),
+                                 SIGABRT,
+                                 0,
+                                 0,
+                                 0,
+                                 0,
+                                 g_process_role,
+                                 0,
+                                 UINT64_C(16)) != 0) {
+    return JNI_FALSE;
+  }
+  if (mode == 1) {
+    return pwrite(g_emergency_fd, record.bytes, 128, 0) ==
+                   static_cast<ssize_t>(sizeof(record.bytes))
+               ? JNI_TRUE
+               : JNI_FALSE;
+  }
+  return pwrite(-1, record.bytes, sizeof(record.bytes), 0) ==
+                 static_cast<ssize_t>(sizeof(record.bytes))
+             ? JNI_TRUE
+             : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_dev_tracebox_nativecapture_NativeRuntime_crashForTest(
     JNIEnv*,
@@ -650,4 +687,12 @@ Java_dev_tracebox_nativecapture_NativeRuntime_hangForTest(
     JNIEnv*,
     jobject) {
   kill(getpid(), SIGSTOP);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_tracebox_nativecapture_NativeRuntime_recursiveSignalForTest(
+    JNIEnv*,
+    jobject) {
+  g_in_signal = 1;
+  EmergencySignalHandler(SIGABRT, nullptr, nullptr);
 }
