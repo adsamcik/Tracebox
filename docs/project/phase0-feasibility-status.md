@@ -75,8 +75,9 @@ No API 37 result is claimed by this targeted run.
 | Final static no-network scan | FAIL | `evidence/phase0/final-no-network-static.json` |
 | Full APK reproducibility comparison | FAIL | `evidence/phase0/final-reproducibility.json` |
 | Artifact size inventory | PASS | `evidence/phase0/F0.7-artifact-sizes.json` |
+| Targeted review-fix host/native/Rust regressions | PASS | `evidence/phase0/review-fix-host-validation.json` |
 
-The presubmit result records that its configured checks completed successfully. It does not override the separate final no-network and reproducibility failures.
+The presubmit and targeted review-fix results record that their configured checks completed successfully. They do not override the separate final no-network, reproducibility, stream-profile, required-lane, or complete-protocol failures.
 
 ## Implemented reversible foundation
 
