@@ -52,18 +52,21 @@ class AnrStateMachine(
         require(maxCapturesPerWindow > 0)
     }
 
+    @Synchronized
     fun mode(value: AnrOperatingMode, nowMillis: Long) {
         currentMode = value
         if (startedAt == 0L) startedAt = nowMillis
         if (value == AnrOperatingMode.SUSPENDED) watchState = AnrWatchState.HEALTHY
     }
 
+    @Synchronized
     fun state(): AnrWatchState = watchState
 
     /**
      * A second delayed heartbeat makes the stall credible. It remains a candidate unless a later
      * `ApplicationExitInfo.REASON_ANR` reconciliation independently confirms it.
      */
+    @Synchronized
     fun heartbeatDelayed(
         delayedMillis: Long,
         stackSignature: Long,
@@ -93,6 +96,7 @@ class AnrStateMachine(
         return AnrTransition.Captured(AnrEvidenceLevel.CANDIDATE, snapshotAllowed = true)
     }
 
+    @Synchronized
     fun recovered(): AnrTransition {
         watchState = AnrWatchState.HEALTHY
         return AnrTransition.Recovered

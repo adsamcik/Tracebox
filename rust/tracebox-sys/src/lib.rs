@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Mutex;
 
 #[allow(missing_docs)]
 mod generated;
@@ -67,6 +68,55 @@ const HEADER_V1_SIZE: u32 = 8;
 const BREADCRUMB_V1_SIZE: u32 = 24;
 const PANIC_PROBE_V1_SIZE: u32 = 16;
 const PANIC_RECORD_V1_SIZE: u32 = 24;
+const PANIC_RECORD_RING_CAPACITY: usize = 64;
+const EMPTY_PANIC_RECORD: PanicRecordV1 = PanicRecordV1 {
+    header: HeaderV1 {
+        struct_size: 0,
+        abi_version: 0,
+    },
+    payload_kind: 0,
+    has_location: 0,
+    line: 0,
+    column: 0,
+};
+
+struct PanicRecordRing {
+    records: [PanicRecordV1; PANIC_RECORD_RING_CAPACITY],
+    head: usize,
+    len: usize,
+}
+
+impl PanicRecordRing {
+    const fn new() -> Self {
+        Self {
+            records: [EMPTY_PANIC_RECORD; PANIC_RECORD_RING_CAPACITY],
+            head: 0,
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, value: PanicRecordV1) -> bool {
+        if self.len == PANIC_RECORD_RING_CAPACITY {
+            return false;
+        }
+        let index = (self.head + self.len) % PANIC_RECORD_RING_CAPACITY;
+        self.records[index] = value;
+        self.len += 1;
+        true
+    }
+
+    fn drain(&mut self) -> Vec<PanicRecordV1> {
+        let mut drained = Vec::with_capacity(self.len);
+        for offset in 0..self.len {
+            drained.push(self.records[(self.head + offset) % PANIC_RECORD_RING_CAPACITY]);
+        }
+        self.head = 0;
+        self.len = 0;
+        drained
+    }
+}
+
+static PANIC_RECORDS: Mutex<PanicRecordRing> = Mutex::new(PanicRecordRing::new());
 
 fn valid_header(header: HeaderV1, expected_size: u32) -> Result<(), StatusV1> {
     if header.abi_version != 1 {
@@ -128,10 +178,26 @@ pub extern "C" fn tb_tracebox_record_panic_v1(value: PanicRecordV1) -> StatusV1 
         if value.payload_kind > 2 || value.has_location > 1 {
             return Ok(StatusV1::InvalidArgument);
         }
-        Ok(StatusV1::Ok)
+        let mut records = PANIC_RECORDS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        Ok(if records.push(value) {
+            StatusV1::Ok
+        } else {
+            StatusV1::Dropped
+        })
     }))
     .unwrap_or(Ok(StatusV1::Dropped))
     .unwrap_or(StatusV1::Dropped)
+}
+
+/// Drains the process-local bounded panic-record sink for a native consumer or host test.
+///
+/// The returned vector is intentionally outside the panic path; recording itself uses a fixed-size
+/// ring and performs no allocation.
+pub fn drain_panic_records_v1() -> Vec<PanicRecordV1> {
+    PANIC_RECORDS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .drain()
 }
 
 #[cfg(test)]
@@ -166,6 +232,7 @@ mod tests {
 
     #[test]
     fn structured_panic_bridge_accepts_only_bounded_metadata() {
+        let _ = drain_panic_records_v1();
         assert_eq!(
             tb_tracebox_record_panic_v1(PanicRecordV1 {
                 header: HeaderV1 {
@@ -192,5 +259,6 @@ mod tests {
             }),
             StatusV1::InvalidArgument,
         );
+        assert_eq!(drain_panic_records_v1().len(), 1);
     }
 }

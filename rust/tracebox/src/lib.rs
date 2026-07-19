@@ -186,7 +186,8 @@ mod tests {
     }
 
     #[test]
-    fn bounded_panic_record_crosses_the_native_structured_record_bridge() {
+    fn native_panic_sink_makes_hook_metadata_retrievable_from_the_bounded_bridge_sink() {
+        let _ = tracebox_sys::drain_panic_records_v1();
         NativePanicRecordSink.record(PanicRecord {
             payload: PanicPayloadKind::StaticString,
             location: Some(PanicLocation {
@@ -195,5 +196,18 @@ mod tests {
                 column: 3,
             }),
         });
+        assert_eq!(
+            tracebox_sys::drain_panic_records_v1(),
+            vec![PanicRecordV1 {
+                header: HeaderV1 {
+                    struct_size: std::mem::size_of::<PanicRecordV1>() as u32,
+                    abi_version: 1,
+                },
+                payload_kind: 1,
+                has_location: 1,
+                line: 7,
+                column: 3,
+            }],
+        );
     }
 }

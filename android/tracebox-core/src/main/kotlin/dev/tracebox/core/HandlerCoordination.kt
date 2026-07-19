@@ -83,11 +83,12 @@ enum class CrashDispatchResult {
     DegradedNativeDisabled,
 }
 
-/** Mirrors tracebox_bridge.cc: previous sigaction is preserved and re-raised exactly once. */
+/** Mirrors the native best-effort chain: invoke the prior action once, then force default death if it returns. */
 data class NativeSignalDispatchPlan(
     val result: CrashDispatchResult,
     val preservePreviousAction: Boolean,
-    val reraisePreviousExactlyOnce: Boolean,
+    val invokePreviousHandlerExactlyOnce: Boolean,
+    val forceDefaultTerminationIfPreviousReturns: Boolean,
 )
 
 class CrashDispatchStateMachine(private val policy: CrashCoexistencePolicy) {
@@ -104,7 +105,8 @@ class CrashDispatchStateMachine(private val policy: CrashCoexistencePolicy) {
         return NativeSignalDispatchPlan(
             result = result,
             preservePreviousAction = priorHandlerDetected && policy == CrashCoexistencePolicy.BEST_EFFORT_CHAIN,
-            reraisePreviousExactlyOnce = result == CrashDispatchResult.PrimaryCrashpadThenPrior,
+            invokePreviousHandlerExactlyOnce = result == CrashDispatchResult.PrimaryCrashpadThenPrior,
+            forceDefaultTerminationIfPreviousReturns = result == CrashDispatchResult.PrimaryCrashpadThenPrior,
         )
     }
 }

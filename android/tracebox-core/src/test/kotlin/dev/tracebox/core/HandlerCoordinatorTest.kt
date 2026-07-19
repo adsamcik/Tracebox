@@ -74,11 +74,12 @@ class HandlerCoordinatorTest {
         )
     }
 
-    @Test fun best_effort_plan_matches_native_bridge_previous_action_preservation_and_single_reraise() {
+    @Test fun best_effort_plan_invokes_prior_once_then_forces_default_termination_if_it_returns() {
         val plan = CrashDispatchStateMachine(CrashCoexistencePolicy.BEST_EFFORT_CHAIN).nativePlan(priorHandlerDetected = true)
 
         assertEquals(CrashDispatchResult.PrimaryCrashpadThenPrior, plan.result)
         assertTrue(plan.preservePreviousAction)
-        assertTrue(plan.reraisePreviousExactlyOnce)
+        assertTrue(plan.invokePreviousHandlerExactlyOnce)
+        assertTrue(plan.forceDefaultTerminationIfPreviousReturns)
     }
 }
