@@ -50,7 +50,7 @@ sealed interface GeneratedRecord {
     for event in schema.events:
         params = "\n".join(f"    val {_kotlin_name(field.name)}: {kotlin_types[field.semantic_type]}," for field in event.fields)
         kotlin += f"""/** Schema event {event.id}; fields are privacy-classified in the schema. */
-class Generated{event.name} internal constructor(
+class Generated{event.name}(
 {params}
 ) : GeneratedRecord {{
     override val eventId = GeneratedEventId.{event.name.upper()}

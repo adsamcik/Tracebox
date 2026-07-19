@@ -294,17 +294,6 @@ class UidAccounting(private val quota: UidQuota, private val maxFiles: Map<UidBu
         return true
     }
     fun release(path: Path) { allocations.remove(path) }
-    /**
-     * Atomically moves a previously charged finalized package into its staging lease.  This keeps
-     * the exact-byte reservation while ensuring one physical package consumes one file slot.
-     */
-    fun transfer(path: Path, destination: Path, bucket: UidBucket, bytes: Long): Boolean {
-        val allocation = allocations[path] ?: return false
-        if (destination in allocations || allocation != (bucket to bytes)) return false
-        allocations.remove(path)
-        allocations[destination] = allocation
-        return true
-    }
     fun used(bucket: UidBucket): Long = allocations.filterValues { it.first == bucket }.values.sumOf { it.second }
 }
 

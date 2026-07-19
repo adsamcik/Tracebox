@@ -17,7 +17,7 @@ sealed interface GeneratedRecord {
 }
 
 /** Schema event 1; fields are privacy-classified in the schema. */
-class GeneratedStructuralSummary internal constructor(
+class GeneratedStructuralSummary(
     val stream_count: UInt,
     val thread_count: UInt,
     val module_count: UInt,
@@ -28,7 +28,7 @@ class GeneratedStructuralSummary internal constructor(
 }
 
 /** Schema event 2; fields are privacy-classified in the schema. */
-class GeneratedEmergencyRecord internal constructor(
+class GeneratedEmergencyRecord(
     val slot_sequence: ULong,
     val policy_epoch: ULong,
     val signal_number: Int,
@@ -41,7 +41,7 @@ class GeneratedEmergencyRecord internal constructor(
 }
 
 /** Schema event 3; fields are privacy-classified in the schema. */
-class GeneratedBreadcrumb internal constructor(
+class GeneratedBreadcrumb(
     val code: UInt,
     val monotonic_time_ns: ULong,
 ) : GeneratedRecord {
@@ -49,7 +49,7 @@ class GeneratedBreadcrumb internal constructor(
 }
 
 /** Schema event 4; fields are privacy-classified in the schema. */
-class GeneratedHandledError internal constructor(
+class GeneratedHandledError(
     val kind: UInt,
     val frame_count: UShort,
 ) : GeneratedRecord {

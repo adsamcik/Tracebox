@@ -2,6 +2,11 @@ package dev.tracebox.export
 
 import dev.tracebox.api.generated.GeneratedEventId
 import dev.tracebox.api.generated.GeneratedExportMetadata
+import dev.tracebox.api.generated.GeneratedBreadcrumb
+import dev.tracebox.api.generated.GeneratedEmergencyRecord
+import dev.tracebox.api.generated.GeneratedHandledError
+import dev.tracebox.api.generated.GeneratedRecord
+import dev.tracebox.api.generated.GeneratedStructuralSummary
 import dev.tracebox.storage.UidAccounting
 import dev.tracebox.storage.UidBucket
 import java.nio.ByteBuffer
@@ -42,18 +47,25 @@ enum class PackagePrivacyClass { C0, C1, C2 }
  */
 sealed interface PackageSourceInput
 
-data class OrdinarySourceRecord(
+/**
+ * A Standard record can only be constructed from a [GeneratedRecord], never a bare [ByteArray].
+ * This signature structurally prevents raw Crashpad bytes from being relabeled as ordinary input.
+ */
+class OrdinarySourceRecord(
     val sequence: Long,
-    val eventId: GeneratedEventId,
-    val payload: ByteArray,
+    val generated: GeneratedRecord,
     val occurredAtMillis: Long,
     val privacyClass: PackagePrivacyClass,
     val artifactIdentity: InternalIdentity? = null,
     val valid: Boolean = true,
 ) : PackageSourceInput {
+    internal val encodedPayload: ByteArray = GeneratedRecordPayloadEncoder.encode(generated)
+
     init {
-        require(sequence >= 0 && occurredAtMillis >= 0 && payload.size <= MAX_ORDINARY_RECORD_BYTES)
+        require(sequence >= 0 && occurredAtMillis >= 0 && encodedPayload.size <= MAX_ORDINARY_RECORD_BYTES)
     }
+
+    val eventId: GeneratedEventId get() = generated.eventId
 
     companion object {
         const val MAX_ORDINARY_RECORD_BYTES = 16 * 1024
@@ -62,12 +74,34 @@ data class OrdinarySourceRecord(
 
 /** Reserved for a future Enhanced-mode pipeline; StandardSnapshotRequest has no reference to it. */
 class RawArtifactSource private constructor(
-    val bytes: ByteArray,
+    private val rawBytes: ByteArray,
     val artifactIdentity: InternalIdentity,
 ) : PackageSourceInput {
     companion object {
         fun captured(bytes: ByteArray, artifactIdentity: InternalIdentity): RawArtifactSource =
             RawArtifactSource(bytes.copyOf(), artifactIdentity)
+    }
+}
+
+/** The Phase 3 generated-record primitive encoding, limited to bounded schema fields. */
+private object GeneratedRecordPayloadEncoder {
+    fun encode(value: GeneratedRecord): ByteArray = when (value) {
+        is GeneratedStructuralSummary -> ByteBuffer.allocate(18).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(value.stream_count.toInt()).putInt(value.thread_count.toInt())
+            putInt(value.module_count.toInt()).putInt(value.exception_code.toInt())
+            putShort(value.processor_architecture.toShort())
+        }.array()
+        is GeneratedEmergencyRecord -> ByteBuffer.allocate(40).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putLong(value.slot_sequence.toLong()).putLong(value.policy_epoch.toLong())
+            putInt(value.signal_number).putInt(value.signal_code)
+            putInt(value.process_role.toInt()).putInt(value.thread_role.toInt()).putLong(value.flags.toLong())
+        }.array()
+        is GeneratedBreadcrumb -> ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(value.code.toInt()).putLong(value.monotonic_time_ns.toLong())
+        }.array()
+        is GeneratedHandledError -> ByteBuffer.allocate(6).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(value.kind.toInt()).putShort(value.frame_count.toShort())
+        }.array()
     }
 }
 
@@ -208,7 +242,7 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
                     artifactLocal,
                     recordLocal,
                     record.occurredAtMillis,
-                    record.payload,
+                    record.encodedPayload,
                 )
                 assertNoInternalIdentities(
                     transformed,
@@ -242,7 +276,6 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
 
     /**
      * Charges the exact final ZIP bytes, including the manifest and ZIP metadata—not entry bodies.
-     * The reservation is transferred atomically to a staging lease when one is created.
      */
     internal fun reserveFinalizedPackage(exactBytes: Long): PackageQuotaReservation {
         if (!accounting.reserve(stagingKey, UidBucket.SNAPSHOTS, exactBytes)) {
@@ -273,12 +306,18 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
         private var path: java.nio.file.Path,
         val bytes: Long,
     ) {
-        internal fun transferTo(destination: java.nio.file.Path): Boolean {
-            if (!accounting.transfer(path, destination, UidBucket.SNAPSHOTS, bytes)) return false
-            path = destination
-            return true
+        private var released = false
+
+        internal fun reserveLease(destination: java.nio.file.Path): PackageQuotaReservation? {
+            if (!accounting.reserve(destination, UidBucket.SNAPSHOTS, bytes)) return null
+            return PackageQuotaReservation(accounting, destination, bytes)
         }
 
-        internal fun release() = accounting.release(path)
+        internal fun release() {
+            if (!released) {
+                accounting.release(path)
+                released = true
+            }
+        }
     }
 }

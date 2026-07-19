@@ -1,6 +1,7 @@
 package dev.tracebox.export.ui
 
 import dev.tracebox.api.generated.GeneratedEventId
+import dev.tracebox.api.generated.GeneratedBreadcrumb
 import dev.tracebox.export.DeterministicZip
 import dev.tracebox.export.InternalIdentity
 import dev.tracebox.export.OrdinarySourceRecord
@@ -33,7 +34,7 @@ class ExportWorkflowTest {
             7,
             mapOf(segment to 10),
             listOf(SegmentSource(identity(1), segment, 3, listOf(
-                OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(7, 8), 100, PackagePrivacyClass.C1),
+                OrdinarySourceRecord(0, GeneratedBreadcrumb(7u, 8u), 100, PackagePrivacyClass.C1),
             ))),
         )
     }
@@ -75,9 +76,55 @@ class ExportWorkflowTest {
         val root = Path.of("build", "phase4-workflow", "tracebox-export-staging")
         val manager = StagingLeaseManager(root) { 100L }
         assertFailsWith<IllegalStateException> {
-            manager.stageReservedForHostTest(byteArrayOf(1), { false }, {}, ttlMillis = 5)
+            manager.stageReservedForHostTest(byteArrayOf(1), { null }, ttlMillis = 5)
         }
         assertTrue(!java.nio.file.Files.exists(root) || java.nio.file.Files.list(root).use { !it.findAny().isPresent })
+    }
+
+    @Test fun simultaneous_staging_leases_hold_independent_exact_byte_reservations() {
+        var now = 100L
+        val root = Path.of("build", "phase4-workflow", "leases-${System.nanoTime()}", StagingLeaseManager.STAGING_DIRECTORY)
+        val bytes = byteArrayOf(1, 2, 3)
+        val stagingAccounting = UidAccounting(
+            UidQuota(mapOf(UidBucket.SNAPSHOTS to 100L)),
+            mapOf(UidBucket.SNAPSHOTS to 3),
+        )
+        val manager = StagingLeaseManager(root) { now }
+        val reserveLease: (Path) -> (() -> Unit)? = { destination ->
+            if (stagingAccounting.reserve(destination, UidBucket.SNAPSHOTS, bytes.size.toLong())) {
+                { stagingAccounting.release(destination) }
+            } else {
+                null
+            }
+        }
+
+        manager.stageReservedForHostTest(bytes, reserveLease, ttlMillis = 10)
+        now = 101L
+        manager.stageReservedForHostTest(bytes, reserveLease, ttlMillis = 10)
+        assertEquals(6L, stagingAccounting.used(UidBucket.SNAPSHOTS))
+
+        now = 110L
+        assertEquals(1, manager.cleanupExpired().size)
+        assertEquals(3L, stagingAccounting.used(UidBucket.SNAPSHOTS))
+        now = 111L
+        manager.cleanupExpired()
+        assertEquals(0L, stagingAccounting.used(UidBucket.SNAPSHOTS))
+    }
+
+    @Test fun failed_or_cancelled_approved_receipts_have_no_handoff_constructor_parameter() {
+        val commonDigest = byteArrayOf(1)
+        val failed = ExportReceipt.Approved.SaveFailed(
+            commonDigest, commonDigest, 1, ProtectionMode.LOCAL_ONLY, RecipientSet.LocalOnly,
+            SaveResult.Failed("SAF copy failed"), false, null,
+        )
+        val cancelled = ExportReceipt.Approved.SaveCancelled(
+            commonDigest, commonDigest, 1, ProtectionMode.LOCAL_ONLY, RecipientSet.LocalOnly,
+            SaveResult.PartialCopyWarning(0, cancelled = true), true, null,
+        )
+        assertIs<ExportReceipt.Approved.SaveFailed>(failed)
+        assertIs<ExportReceipt.Approved.SaveCancelled>(cancelled)
+        // SaveFailed and SaveCancelled constructors have no ShareHandoffState parameter; only
+        // SaveSucceededPendingOrCompleteHandoff accepts (save: SaveResult.Complete, handoff).
     }
 
 }

@@ -1,10 +1,14 @@
 package dev.tracebox.export
 
 import dev.tracebox.api.generated.GeneratedEventId
+import dev.tracebox.api.generated.GeneratedBreadcrumb
+import dev.tracebox.api.generated.GeneratedEmergencyRecord
+import dev.tracebox.api.generated.GeneratedHandledError
 import dev.tracebox.storage.UidAccounting
 import dev.tracebox.storage.UidBucket
 import dev.tracebox.storage.UidQuota
 import java.nio.file.Path
+import java.nio.file.Files
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -15,13 +19,26 @@ import kotlin.test.assertTrue
 
 class PackagePipelineTest {
     private fun identity(seed: Byte) = InternalIdentity.fromBytes(ByteArray(32) { seed })
+    private fun breadcrumb(code: UInt = 7u, time: ULong = 8u) = GeneratedBreadcrumb(code, time)
+    private fun handledError(kind: UInt = 9u, frames: UShort = 1u) = GeneratedHandledError(kind, frames)
+    private fun sharedCborFixturePath(): Path {
+        (System.getProperty("tracebox.sharedCborFixture") ?: System.getenv("TRACEBOX_SHARED_CBOR_FIXTURE"))
+            ?.let { return Path.of(it) }
+        var directory = Path.of("").toAbsolutePath()
+        while (directory.parent != null) {
+            val candidate = directory.resolve("tooling/fixtures/canonical-cbor-single-map.fixture")
+            if (Files.exists(candidate)) return candidate
+            directory = directory.parent
+        }
+        error("shared CBOR fixture not found")
+    }
     private fun accounting(limit: Long = 1_000_000) =
         UidAccounting(UidQuota(mapOf(UidBucket.SNAPSHOTS to limit)), mapOf(UidBucket.SNAPSHOTS to 1))
 
     private fun request(
         records: List<OrdinarySourceRecord> = listOf(
-            OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(7, 8), 100, PackagePrivacyClass.C1),
-            OrdinarySourceRecord(1, GeneratedEventId.HANDLEDERROR, byteArrayOf(9), 200, PackagePrivacyClass.C1),
+            OrdinarySourceRecord(0, breadcrumb(), 100, PackagePrivacyClass.C1),
+            OrdinarySourceRecord(1, handledError(), 200, PackagePrivacyClass.C1),
         ),
     ): StandardSnapshotRequest {
         val segment = identity(2)
@@ -35,8 +52,8 @@ class PackagePipelineTest {
     @Test fun snapshot_strips_internal_ids_assigns_local_ids_and_records_corrupt_omission() {
         val snapshot = SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString()))
             .prepare(request(records = listOf(
-                OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(7), 100, PackagePrivacyClass.C1),
-                OrdinarySourceRecord(1, GeneratedEventId.HANDLEDERROR, byteArrayOf(), 200, PackagePrivacyClass.C1, valid = false),
+                OrdinarySourceRecord(0, breadcrumb(), 100, PackagePrivacyClass.C1),
+                OrdinarySourceRecord(1, handledError(), 200, PackagePrivacyClass.C1, valid = false),
             )))
 
         assertEquals(1, snapshot.entries.size)
@@ -46,18 +63,10 @@ class PackagePipelineTest {
         assertTrue(!snapshot.entries.single().bytes().asList().windowed(32).any { it.all { byte -> byte == 1.toByte() } })
     }
 
-    @Test fun internal_identity_binary_or_hex_leak_fails_snapshot_preparation() {
+    @Test fun internal_identity_binary_or_hex_leak_is_rejected_by_scanner() {
         val id = identity(0x5a)
-        val segment = identity(0x2)
-        val request = StandardSnapshotRequest(
-            1,
-            mapOf(segment to 0),
-            listOf(SegmentSource(id, segment, 1, listOf(
-                OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, id.bytes(), 1, PackagePrivacyClass.C1),
-            ))),
-        )
         assertFailsWith<SnapshotFailure.InternalIdentityLeak> {
-            SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString())).prepare(request)
+            RawArtifactIdentityScanner.requireNoKnownIdentityEncoding(id.bytes(), listOf(id))
         }
     }
 
@@ -101,24 +110,34 @@ class PackagePipelineTest {
         assertEquals(ready.packageBytes.exactBytes().size.toLong(), exact.used(UidBucket.SNAPSHOTS))
     }
 
-    @Test fun raw_artifact_source_has_no_standard_request_constructor_path() {
+    @Test fun ordinary_source_record_requires_a_generated_record_not_raw_bytes() {
         val raw = RawArtifactSource.captured(byteArrayOf(0x4d, 0x44), identity(9))
-        assertEquals(2, raw.bytes.size)
-        // SegmentSource.records is List<OrdinarySourceRecord>, not List<PackageSourceInput>;
-        // therefore passing `raw` here is a Kotlin compile-time type mismatch.
+        assertEquals(identity(9), raw.artifactIdentity)
+        val record = OrdinarySourceRecord(0, breadcrumb(), 1, PackagePrivacyClass.C1)
+        assertEquals(GeneratedEventId.BREADCRUMB, record.eventId)
+        // OrdinarySourceRecord(sequence, generated: GeneratedRecord, occurredAtMillis, ...) has no
+        // ByteArray overload; RawArtifactSource exposes no bytes property, so raw bytes cannot enter.
     }
 
     @Test fun schema_visibility_is_enforced() {
         assertFailsWith<SnapshotFailure.CorruptInput> {
             SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString())).prepare(
-                request(listOf(OrdinarySourceRecord(0, GeneratedEventId.EMERGENCYRECORD, byteArrayOf(), 1, PackagePrivacyClass.C0))),
+                request(listOf(OrdinarySourceRecord(0, GeneratedEmergencyRecord(0u, 0u, 0, 0, 0u, 0u, 0u), 1, PackagePrivacyClass.C0))),
             )
         }
     }
 
-    @Test fun canonical_cbor_has_shared_golden_vector_and_reencodes_identically() {
-        val golden = byteArrayOf(0xa1.toByte(), 0x61, 0x61, 0x01)
-        assertContentEquals(golden, CanonicalCbor.encode(CborValue.Map(mapOf("a" to CborValue.Unsigned(1)))))
+    @Test fun canonical_cbor_encodes_shared_fixture_for_the_rust_cross_language_test() {
+        val fixture = Files.readAllLines(sharedCborFixturePath()).associate {
+            val (key, value) = it.split("=", limit = 2)
+            key to value
+        }
+        val encoded = CanonicalCbor.encode(
+            CborValue.Map(mapOf(checkNotNull(fixture["key"]) to CborValue.Unsigned(checkNotNull(fixture["unsigned"]).toLong()))),
+        )
+        (System.getProperty("tracebox.crossLanguageCborOutput") ?: System.getenv("TRACEBOX_CROSS_LANGUAGE_CBOR_OUTPUT"))?.let { output ->
+            Path.of(output).also { Files.createDirectories(it.parent) }.let { Files.write(it, encoded) }
+        }
 
         val snapshot = SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString())).prepare(request())
         assertContentEquals(ManifestEncoder.encode(snapshot).bytes(), ManifestEncoder.encode(snapshot).bytes())
@@ -129,13 +148,13 @@ class PackagePipelineTest {
             identity(9),
             identity(4),
             1,
-            listOf(OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(1), 20, PackagePrivacyClass.C1)),
+            listOf(OrdinarySourceRecord(0, breadcrumb(1u, 1u), 20, PackagePrivacyClass.C1)),
         )
         val second = SegmentSource(
             identity(3),
             identity(2),
             1,
-            listOf(OrdinarySourceRecord(0, GeneratedEventId.HANDLEDERROR, byteArrayOf(2), 10, PackagePrivacyClass.C1)),
+            listOf(OrdinarySourceRecord(0, handledError(2u, 1u), 10, PackagePrivacyClass.C1)),
         )
         val cutoffs = mapOf(first.segmentIdentity to 0L, second.segmentIdentity to 0L)
         val one = SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString()))

@@ -22,7 +22,7 @@ sealed interface MaterializedPackage {
     val manifest: PackageManifest
     fun exactBytes(): ByteArray
     fun plaintextSha256(): ByteArray
-    fun transferStagingQuota(destination: java.nio.file.Path): Boolean
+    fun reserveStagingQuota(destination: java.nio.file.Path): (() -> Unit)?
     fun releaseStagingQuota()
     fun withQuotaReservation(reservation: SnapshotPreparer.PackageQuotaReservation): MaterializedPackage
 }
@@ -38,8 +38,16 @@ private class FinalizedPackage(
     private val digest = digest.copyOf()
     override fun exactBytes(): ByteArray = materializedBytes.copyOf()
     override fun plaintextSha256(): ByteArray = digest.copyOf()
-    override fun transferStagingQuota(destination: java.nio.file.Path): Boolean =
-        quotaReservation?.transferTo(destination) ?: false
+    private var pendingReservation = quotaReservation != null
+
+    override fun reserveStagingQuota(destination: java.nio.file.Path): (() -> Unit)? = synchronized(this) {
+        val reservation = quotaReservation ?: return null
+        if (pendingReservation) {
+            reservation.release()
+            pendingReservation = false
+        }
+        reservation.reserveLease(destination)?.let { lease -> { lease.release() } }
+    }
     override fun releaseStagingQuota() { quotaReservation?.release() }
 
     override fun withQuotaReservation(reservation: SnapshotPreparer.PackageQuotaReservation): MaterializedPackage =

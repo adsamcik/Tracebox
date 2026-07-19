@@ -28,17 +28,65 @@ sealed interface ExportReceipt {
     data class GenerationFailed(val cause: PackagePipelineFailure) : ExportReceipt
     data object Cancelled : ExportReceipt
     data class PreviewGenerated(val outputDigest: ByteArray, val outputSize: Long) : ExportReceipt
-    data class Approved(
-        val approvedPlaintextDigest: ByteArray,
-        val outputDigest: ByteArray,
-        val outputSize: Long,
-        val protectionMode: ProtectionMode,
-        val recipients: RecipientSet,
-        val save: SaveResult,
-        val handoff: ShareHandoffState,
-        val cancellationObserved: Boolean,
-        val stagingExpiryMillis: Long?,
-    ) : ExportReceipt
+
+    sealed interface Approved : ExportReceipt {
+        val approvedPlaintextDigest: ByteArray
+        val outputDigest: ByteArray
+        val outputSize: Long
+        val protectionMode: ProtectionMode
+        val recipients: RecipientSet
+        val cancellationObserved: Boolean
+        val stagingExpiryMillis: Long?
+
+        data class SaveNotRequested(
+            override val approvedPlaintextDigest: ByteArray,
+            override val outputDigest: ByteArray,
+            override val outputSize: Long,
+            override val protectionMode: ProtectionMode,
+            override val recipients: RecipientSet,
+            override val cancellationObserved: Boolean,
+            override val stagingExpiryMillis: Long?,
+        ) : Approved
+
+        /** This terminal failure has no handoff parameter, so it cannot represent sharing. */
+        data class SaveFailed(
+            override val approvedPlaintextDigest: ByteArray,
+            override val outputDigest: ByteArray,
+            override val outputSize: Long,
+            override val protectionMode: ProtectionMode,
+            override val recipients: RecipientSet,
+            val save: SaveResult.Failed,
+            override val cancellationObserved: Boolean,
+            override val stagingExpiryMillis: Long?,
+        ) : Approved
+
+        /** This terminal cancellation has no handoff parameter, so it cannot represent sharing. */
+        data class SaveCancelled(
+            override val approvedPlaintextDigest: ByteArray,
+            override val outputDigest: ByteArray,
+            override val outputSize: Long,
+            override val protectionMode: ProtectionMode,
+            override val recipients: RecipientSet,
+            val save: SaveResult.PartialCopyWarning,
+            override val cancellationObserved: Boolean,
+            override val stagingExpiryMillis: Long?,
+        ) : Approved {
+            init { require(save.cancelled) }
+        }
+
+        /** The only approved receipt that has both a successful save and a share-handoff state. */
+        data class SaveSucceededPendingOrCompleteHandoff(
+            override val approvedPlaintextDigest: ByteArray,
+            override val outputDigest: ByteArray,
+            override val outputSize: Long,
+            override val protectionMode: ProtectionMode,
+            override val recipients: RecipientSet,
+            val save: SaveResult.Complete,
+            val handoff: ShareHandoffState,
+            override val cancellationObserved: Boolean,
+            override val stagingExpiryMillis: Long?,
+        ) : Approved
+    }
 }
 
 object ReceiptFactory {
@@ -57,9 +105,9 @@ object ReceiptFactory {
         val bytes = approved.exactBytes()
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
         check(approved.matches(digest))
-        return ExportReceipt.Approved(
+        return ExportReceipt.Approved.SaveNotRequested(
             approved.approvedPlaintextDigest(), digest, bytes.size.toLong(), approved.protectionMode(), approved.recipients(),
-            SaveResult.NotRequested, ShareHandoffState.NOT_STARTED, false, expiryMillis,
+            false, expiryMillis,
         )
     }
 

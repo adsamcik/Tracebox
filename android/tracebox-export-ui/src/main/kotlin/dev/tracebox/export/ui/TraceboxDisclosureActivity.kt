@@ -94,7 +94,7 @@ class TraceboxDisclosureActivity : Activity() {
         fun matches(bytes: ByteArray): Boolean
         fun protectionMode(): ProtectionMode
         fun recipients(): RecipientSet
-        fun transferQuotaReservation(destination: java.nio.file.Path): Boolean
+        fun reserveStagingQuota(destination: java.nio.file.Path): (() -> Unit)?
         fun releaseQuotaReservation()
     }
 
@@ -114,8 +114,8 @@ class TraceboxDisclosureActivity : Activity() {
         override fun matches(bytes: ByteArray): Boolean = token.plaintextDigest.contentEquals(bytes)
         override fun protectionMode(): ProtectionMode = token.protectionMode
         override fun recipients(): RecipientSet = token.recipients
-        override fun transferQuotaReservation(destination: java.nio.file.Path): Boolean =
-            materialized.transferStagingQuota(destination)
+        override fun reserveStagingQuota(destination: java.nio.file.Path): (() -> Unit)? =
+            materialized.reserveStagingQuota(destination)
         override fun releaseQuotaReservation() = materialized.releaseStagingQuota()
     }
 

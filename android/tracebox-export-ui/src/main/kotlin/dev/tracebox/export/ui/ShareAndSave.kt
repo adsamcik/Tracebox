@@ -28,8 +28,7 @@ class StagingLeaseManager(private val directory: Path, private val clock: Export
     fun stage(approved: TraceboxDisclosureActivity.ApprovedPackage, ttlMillis: Long): StagingLease {
         return stageReservedForHostTest(
             approved.exactBytes(),
-            approved::transferQuotaReservation,
-            { approved.releaseQuotaReservation() },
+            approved::reserveStagingQuota,
             ttlMillis,
         )
     }
@@ -37,14 +36,13 @@ class StagingLeaseManager(private val directory: Path, private val clock: Export
     /** Shared staging write path; host tests inject a rejected reservation without minting approval. */
     internal fun stageReservedForHostTest(
         exactBytes: ByteArray,
-        transferReservation: (Path) -> Boolean,
-        releaseReservation: () -> Unit,
+        reserveLease: (Path) -> (() -> Unit)?,
         ttlMillis: Long,
     ): StagingLease {
         require(ttlMillis > 0)
         Files.createDirectories(directory)
         val output = directory.resolve("tbdiag-${UUID.randomUUID()}.tbdiag")
-        if (!transferReservation(output)) {
+        val releaseReservation = reserveLease(output) ?: run {
             throw IllegalStateException("finalized package has no available staging quota reservation")
         }
         try { Files.write(output, exactBytes) } catch (failure: Throwable) {
