@@ -27,7 +27,8 @@ pub struct Archive { pub entries: Vec<ArchiveEntry> }
 pub enum ArchiveError {
     Io(String), ArchiveTooLarge(u64), Truncated, InvalidZip(&'static str), TooManyEntries(u16),
     EntryTooLarge(u64), TotalTooLarge(u64), UnsupportedCompression(u16), InvalidEntryName,
-    DuplicateEntry, InvalidUtf8Name, InvalidLocalHeader,
+    DuplicateEntry, InvalidUtf8Name, InvalidLocalHeader, EncryptedEntry, DataDescriptorEntry,
+    LocalHeaderMismatch(&'static str), CrcMismatch { declared: u32, actual: u32 },
 }
 
 impl fmt::Display for ArchiveError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{self:?}") } }
@@ -63,8 +64,11 @@ pub fn parse_archive(bytes: &[u8]) -> Result<Archive, ArchiveError> {
     let mut output = Vec::with_capacity(entries as usize);
     for _ in 0..entries {
         if u32_at(bytes, cursor)? != CENTRAL_DIRECTORY_HEADER { return Err(ArchiveError::InvalidZip("central directory signature")); }
+        let flags = u16_at(bytes, cursor + 8)?;
+        validate_flags(flags)?;
         let method = u16_at(bytes, cursor + 10)?;
         if method != 0 { return Err(ArchiveError::UnsupportedCompression(method)); }
+        let crc = u32_at(bytes, cursor + 16)?;
         let compressed = u32_at(bytes, cursor + 20)? as u64;
         let uncompressed = u32_at(bytes, cursor + 24)? as u64;
         if compressed != uncompressed { return Err(ArchiveError::InvalidZip("STORED size mismatch")); }
@@ -82,7 +86,9 @@ pub fn parse_archive(bytes: &[u8]) -> Result<Archive, ArchiveError> {
         let name = std::str::from_utf8(&bytes[name_start..next]).map_err(|_| ArchiveError::InvalidUtf8Name)?;
         validate_entry_name(name)?;
         if !names.insert(name.to_owned()) { return Err(ArchiveError::DuplicateEntry); }
-        let payload = payload(bytes, local_offset, name.as_bytes(), uncompressed)?;
+        let payload = payload(bytes, local_offset, name.as_bytes(), flags, method, crc, compressed, uncompressed)?;
+        let actual_crc = crc32(payload);
+        if actual_crc != crc { return Err(ArchiveError::CrcMismatch { declared: crc, actual: actual_crc }); }
         output.push(ArchiveEntry { name: name.to_owned(), bytes: payload.to_vec() });
         cursor = next;
     }
@@ -98,17 +104,45 @@ fn find_eocd(bytes: &[u8]) -> Result<usize, ArchiveError> {
     }
     Err(ArchiveError::InvalidZip("missing end of central directory"))
 }
-fn payload<'a>(bytes: &'a [u8], offset: usize, name: &[u8], size: u64) -> Result<&'a [u8], ArchiveError> {
+fn payload<'a>(
+    bytes: &'a [u8], offset: usize, name: &[u8], central_flags: u16, central_method: u16,
+    central_crc: u32, central_compressed: u64, central_uncompressed: u64,
+) -> Result<&'a [u8], ArchiveError> {
     if u32_at(bytes, offset)? != LOCAL_FILE_HEADER { return Err(ArchiveError::InvalidLocalHeader); }
-    if u16_at(bytes, offset + 8)? != 0 { return Err(ArchiveError::InvalidLocalHeader); }
+    let local_flags = u16_at(bytes, offset + 6)?;
+    validate_flags(local_flags)?;
+    let local_method = u16_at(bytes, offset + 8)?;
+    let local_crc = u32_at(bytes, offset + 14)?;
+    let local_compressed = u32_at(bytes, offset + 18)? as u64;
+    let local_uncompressed = u32_at(bytes, offset + 22)? as u64;
+    if local_flags != central_flags { return Err(ArchiveError::LocalHeaderMismatch("flags")); }
+    if local_method != central_method { return Err(ArchiveError::LocalHeaderMismatch("compression method")); }
+    if local_crc != central_crc { return Err(ArchiveError::LocalHeaderMismatch("CRC-32")); }
+    if local_compressed != central_compressed { return Err(ArchiveError::LocalHeaderMismatch("compressed size")); }
+    if local_uncompressed != central_uncompressed { return Err(ArchiveError::LocalHeaderMismatch("uncompressed size")); }
     let local_name_len = u16_at(bytes, offset + 26)? as usize;
     let extra_len = u16_at(bytes, offset + 28)? as usize;
-    if local_name_len != name.len() || extra_len != 0 { return Err(ArchiveError::InvalidLocalHeader); }
+    if local_name_len != name.len() { return Err(ArchiveError::LocalHeaderMismatch("filename")); }
+    if extra_len != 0 { return Err(ArchiveError::InvalidLocalHeader); }
     let name_start = offset.checked_add(30).ok_or(ArchiveError::Truncated)?;
     let data_start = name_start.checked_add(local_name_len).ok_or(ArchiveError::Truncated)?;
-    let data_end = data_start.checked_add(usize::try_from(size).map_err(|_| ArchiveError::EntryTooLarge(size))?).ok_or(ArchiveError::Truncated)?;
-    if data_end > bytes.len() || &bytes[name_start..data_start] != name { return Err(ArchiveError::InvalidLocalHeader); }
+    let data_end = data_start.checked_add(usize::try_from(central_uncompressed).map_err(|_| ArchiveError::EntryTooLarge(central_uncompressed))?).ok_or(ArchiveError::Truncated)?;
+    if data_end > bytes.len() { return Err(ArchiveError::Truncated); }
+    if &bytes[name_start..data_start] != name { return Err(ArchiveError::LocalHeaderMismatch("filename")); }
     Ok(&bytes[data_start..data_end])
+}
+fn validate_flags(flags: u16) -> Result<(), ArchiveError> {
+    if flags & 1 != 0 { return Err(ArchiveError::EncryptedEntry); }
+    if flags & 8 != 0 { return Err(ArchiveError::DataDescriptorEntry); }
+    Ok(())
+}
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0_u32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 { crc = if crc & 1 != 0 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 }; }
+    }
+    !crc
 }
 fn validate_entry_name(name: &str) -> Result<(), ArchiveError> {
     if name.starts_with('/') || name.starts_with('\\') || name.contains('\\') || name.contains('\0') || name.split('/').any(|part| part.is_empty() || part == "." || part == "..") || name.as_bytes().get(1) == Some(&b':') { return Err(ArchiveError::InvalidEntryName); }
@@ -137,9 +171,30 @@ pub fn symbolize(catalog: &[SymbolCatalogEntry], raw: RawFrame) -> Symbolication
 #[cfg(test)]
 mod tests {
  use super::*;
- fn zip(name: &str, payload: &[u8]) -> Vec<u8> { let mut out=Vec::new(); let n=name.as_bytes(); out.extend_from_slice(&LOCAL_FILE_HEADER.to_le_bytes()); out.extend_from_slice(&[20,0,0,0,0,0,0,0,0,0,0,0,0,0]); out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); out.extend_from_slice(&(n.len() as u16).to_le_bytes()); out.extend_from_slice(&[0,0]); out.extend_from_slice(n); out.extend_from_slice(payload); let cd=out.len(); out.extend_from_slice(&CENTRAL_DIRECTORY_HEADER.to_le_bytes()); out.extend_from_slice(&[20,0,20,0,0,0,0,0,0,0,0,0,0,0,0,0]); out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); out.extend_from_slice(&(n.len() as u16).to_le_bytes()); out.extend_from_slice(&[0,0,0,0,0,0,0,0,0,0,0,0]); out.extend_from_slice(&0_u32.to_le_bytes()); out.extend_from_slice(n); let size=out.len()-cd; out.extend_from_slice(&END_OF_CENTRAL_DIRECTORY.to_le_bytes()); out.extend_from_slice(&[0,0,0,0,1,0,1,0]); out.extend_from_slice(&(size as u32).to_le_bytes()); out.extend_from_slice(&(cd as u32).to_le_bytes()); out.extend_from_slice(&[0,0]); out }
+ fn zip(name: &str, payload: &[u8]) -> Vec<u8> {
+  let mut out=Vec::new(); let n=name.as_bytes(); let crc=crc32(payload); let flags=0x0800_u16;
+  out.extend_from_slice(&LOCAL_FILE_HEADER.to_le_bytes()); out.extend_from_slice(&20_u16.to_le_bytes()); out.extend_from_slice(&flags.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&crc.to_le_bytes()); out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); out.extend_from_slice(&(n.len() as u16).to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(n); out.extend_from_slice(payload);
+  let cd=out.len(); out.extend_from_slice(&CENTRAL_DIRECTORY_HEADER.to_le_bytes()); out.extend_from_slice(&20_u16.to_le_bytes()); out.extend_from_slice(&20_u16.to_le_bytes()); out.extend_from_slice(&flags.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&crc.to_le_bytes()); out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); out.extend_from_slice(&(payload.len() as u32).to_le_bytes()); out.extend_from_slice(&(n.len() as u16).to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u32.to_le_bytes()); out.extend_from_slice(&0_u32.to_le_bytes()); out.extend_from_slice(n);
+  let size=out.len()-cd; out.extend_from_slice(&END_OF_CENTRAL_DIRECTORY.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out.extend_from_slice(&1_u16.to_le_bytes()); out.extend_from_slice(&1_u16.to_le_bytes()); out.extend_from_slice(&(size as u32).to_le_bytes()); out.extend_from_slice(&(cd as u32).to_le_bytes()); out.extend_from_slice(&0_u16.to_le_bytes()); out
+ }
+ fn central_directory_offset(bytes: &[u8]) -> usize { u32_at(bytes, bytes.len()-6).unwrap() as usize }
+ fn set_u16(bytes: &mut [u8], offset: usize, value: u16) { bytes[offset..offset+2].copy_from_slice(&value.to_le_bytes()); }
+ fn set_u32(bytes: &mut [u8], offset: usize, value: u32) { bytes[offset..offset+4].copy_from_slice(&value.to_le_bytes()); }
  #[test] fn validates_stored_archive_without_extraction() { let parsed=parse_archive(&zip("manifest.cbor", b"ok")).unwrap(); assert_eq!(parsed.entries[0].name,"manifest.cbor"); }
  #[test] fn rejects_path_traversal() { assert_eq!(parse_archive(&zip("../escape",b"x")),Err(ArchiveError::InvalidEntryName)); }
+ #[test] fn rejects_encryption_flag_in_local_or_central_header() {
+  let mut local=zip("manifest.cbor",b"ok"); set_u16(&mut local,6,0x0801); assert_eq!(parse_archive(&local),Err(ArchiveError::EncryptedEntry));
+  let mut central=zip("manifest.cbor",b"ok"); let offset=central_directory_offset(&central); set_u16(&mut central,offset+8,0x0801); assert_eq!(parse_archive(&central),Err(ArchiveError::EncryptedEntry));
+ }
+ #[test] fn rejects_data_descriptor_flag_in_local_or_central_header() {
+  let mut local=zip("manifest.cbor",b"ok"); set_u16(&mut local,6,0x0808); assert_eq!(parse_archive(&local),Err(ArchiveError::DataDescriptorEntry));
+  let mut central=zip("manifest.cbor",b"ok"); let offset=central_directory_offset(&central); set_u16(&mut central,offset+8,0x0808); assert_eq!(parse_archive(&central),Err(ArchiveError::DataDescriptorEntry));
+ }
+ #[test] fn rejects_mismatched_local_and_central_crc_or_size() {
+  let mut crc_mismatch=zip("manifest.cbor",b"ok"); set_u32(&mut crc_mismatch,14,0); assert_eq!(parse_archive(&crc_mismatch),Err(ArchiveError::LocalHeaderMismatch("CRC-32")));
+  let mut size_mismatch=zip("manifest.cbor",b"ok"); let central=central_directory_offset(&size_mismatch); set_u32(&mut size_mismatch,central+20,1); set_u32(&mut size_mismatch,central+24,1); assert_eq!(parse_archive(&size_mismatch),Err(ArchiveError::LocalHeaderMismatch("compressed size")));
+ }
+ #[test] fn rejects_payload_with_wrong_crc() { let mut corrupted=zip("manifest.cbor",b"ok"); corrupted[30+"manifest.cbor".len()]^=0xff; assert!(matches!(parse_archive(&corrupted),Err(ArchiveError::CrcMismatch { .. }))); }
  #[test] fn mutation_corpus_never_panics() { let good=zip("manifest.cbor",b"ok"); for index in 0..good.len() { let mut value=good.clone(); value[index]^=0xff; assert!(std::panic::catch_unwind(|| parse_archive(&value)).is_ok()); } for length in 0..good.len() { assert!(std::panic::catch_unwind(|| parse_archive(&good[..length])).is_ok()); } }
  #[test] fn mismatch_preserves_raw_frame() { let raw=RawFrame { module:"libx.so".into(), identity:"bad".into(), offset:42 }; let outcome=symbolize(&[SymbolCatalogEntry{module:"libx.so".into(),identity:"good".into(),offset:42,symbol:"rust_or_cpp".into()}],raw.clone()); assert_eq!(outcome,Symbolication::IdentityMismatch{raw,available:vec!["good".into()]}); }
  #[test] fn missing_entry_is_unresolved() { let raw=RawFrame { module:"libx.so".into(), identity:"good".into(), offset:99 }; assert_eq!(symbolize(&[],raw.clone()),Symbolication::Unresolved{raw}); }
