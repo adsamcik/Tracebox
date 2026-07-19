@@ -1,0 +1,30 @@
+{
+  "requirement_id": "P4.1",
+  "scope": "Recovered Phase 2 segment and Phase 3 structural-summary spool integration into StandardSnapshotRequest",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "tool_versions": {
+    "gradle": "9.6.1",
+    "kotlin": "2.3.10"
+  },
+  "commands": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-export:testDebugUnitTest --tests dev.tracebox.export.PackagePipelineTest --no-daemon",
+      "exit_status": 0,
+      "test_count": 11,
+      "assertions": [
+        "recovered_storage_adapter_selects_real_segments_and_imported_phase3_summary passed",
+        "the test creates a real SegmentWriter segment, stages a real GeneratedStructuralSummary through StructuralSummarySpool, imports it with TargetSegmentSummaryImporter, recovers it through RecoveredSnapshotRequestAdapter, and verifies two package-local record IDs and both encoded generated payloads"
+      ]
+    },
+    {
+      "command": ".\\gradlew.bat :android:tracebox-storage:testDebugUnitTest --tests dev.tracebox.storage.FailureCaptureStoreTest --no-daemon",
+      "exit_status": 0,
+      "test_count": 8,
+      "assertions": [
+        "Phase 3 spool/import, generated-record persistence, raw lifecycle, and emergency-ingestion tests passed"
+      ]
+    }
+  ],
+  "matrix_cell": "HOST_WINDOWS_X86_64_GRADLE_KOTLIN",
+  "result": "PASS"
+}

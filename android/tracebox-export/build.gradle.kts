@@ -9,5 +9,6 @@ android {
 dependencies {
     implementation(project(":android:tracebox-api"))
     implementation(project(":android:tracebox-storage"))
+    testImplementation(project(":android:tracebox-core"))
     testImplementation(kotlin("test-junit"))
 }

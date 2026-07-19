@@ -4,6 +4,21 @@ import dev.tracebox.api.generated.GeneratedEventId
 import dev.tracebox.api.generated.GeneratedBreadcrumb
 import dev.tracebox.api.generated.GeneratedEmergencyRecord
 import dev.tracebox.api.generated.GeneratedHandledError
+import dev.tracebox.api.generated.GeneratedStructuralSummary
+import dev.tracebox.core.ControlPage
+import dev.tracebox.core.GateResult
+import dev.tracebox.core.PolicySnapshot
+import dev.tracebox.core.PolicyTaggedRecord
+import dev.tracebox.core.RecordPriority
+import dev.tracebox.core.WriterPolicyGate
+import dev.tracebox.storage.GeneratedRecordCodec
+import dev.tracebox.storage.PersistedSegmentIdentity
+import dev.tracebox.storage.RoleQuotaLedger
+import dev.tracebox.storage.RoleQuotaPolicy
+import dev.tracebox.storage.SegmentHeader
+import dev.tracebox.storage.SegmentWriter
+import dev.tracebox.storage.StructuralSummarySpool
+import dev.tracebox.storage.TargetSegmentSummaryImporter
 import dev.tracebox.storage.UidAccounting
 import dev.tracebox.storage.UidBucket
 import dev.tracebox.storage.UidQuota
@@ -117,6 +132,51 @@ class PackagePipelineTest {
         assertEquals(GeneratedEventId.BREADCRUMB, record.eventId)
         // OrdinarySourceRecord(sequence, generated: GeneratedRecord, occurredAtMillis, ...) has no
         // ByteArray overload; RawArtifactSource exposes no bytes property, so raw bytes cannot enter.
+    }
+
+    @Test fun recovered_storage_adapter_selects_real_segments_and_imported_phase3_summary() {
+        val root = Path.of("build", "phase4-integration", UUID.randomUUID().toString())
+        Files.createDirectories(root)
+        val segment = root.resolve("ordinary.tbseg")
+        val page = ControlPage(root.resolve("control"))
+        page.commit(PolicySnapshot(9, 0))
+        val gate = WriterPolicyGate(page)
+        assertEquals(GateResult.Reloaded, gate.reload())
+        val writer = SegmentWriter.create(
+            segment,
+            SegmentHeader(
+                PersistedSegmentIdentity(ByteArray(32) { 2 }, ByteArray(32) { 1 }),
+                ByteArray(32) { 3 },
+                9,
+                0,
+                7,
+            ),
+            gate,
+            RoleQuotaLedger(RoleQuotaPolicy(mapOf(7 to 1_000_000)), root),
+        )
+        val breadcrumb = GeneratedBreadcrumb(42u, 9_000u)
+        writer.append(
+            breadcrumb.eventId.stableId,
+            PolicyTaggedRecord(4L, 9, RecordPriority.BREADCRUMB, GeneratedRecordCodec.encode(breadcrumb)),
+        )
+        val summary = GeneratedStructuralSummary(1u, 2u, 3u, 4u, 5u)
+        val spool = StructuralSummarySpool(root.resolve("spool"))
+        spool.stageStructuralSummary(ByteArray(32) { 4 }, 1, ByteArray(32) { 5 }, summary)
+        spool.replayToTarget(TargetSegmentSummaryImporter(root.resolve("acknowledgements"), segment, writer))
+
+        val request = RecoveredSnapshotRequestAdapter().build(9, 7, 1, listOf(segment))
+        val source = request.segments.single()
+        assertEquals(2, source.records.size)
+        assertEquals(GeneratedEventId.BREADCRUMB, source.records[0].eventId)
+        assertEquals(GeneratedEventId.STRUCTURALSUMMARY, source.records[1].eventId)
+
+        val prepared = SnapshotPreparer(accounting(), root.resolve("staging")).prepare(request)
+        assertEquals(2, prepared.entries.size)
+        assertEquals(listOf(1, 2), prepared.entries.map { it.recordLocalId })
+        assertEquals(listOf(1, 1), prepared.entries.map { it.processLocalId })
+        assertEquals(listOf(1, 1), prepared.entries.map { it.segmentLocalId })
+        assertContentEquals(GeneratedRecordCodec.encode(breadcrumb), prepared.entries[0].bytes().copyOfRange(32, 44))
+        assertContentEquals(GeneratedRecordCodec.encode(summary), prepared.entries[1].bytes().copyOfRange(32, 50))
     }
 
     @Test fun schema_visibility_is_enforced() {

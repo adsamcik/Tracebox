@@ -3,10 +3,8 @@ package dev.tracebox.export
 import dev.tracebox.api.generated.GeneratedEventId
 import dev.tracebox.api.generated.GeneratedExportMetadata
 import dev.tracebox.api.generated.GeneratedBreadcrumb
-import dev.tracebox.api.generated.GeneratedEmergencyRecord
-import dev.tracebox.api.generated.GeneratedHandledError
 import dev.tracebox.api.generated.GeneratedRecord
-import dev.tracebox.api.generated.GeneratedStructuralSummary
+import dev.tracebox.storage.GeneratedRecordCodec
 import dev.tracebox.storage.UidAccounting
 import dev.tracebox.storage.UidBucket
 import java.nio.ByteBuffer
@@ -59,7 +57,7 @@ class OrdinarySourceRecord(
     val artifactIdentity: InternalIdentity? = null,
     val valid: Boolean = true,
 ) : PackageSourceInput {
-    internal val encodedPayload: ByteArray = GeneratedRecordPayloadEncoder.encode(generated)
+    internal val encodedPayload: ByteArray = GeneratedRecordCodec.encode(generated)
 
     init {
         require(sequence >= 0 && occurredAtMillis >= 0 && encodedPayload.size <= MAX_ORDINARY_RECORD_BYTES)
@@ -80,28 +78,6 @@ class RawArtifactSource private constructor(
     companion object {
         fun captured(bytes: ByteArray, artifactIdentity: InternalIdentity): RawArtifactSource =
             RawArtifactSource(bytes.copyOf(), artifactIdentity)
-    }
-}
-
-/** The Phase 3 generated-record primitive encoding, limited to bounded schema fields. */
-private object GeneratedRecordPayloadEncoder {
-    fun encode(value: GeneratedRecord): ByteArray = when (value) {
-        is GeneratedStructuralSummary -> ByteBuffer.allocate(18).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(value.stream_count.toInt()).putInt(value.thread_count.toInt())
-            putInt(value.module_count.toInt()).putInt(value.exception_code.toInt())
-            putShort(value.processor_architecture.toShort())
-        }.array()
-        is GeneratedEmergencyRecord -> ByteBuffer.allocate(40).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putLong(value.slot_sequence.toLong()).putLong(value.policy_epoch.toLong())
-            putInt(value.signal_number).putInt(value.signal_code)
-            putInt(value.process_role.toInt()).putInt(value.thread_role.toInt()).putLong(value.flags.toLong())
-        }.array()
-        is GeneratedBreadcrumb -> ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(value.code.toInt()).putLong(value.monotonic_time_ns.toLong())
-        }.array()
-        is GeneratedHandledError -> ByteBuffer.allocate(6).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(value.kind.toInt()).putShort(value.frame_count.toShort())
-        }.array()
     }
 }
 

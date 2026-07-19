@@ -15,6 +15,7 @@ import dev.tracebox.api.generated.GeneratedEmergencyRecord
 import dev.tracebox.api.generated.GeneratedEventId
 import dev.tracebox.api.generated.GeneratedHandledError
 import dev.tracebox.api.generated.GeneratedRecord
+import dev.tracebox.api.generated.GeneratedStructuralSummary
 import dev.tracebox.core.GateAcceptance
 import dev.tracebox.core.GateResult
 import dev.tracebox.core.JvmCapturePolicy
@@ -169,6 +170,14 @@ class StructuralSummarySpool(private val root: Path) {
         }
         return id
     }
+
+    /** Stages a schema-generated summary whose body can later be recovered into ordinary storage. */
+    fun stageStructuralSummary(
+        rawId: ByteArray,
+        extractorVersion: Int,
+        schema: ByteArray,
+        summary: GeneratedStructuralSummary,
+    ): String = stage(rawId, extractorVersion, schema, GeneratedRecordCodec.encode(summary))
 
     fun replay(import: (String, ByteArray) -> Unit) {
         Files.list(root).use { paths ->
@@ -362,17 +371,7 @@ class StructuralSummarySpool(private val root: Path) {
                 GeneratedEventId.HANDLEDERROR -> Descriptor(8L, RecordPriority.HANDLED_ERROR)
             }
 
-            private fun encode(value: GeneratedRecord): ByteArray = when (value) {
-                is GeneratedEmergencyRecord -> ByteBuffer.allocate(40).order(java.nio.ByteOrder.LITTLE_ENDIAN).apply {
-                    putLong(value.slot_sequence.toLong()).putLong(value.policy_epoch.toLong())
-                    putInt(value.signal_number).putInt(value.signal_code)
-                    putInt(value.process_role.toInt()).putInt(value.thread_role.toInt()).putLong(value.flags.toLong())
-                }.array()
-                is GeneratedHandledError -> ByteBuffer.allocate(6).order(java.nio.ByteOrder.LITTLE_ENDIAN).apply {
-                    putInt(value.kind.toInt()).putShort(value.frame_count.toShort())
-                }.array()
-                else -> throw IllegalArgumentException("unsupported generated failure record")
-            }
+            private fun encode(value: GeneratedRecord): ByteArray = GeneratedRecordCodec.encode(value)
 
             private data class Descriptor(val category: Long, val priority: RecordPriority)
         }
