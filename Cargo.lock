@@ -92,6 +92,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tbdiag-cli"
+version = "0.1.0"
+dependencies = [
+ "tbdiag-format",
+]
+
+[[package]]
 name = "tbdiag-format"
 version = "0.1.0"
 

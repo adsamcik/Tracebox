@@ -2,6 +2,7 @@
 members = [
     "rust/tbdiag-phase0",
     "rust/tbdiag-format",
+    "rust/tbdiag-cli",
     "rust/tracebox-phase0",
     "rust/tracebox-sys",
     "rust/tracebox",
