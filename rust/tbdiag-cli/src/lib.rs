@@ -194,6 +194,16 @@ mod tests {
   let mut crc_mismatch=zip("manifest.cbor",b"ok"); set_u32(&mut crc_mismatch,14,0); assert_eq!(parse_archive(&crc_mismatch),Err(ArchiveError::LocalHeaderMismatch("CRC-32")));
   let mut size_mismatch=zip("manifest.cbor",b"ok"); let central=central_directory_offset(&size_mismatch); set_u32(&mut size_mismatch,central+20,1); set_u32(&mut size_mismatch,central+24,1); assert_eq!(parse_archive(&size_mismatch),Err(ArchiveError::LocalHeaderMismatch("compressed size")));
  }
+ #[test] fn rejects_mismatched_local_compression_method() {
+  // The central method is forced to STORED (0) at the outer entry-loop check before payload()
+  // ever runs, so only the LOCAL method field can diverge and reach the local/central compare.
+  let mut method_mismatch=zip("manifest.cbor",b"ok"); set_u16(&mut method_mismatch,8,5); assert_eq!(parse_archive(&method_mismatch),Err(ArchiveError::LocalHeaderMismatch("compression method")));
+ }
+ #[test] fn rejects_mismatched_local_filename_content() {
+  // Same declared length as the central name, but different bytes: length check at
+  // `local_name_len != name.len()` passes, so this exercises the byte-content compare.
+  let mut name_mismatch=zip("manifest.cbor",b"ok"); name_mismatch[30]^=0xff; assert_eq!(parse_archive(&name_mismatch),Err(ArchiveError::LocalHeaderMismatch("filename")));
+ }
  #[test] fn rejects_payload_with_wrong_crc() { let mut corrupted=zip("manifest.cbor",b"ok"); corrupted[30+"manifest.cbor".len()]^=0xff; assert!(matches!(parse_archive(&corrupted),Err(ArchiveError::CrcMismatch { .. }))); }
  #[test] fn mutation_corpus_never_panics() { let good=zip("manifest.cbor",b"ok"); for index in 0..good.len() { let mut value=good.clone(); value[index]^=0xff; assert!(std::panic::catch_unwind(|| parse_archive(&value)).is_ok()); } for length in 0..good.len() { assert!(std::panic::catch_unwind(|| parse_archive(&good[..length])).is_ok()); } }
  #[test] fn mismatch_preserves_raw_frame() { let raw=RawFrame { module:"libx.so".into(), identity:"bad".into(), offset:42 }; let outcome=symbolize(&[SymbolCatalogEntry{module:"libx.so".into(),identity:"good".into(),offset:42,symbol:"rust_or_cpp".into()}],raw.clone()); assert_eq!(outcome,Symbolication::IdentityMismatch{raw,available:vec!["good".into()]}); }
