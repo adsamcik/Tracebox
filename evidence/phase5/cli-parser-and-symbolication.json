@@ -1,0 +1,11 @@
+{
+  "work_package": "T5.1/T5.3",
+  "command": "cargo test -p tbdiag-cli",
+  "result": "PASS",
+  "assertions": [
+    "bounded deterministic STORED ZIP parser rejects traversal and malformed mutations without panic",
+    "symbolication resolves only exact module identity and offset",
+    "identity mismatch preserves the raw module and offset as a typed hard failure"
+  ],
+  "limitations": ["v1 deliberately rejects unsupported compression and external symbol subprocesses"]
+}

@@ -1,0 +1,12 @@
+{
+    "scope":  "host static source, manifest, and dependency closure",
+    "manifests_scanned":  7,
+    "rust_packages_scanned":  21,
+    "gradle_files_scanned":  12,
+    "runtime_sources_scanned":  55,
+    "crashpad_inputs_scanned":  15,
+    "dynamic_dex_native_import_and_blocked_egress":  "UNAVAILABLE_EXTERNAL: no physical/emulator Android device is available; runtime observation was not attempted",
+    "claim":  "Tracebox-owned runtime and tooling artifacts introduce no network permission, networking dependency, uploader, exporter, remote configuration, or observed runtime network attempt in certified paths",
+    "claim_scope":  "Static portions verified by this command only; observed runtime network attempt remains unavailable and is not certified.",
+    "result":  "PASS"
+}

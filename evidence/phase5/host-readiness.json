@@ -1,0 +1,9 @@
+{
+  "work_package": "T5.6",
+  "command": "tools/verify/Invoke-Phase5HostReadiness.ps1",
+  "result": "FAIL",
+  "passing_stages": ["Verify-FoundationSpecs.ps1", "Verify-Phase5NoNetworkStatic.ps1", "cargo test --workspace"],
+  "failing_stage": "gradlew.bat phase1Check phase2Check phase4CoreCheck --offline --no-daemon",
+  "failure": "phase0-fixture releaseRuntimeClasspath resolves Kotlin coroutines 1.10.2 absent from its gradle.lockfile",
+  "certification_status": "Not certified; device/OEM/physical matrix is unavailable and Gradle dependency locking needs repair."
+}
