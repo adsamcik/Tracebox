@@ -1,9 +1,14 @@
 {
   "work_package": "T5.6",
   "command": "tools/verify/Invoke-Phase5HostReadiness.ps1",
-  "result": "FAIL",
-  "passing_stages": ["Verify-FoundationSpecs.ps1", "Verify-Phase5NoNetworkStatic.ps1", "cargo test --workspace"],
-  "failing_stage": "gradlew.bat phase1Check phase2Check phase4CoreCheck --offline --no-daemon",
-  "failure": "phase0-fixture releaseRuntimeClasspath resolves Kotlin coroutines 1.10.2 absent from its gradle.lockfile",
-  "certification_status": "Not certified; device/OEM/physical matrix is unavailable and Gradle dependency locking needs repair."
+  "result": "PASS",
+  "passing_stages": [
+    "Verify-FoundationSpecs.ps1",
+    "Verify-Phase5NoNetworkStatic.ps1",
+    "cargo test --workspace",
+    "gradlew.bat phase1Check phase2Check phase4CoreCheck --offline --no-daemon"
+  ],
+  "remediation_history": "An initial run found `phase0-fixture`'s releaseRuntimeClasspath resolving Kotlin coroutines 1.10.2 absent from its gradle.lockfile, and several android/* modules (tracebox-api, tracebox-core, tracebox-directboot, tracebox-export, tracebox-export-ui, tracebox-storage) and tooling/tracebox-gradle-plugin had never had a gradle.lockfile committed at all. Both gaps were pre-existing drift accumulated across Phases 1-4, not something this phase's own commits introduced (verified: this phase's own commits touching Rust/Kotlin were dependency-neutral). Regenerated locks for every module via `gradlew <module>:dependencies --write-locks --no-daemon --offline` across all 11 subprojects in one pass, then re-ran this script end-to-end and confirmed exit code 0.",
+  "certification_status": "Not certified; the device/OEM/physical matrix required for FOUNDATION_CERTIFIED remains unavailable in this environment (consistent with Phase 0's ADR-0008 record). All currently-available host-level automated evidence across Phases 1-5 passes in one consolidated run."
 }
+
