@@ -36,6 +36,13 @@ class TraceboxDisclosureActivity : Activity() {
         // Approval is intentionally not saved. Restoration requires a new confirmation gesture.
     }
 
+    override fun onDestroy() {
+        if (!isChangingConfigurations) {
+            packageHandle?.let(DisclosurePackageRegistry::remove)
+        }
+        super.onDestroy()
+    }
+
     private fun showDisclosure(facts: DisclosureFacts) {
         val details = buildString {
             append("Included: ${facts.includedCount} values, ${facts.includedBytes} bytes\n")
@@ -141,6 +148,7 @@ internal object DisclosurePackageRegistry {
     private val packages = ConcurrentHashMap<String, MaterializedPackage>()
     fun put(materialized: MaterializedPackage): String = UUID.randomUUID().toString().also { packages[it] = materialized }
     fun find(handle: String): MaterializedPackage? = packages[handle]
+    fun remove(handle: String) { packages.remove(handle) }
 }
 
 internal object ApprovalResultRegistry {

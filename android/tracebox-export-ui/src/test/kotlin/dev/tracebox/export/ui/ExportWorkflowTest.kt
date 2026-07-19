@@ -58,6 +58,17 @@ class ExportWorkflowTest {
         assertEquals(emptyList(), disclosure.facts.rawC2Artifacts)
     }
 
+    @Test fun disclosure_registry_releases_terminal_flow_and_preserves_recreation_flow() {
+        val materialized = assertIs<PackagePipelineResult.Ready>(pipeline(request())).packageBytes
+        val terminalHandle = DisclosurePackageRegistry.put(materialized)
+        DisclosurePackageRegistry.remove(terminalHandle)
+        assertNull(DisclosurePackageRegistry.find(terminalHandle))
+
+        val recreationHandle = DisclosurePackageRegistry.put(materialized)
+        assertTrue(DisclosurePackageRegistry.find(recreationHandle) != null)
+        DisclosurePackageRegistry.remove(recreationHandle)
+    }
+
     @Test fun failed_pipeline_receipt_has_no_shareable_fields() {
         val receipt = ReceiptFactory.fromPipeline(assertIs<PackagePipelineResult.Failed>(pipeline(request(), limit = 1)))
         val failed = assertIs<ExportReceipt.GenerationFailed>(receipt)
@@ -83,7 +94,28 @@ class ExportWorkflowTest {
         assertFailsWith<IllegalStateException> {
             manager.stageReservedForHostTest(byteArrayOf(1), { null }, ttlMillis = 5)
         }
+
         assertTrue(!java.nio.file.Files.exists(root) || java.nio.file.Files.list(root).use { !it.findAny().isPresent })
+    }
+
+    @Test fun staging_post_write_failure_removes_file_and_releases_reservation_once() {
+        val root = Path.of(
+            "build",
+            "phase4-workflow",
+            "staging-rollback-${System.nanoTime()}",
+            StagingLeaseManager.STAGING_DIRECTORY,
+        )
+        val releases = AtomicInteger()
+        val manager = StagingLeaseManager(root, { 100L }) {
+            throw IllegalStateException("injected registration failure")
+        }
+
+        assertFailsWith<IllegalStateException> {
+            manager.stageReservedForHostTest(byteArrayOf(1, 2, 3), { { releases.incrementAndGet() } }, ttlMillis = 5)
+        }
+
+        assertEquals(1, releases.get())
+        assertTrue(java.nio.file.Files.list(root).use { !it.findAny().isPresent })
     }
 
     @Test fun simultaneous_staging_leases_hold_independent_exact_byte_reservations() {

@@ -61,15 +61,18 @@ class StagingLeaseManager private constructor(
         val releaseReservation = reserveLease(output) ?: run {
             throw IllegalStateException("finalized package has no available staging quota reservation")
         }
-        try { Files.write(output, exactBytes) } catch (failure: Throwable) {
+        try {
+            Files.write(output, exactBytes)
+            val expiry = clock.nowMillis() + ttlMillis
+            Files.setLastModifiedTime(output, FileTime.fromMillis(expiry))
+            hostTestHooks?.afterLeaseFileWritten?.invoke()
+            reservationReleases[output] = releaseReservation
+            return@synchronized StagingLease(output, expiry) { release(output) }
+        } catch (failure: Throwable) {
+            Files.deleteIfExists(output)
             releaseReservation()
             throw failure
         }
-        val expiry = clock.nowMillis() + ttlMillis
-        Files.setLastModifiedTime(output, FileTime.fromMillis(expiry))
-        hostTestHooks?.afterLeaseFileWritten?.invoke()
-        reservationReleases[output] = releaseReservation
-        StagingLease(output, expiry) { release(output) }
     }
 
     fun cleanupExpired(): List<Path> {
