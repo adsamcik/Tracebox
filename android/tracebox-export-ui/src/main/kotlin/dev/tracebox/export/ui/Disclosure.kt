@@ -117,38 +117,6 @@ object DisclosureDecoder {
         path.isNotEmpty() && !path.startsWith("/") && !path.contains('\\') && path.split('/').none { it == "." || it == ".." || it.isEmpty() }
 }
 
-class ApprovalToken private constructor(
-    val plaintextDigest: ByteArray,
-    val policyEpoch: Long,
-    val protectionMode: ProtectionMode,
-    val recipients: RecipientSet,
-) {
-    internal fun matches(other: ByteArray) = plaintextDigest.contentEquals(other)
-
-    internal companion object {
-        fun issue(facts: DisclosureFacts, protectionMode: ProtectionMode, recipients: RecipientSet) =
-            ApprovalToken(facts.plaintextDigest.copyOf(), facts.policyEpoch, protectionMode, recipients)
-    }
-}
-
-class RenderedDisclosure internal constructor(
-    internal val materialized: MaterializedPackage,
-    val facts: DisclosureFacts,
-)
-
-class ApprovedPackage internal constructor(
-    internal val materialized: MaterializedPackage,
-    internal val token: ApprovalToken,
-) {
-    fun approvedPlaintextDigest(): ByteArray = token.plaintextDigest.copyOf()
-    internal fun exactBytes(): ByteArray = materialized.exactBytes()
-}
-
-internal object ApprovalIssuer {
-    fun afterFreshConfirmation(rendered: RenderedDisclosure): ApprovedPackage =
-        ApprovedPackage(rendered.materialized, ApprovalToken.issue(rendered.facts, ProtectionMode.LOCAL_ONLY, RecipientSet.LocalOnly))
-}
-
 object DisclosureRenderer {
     fun render(materialized: MaterializedPackage): DisclosureDecodeResult {
         val decoded = DisclosureDecoder.decode(materialized.exactBytes())
@@ -157,11 +125,6 @@ object DisclosureRenderer {
         ) decoded else DisclosureDecodeResult.Invalid("package digest mismatch")
     }
 
-    internal fun rendered(materialized: MaterializedPackage): RenderedDisclosure {
-        val decoded = render(materialized) as? DisclosureDecodeResult.Decoded
-            ?: throw IllegalArgumentException("finalized package cannot be disclosed")
-        return RenderedDisclosure(materialized, decoded.facts)
-    }
 }
 
 private sealed interface Cbor {

@@ -9,29 +9,64 @@ import java.nio.file.Path
 import java.nio.file.attribute.FileTime
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
+import java.util.UUID
 
 fun interface ExportClock { fun nowMillis(): Long }
 
-class StagingLease internal constructor(val path: Path, val expiresAtMillis: Long)
+class StagingLease internal constructor(
+    val path: Path,
+    val expiresAtMillis: Long,
+    private val releaseReservation: () -> Unit,
+) {
+    internal fun release() = releaseReservation()
+}
 
 class StagingLeaseManager(private val directory: Path, private val clock: ExportClock) {
+    private val reservationReleases = mutableMapOf<Path, () -> Unit>()
     init { require(directory.fileName.toString() == STAGING_DIRECTORY) }
 
-    fun stage(approved: ApprovedPackage, ttlMillis: Long): StagingLease {
+    fun stage(approved: TraceboxDisclosureActivity.ApprovedPackage, ttlMillis: Long): StagingLease {
+        return stageReservedForHostTest(
+            approved.exactBytes(),
+            approved::transferQuotaReservation,
+            { approved.releaseQuotaReservation() },
+            ttlMillis,
+        )
+    }
+
+    /** Shared staging write path; host tests inject a rejected reservation without minting approval. */
+    internal fun stageReservedForHostTest(
+        exactBytes: ByteArray,
+        transferReservation: (Path) -> Boolean,
+        releaseReservation: () -> Unit,
+        ttlMillis: Long,
+    ): StagingLease {
         require(ttlMillis > 0)
         Files.createDirectories(directory)
-        val output = Files.createTempFile(directory, "tbdiag-", ".tbdiag")
-        Files.write(output, approved.exactBytes())
+        val output = directory.resolve("tbdiag-${UUID.randomUUID()}.tbdiag")
+        if (!transferReservation(output)) {
+            throw IllegalStateException("finalized package has no available staging quota reservation")
+        }
+        try { Files.write(output, exactBytes) } catch (failure: Throwable) {
+            releaseReservation()
+            throw failure
+        }
         val expiry = clock.nowMillis() + ttlMillis
         Files.setLastModifiedTime(output, FileTime.fromMillis(expiry))
-        return StagingLease(output, expiry)
+        reservationReleases[output] = releaseReservation
+        return StagingLease(output, expiry, releaseReservation)
     }
 
     fun cleanupExpired(): List<Path> {
         if (!Files.exists(directory)) return emptyList()
         return Files.list(directory).use { paths ->
             paths.filter { Files.isRegularFile(it) && Files.getLastModifiedTime(it).toMillis() <= clock.nowMillis() }
-                .toList().also { expired -> expired.forEach(Files::deleteIfExists) }
+                .toList().also { expired ->
+                    expired.forEach { path ->
+                        Files.deleteIfExists(path)
+                        reservationReleases.remove(path)?.invoke()
+                    }
+                }
         }
     }
 
@@ -65,7 +100,7 @@ class SafPackageSaver {
         .putExtra(Intent.EXTRA_TITLE, displayName)
 
     fun copyFinalized(
-        approved: ApprovedPackage,
+        approved: TraceboxDisclosureActivity.ApprovedPackage,
         destination: () -> OutputStream,
         isCancelled: () -> Boolean,
         onProgress: (Long) -> Unit,
@@ -93,7 +128,7 @@ class SafPackageSaver {
 
     fun copyFinalizedInBackground(
         executor: Executor,
-        approved: ApprovedPackage,
+        approved: TraceboxDisclosureActivity.ApprovedPackage,
         destination: () -> OutputStream,
         isCancelled: () -> Boolean,
         onProgress: (Long) -> Unit,

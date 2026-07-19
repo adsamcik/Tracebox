@@ -35,7 +35,14 @@ class InternalIdentity private constructor(private val value: ByteArray) : Compa
 
 enum class PackagePrivacyClass { C0, C1, C2 }
 
-data class SourceRecord(
+/**
+ * Standard snapshots only accept ordinary generated records. `RawArtifactSource` is deliberately
+ * not a subtype of this type and `SegmentSource.records` is `List<OrdinarySourceRecord>`, so raw
+ * Crashpad artifacts cannot be passed to `StandardSnapshotRequest` at compile time.
+ */
+sealed interface PackageSourceInput
+
+data class OrdinarySourceRecord(
     val sequence: Long,
     val eventId: GeneratedEventId,
     val payload: ByteArray,
@@ -43,7 +50,7 @@ data class SourceRecord(
     val privacyClass: PackagePrivacyClass,
     val artifactIdentity: InternalIdentity? = null,
     val valid: Boolean = true,
-) {
+) : PackageSourceInput {
     init {
         require(sequence >= 0 && occurredAtMillis >= 0 && payload.size <= MAX_ORDINARY_RECORD_BYTES)
     }
@@ -53,11 +60,22 @@ data class SourceRecord(
     }
 }
 
+/** Reserved for a future Enhanced-mode pipeline; StandardSnapshotRequest has no reference to it. */
+class RawArtifactSource private constructor(
+    val bytes: ByteArray,
+    val artifactIdentity: InternalIdentity,
+) : PackageSourceInput {
+    companion object {
+        fun captured(bytes: ByteArray, artifactIdentity: InternalIdentity): RawArtifactSource =
+            RawArtifactSource(bytes.copyOf(), artifactIdentity)
+    }
+}
+
 data class SegmentSource(
     val processIdentity: InternalIdentity,
     val segmentIdentity: InternalIdentity,
     val processRole: Int,
-    val records: List<SourceRecord>,
+    val records: List<OrdinarySourceRecord>,
 )
 
 /**
@@ -152,14 +170,14 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
             .map { segment ->
                 val cutoff = request.sequenceCutoffs[segment.segmentIdentity]
                     ?: throw SnapshotFailure.CorruptInput("missing frozen cutoff")
-                segment to segment.records.filter { it.sequence <= cutoff }.sortedBy(SourceRecord::sequence)
+                segment to segment.records.filter { it.sequence <= cutoff }.sortedBy(OrdinarySourceRecord::sequence)
             }
 
         val processIds = selected.map { it.first.processIdentity }.distinct().sorted()
             .withIndex().associate { (index, identity) -> identity to index + 1 }
         val segmentIds = selected.map { it.first.segmentIdentity }.distinct().sorted()
             .withIndex().associate { (index, identity) -> identity to index + 1 }
-        val artifactIds = selected.flatMap { (_, records) -> records.mapNotNull(SourceRecord::artifactIdentity) }.distinct().sorted()
+        val artifactIds = selected.flatMap { (_, records) -> records.mapNotNull(OrdinarySourceRecord::artifactIdentity) }.distinct().sorted()
             .withIndex().associate { (index, identity) -> identity to index + 1 }
         val allInternalIdentities = (selected.flatMap { listOf(it.first.processIdentity, it.first.segmentIdentity) } + artifactIds.keys).distinct()
 
@@ -209,8 +227,6 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
                 )
             }
         }
-        val total = entries.sumOf(MaterializedEntry::size)
-        if (!accounting.reserve(stagingKey, UidBucket.SNAPSHOTS, total)) throw SnapshotFailure.StagingQuota(total)
         val range = entries.map(MaterializedEntry::occurredAtMillis).let {
             if (it.isEmpty()) null else it.min()..it.max()
         }
@@ -222,6 +238,17 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
             entries.maxOfOrNull(MaterializedEntry::privacyClass) ?: PackagePrivacyClass.C0,
             range,
         )
+    }
+
+    /**
+     * Charges the exact final ZIP bytes, including the manifest and ZIP metadata—not entry bodies.
+     * The reservation is transferred atomically to a staging lease when one is created.
+     */
+    internal fun reserveFinalizedPackage(exactBytes: Long): PackageQuotaReservation {
+        if (!accounting.reserve(stagingKey, UidBucket.SNAPSHOTS, exactBytes)) {
+            throw SnapshotFailure.StagingQuota(exactBytes)
+        }
+        return PackageQuotaReservation(accounting, stagingKey, exactBytes)
     }
 
     private fun encodeRecord(
@@ -239,5 +266,19 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
 
     private fun assertNoInternalIdentities(bytes: ByteArray, identities: List<InternalIdentity>, location: String) {
         RawArtifactIdentityScanner.requireNoKnownIdentityEncoding(bytes, identities, location)
+    }
+
+    class PackageQuotaReservation internal constructor(
+        private val accounting: UidAccounting,
+        private var path: java.nio.file.Path,
+        val bytes: Long,
+    ) {
+        internal fun transferTo(destination: java.nio.file.Path): Boolean {
+            if (!accounting.transfer(path, destination, UidBucket.SNAPSHOTS, bytes)) return false
+            path = destination
+            return true
+        }
+
+        internal fun release() = accounting.release(path)
     }
 }

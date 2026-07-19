@@ -60,11 +60,17 @@ object CanonicalCbor {
     }
 }
 
-class PackageManifest internal constructor(bytes: ByteArray, entryHashes: Map<String, ByteArray>) {
+sealed interface PackageManifest {
+    fun bytes(): ByteArray
+    fun entryHashes(): Map<String, ByteArray>
+}
+
+/** File-private concrete manifest prevents construction from forged CBOR outside ManifestEncoder. */
+private class EncodedPackageManifest(bytes: ByteArray, entryHashes: Map<String, ByteArray>) : PackageManifest {
     private val encoded = bytes.copyOf()
     private val hashes = entryHashes.mapValues { (_, hash) -> hash.copyOf() }
-    fun bytes(): ByteArray = encoded.copyOf()
-    fun entryHashes(): Map<String, ByteArray> = hashes.mapValues { (_, hash) -> hash.copyOf() }
+    override fun bytes(): ByteArray = encoded.copyOf()
+    override fun entryHashes(): Map<String, ByteArray> = hashes.mapValues { (_, hash) -> hash.copyOf() }
 }
 
 object ManifestEncoder {
@@ -107,6 +113,6 @@ object ManifestEncoder {
                 }),
             ),
         )
-        return PackageManifest(CanonicalCbor.encode(cbor), hashes)
+        return EncodedPackageManifest(CanonicalCbor.encode(cbor), hashes)
     }
 }

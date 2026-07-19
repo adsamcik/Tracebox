@@ -19,9 +19,9 @@ class PackagePipelineTest {
         UidAccounting(UidQuota(mapOf(UidBucket.SNAPSHOTS to limit)), mapOf(UidBucket.SNAPSHOTS to 1))
 
     private fun request(
-        records: List<SourceRecord> = listOf(
-            SourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(7, 8), 100, PackagePrivacyClass.C1),
-            SourceRecord(1, GeneratedEventId.HANDLEDERROR, byteArrayOf(9), 200, PackagePrivacyClass.C1),
+        records: List<OrdinarySourceRecord> = listOf(
+            OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(7, 8), 100, PackagePrivacyClass.C1),
+            OrdinarySourceRecord(1, GeneratedEventId.HANDLEDERROR, byteArrayOf(9), 200, PackagePrivacyClass.C1),
         ),
     ): StandardSnapshotRequest {
         val segment = identity(2)
@@ -35,8 +35,8 @@ class PackagePipelineTest {
     @Test fun snapshot_strips_internal_ids_assigns_local_ids_and_records_corrupt_omission() {
         val snapshot = SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString()))
             .prepare(request(records = listOf(
-                SourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(7), 100, PackagePrivacyClass.C1),
-                SourceRecord(1, GeneratedEventId.HANDLEDERROR, byteArrayOf(), 200, PackagePrivacyClass.C1, valid = false),
+                OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(7), 100, PackagePrivacyClass.C1),
+                OrdinarySourceRecord(1, GeneratedEventId.HANDLEDERROR, byteArrayOf(), 200, PackagePrivacyClass.C1, valid = false),
             )))
 
         assertEquals(1, snapshot.entries.size)
@@ -53,7 +53,7 @@ class PackagePipelineTest {
             1,
             mapOf(segment to 0),
             listOf(SegmentSource(id, segment, 1, listOf(
-                SourceRecord(0, GeneratedEventId.BREADCRUMB, id.bytes(), 1, PackagePrivacyClass.C1),
+                OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, id.bytes(), 1, PackagePrivacyClass.C1),
             ))),
         )
         assertFailsWith<SnapshotFailure.InternalIdentityLeak> {
@@ -72,13 +72,46 @@ class PackagePipelineTest {
         }
     }
 
-    @Test fun staging_quota_is_hard_and_schema_visibility_is_enforced() {
-        assertFailsWith<SnapshotFailure.StagingQuota> {
-            SnapshotPreparer(accounting(1), Path.of("build", "phase4", UUID.randomUUID().toString())).prepare(request())
+    @Test fun finalized_zip_byte_count_is_charged_not_entry_bodies() {
+        val baseline = assertIs<PackagePipelineResult.Ready>(
+            StandardPackagePipeline(
+                SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString())),
+            ).finalize(request()),
+        )
+        val entryBodies = baseline.snapshot.totalBytes()
+        val exactPackageBytes = baseline.packageBytes.exactBytes().size.toLong()
+        assertTrue(exactPackageBytes > entryBodies)
+
+        val insufficient = accounting(exactPackageBytes - 1)
+        val failure = StandardPackagePipeline(
+            SnapshotPreparer(insufficient, Path.of("build", "phase4", UUID.randomUUID().toString())),
+        ).finalize(request())
+        assertIs<PackagePipelineResult.Failed>(failure).also {
+            assertIs<PackagePipelineFailure.Snapshot>(it.failure).also { snapshot ->
+                assertIs<SnapshotFailure.StagingQuota>(snapshot.cause)
+            }
         }
+
+        val exact = accounting(exactPackageBytes)
+        val ready = assertIs<PackagePipelineResult.Ready>(
+            StandardPackagePipeline(
+                SnapshotPreparer(exact, Path.of("build", "phase4", UUID.randomUUID().toString())),
+            ).finalize(request()),
+        )
+        assertEquals(ready.packageBytes.exactBytes().size.toLong(), exact.used(UidBucket.SNAPSHOTS))
+    }
+
+    @Test fun raw_artifact_source_has_no_standard_request_constructor_path() {
+        val raw = RawArtifactSource.captured(byteArrayOf(0x4d, 0x44), identity(9))
+        assertEquals(2, raw.bytes.size)
+        // SegmentSource.records is List<OrdinarySourceRecord>, not List<PackageSourceInput>;
+        // therefore passing `raw` here is a Kotlin compile-time type mismatch.
+    }
+
+    @Test fun schema_visibility_is_enforced() {
         assertFailsWith<SnapshotFailure.CorruptInput> {
             SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString())).prepare(
-                request(listOf(SourceRecord(0, GeneratedEventId.EMERGENCYRECORD, byteArrayOf(), 1, PackagePrivacyClass.C0))),
+                request(listOf(OrdinarySourceRecord(0, GeneratedEventId.EMERGENCYRECORD, byteArrayOf(), 1, PackagePrivacyClass.C0))),
             )
         }
     }
@@ -96,13 +129,13 @@ class PackagePipelineTest {
             identity(9),
             identity(4),
             1,
-            listOf(SourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(1), 20, PackagePrivacyClass.C1)),
+            listOf(OrdinarySourceRecord(0, GeneratedEventId.BREADCRUMB, byteArrayOf(1), 20, PackagePrivacyClass.C1)),
         )
         val second = SegmentSource(
             identity(3),
             identity(2),
             1,
-            listOf(SourceRecord(0, GeneratedEventId.HANDLEDERROR, byteArrayOf(2), 10, PackagePrivacyClass.C1)),
+            listOf(OrdinarySourceRecord(0, GeneratedEventId.HANDLEDERROR, byteArrayOf(2), 10, PackagePrivacyClass.C1)),
         )
         val cutoffs = mapOf(first.segmentIdentity to 0L, second.segmentIdentity to 0L)
         val one = SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString()))

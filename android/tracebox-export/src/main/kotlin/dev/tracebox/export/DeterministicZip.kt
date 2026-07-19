@@ -18,11 +18,32 @@ data class ZipEntryInput(val path: String, val bytes: ByteArray, val declaredSiz
     init { require(declaredSize >= 0) }
 }
 
-class MaterializedPackage internal constructor(bytes: ByteArray, digest: ByteArray, val manifest: PackageManifest) {
+sealed interface MaterializedPackage {
+    val manifest: PackageManifest
+    fun exactBytes(): ByteArray
+    fun plaintextSha256(): ByteArray
+    fun transferStagingQuota(destination: java.nio.file.Path): Boolean
+    fun releaseStagingQuota()
+    fun withQuotaReservation(reservation: SnapshotPreparer.PackageQuotaReservation): MaterializedPackage
+}
+
+/** File-private concrete package prevents arbitrary JVM callers from fabricating finalized bytes. */
+private class FinalizedPackage(
+    bytes: ByteArray,
+    digest: ByteArray,
+    override val manifest: PackageManifest,
+    private val quotaReservation: SnapshotPreparer.PackageQuotaReservation?,
+) : MaterializedPackage {
     private val materializedBytes = bytes.copyOf()
     private val digest = digest.copyOf()
-    fun exactBytes(): ByteArray = materializedBytes.copyOf()
-    fun plaintextSha256(): ByteArray = digest.copyOf()
+    override fun exactBytes(): ByteArray = materializedBytes.copyOf()
+    override fun plaintextSha256(): ByteArray = digest.copyOf()
+    override fun transferStagingQuota(destination: java.nio.file.Path): Boolean =
+        quotaReservation?.transferTo(destination) ?: false
+    override fun releaseStagingQuota() { quotaReservation?.release() }
+
+    override fun withQuotaReservation(reservation: SnapshotPreparer.PackageQuotaReservation): MaterializedPackage =
+        FinalizedPackage(materializedBytes, digest, manifest, reservation)
 }
 
 sealed interface PackagePipelineResult {
@@ -42,7 +63,9 @@ class StandardPackagePipeline(
 ) {
     fun finalize(request: StandardSnapshotRequest): PackagePipelineResult = try {
         val snapshot = preparer.prepare(request)
-        PackagePipelineResult.Ready(snapshot, zip.materialize(snapshot))
+        val materialized = zip.materialize(snapshot)
+        val reservation = preparer.reserveFinalizedPackage(materialized.exactBytes().size.toLong())
+        PackagePipelineResult.Ready(snapshot, materialized.withQuotaReservation(reservation))
     } catch (failure: SnapshotFailure) {
         PackagePipelineResult.Failed(PackagePipelineFailure.Snapshot(failure))
     } catch (failure: PackageConstructionFailure) {
@@ -58,7 +81,7 @@ class DeterministicZip(private val plaintextLimit: Long = DEFAULT_PLAINTEXT_LIMI
         val entries = listOf(ZipEntryInput("manifest.cbor", manifest.bytes())) +
             snapshot.entries.map { ZipEntryInput(it.path, it.bytes()) }
         val bytes = write(entries)
-        return MaterializedPackage(bytes, MessageDigest.getInstance("SHA-256").digest(bytes), manifest)
+        return FinalizedPackage(bytes, MessageDigest.getInstance("SHA-256").digest(bytes), manifest, null)
     }
 
     fun write(input: List<ZipEntryInput>): ByteArray {

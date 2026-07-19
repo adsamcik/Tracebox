@@ -27,7 +27,7 @@ class TraceboxDisclosureActivity : Activity() {
             return
         }
         stateMachine.restore(materialized)
-        showDisclosure(checkNotNull(stateMachine.facts()).facts)
+        showDisclosure(checkNotNull(stateMachine.facts()))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -57,6 +57,7 @@ class TraceboxDisclosureActivity : Activity() {
         })
     }
 
+    /** The sole production approval creation point, reached only by the Confirm button callback. */
     private fun confirmFreshGesture() {
         val approved = stateMachine.confirmFreshGesture() ?: return
         val resultHandle = ApprovalResultRegistry.put(approved)
@@ -64,24 +65,66 @@ class TraceboxDisclosureActivity : Activity() {
         finish()
     }
 
-    internal class DisclosureActivityStateMachine {
-        private var rendered: RenderedDisclosure? = null
+    private class DisclosureActivityStateMachine {
+        private var materialized: MaterializedPackage? = null
+        private var facts: DisclosureFacts? = null
         private var approval: ApprovedPackage? = null
 
         fun restore(materialized: MaterializedPackage) {
-            rendered = DisclosureRenderer.rendered(materialized)
+            val decoded = DisclosureRenderer.render(materialized) as? DisclosureDecodeResult.Decoded
+                ?: throw IllegalArgumentException("finalized package cannot be disclosed")
+            this.materialized = materialized
+            facts = decoded.facts
             approval = null
         }
 
-        fun facts(): RenderedDisclosure? = rendered
+        fun facts(): DisclosureFacts? = facts
 
         fun confirmFreshGesture(): ApprovedPackage? {
-            val current = rendered ?: return null
-            return ApprovalIssuer.afterFreshConfirmation(current).also { approval = it }
+            val currentMaterialized = materialized ?: return null
+            val currentFacts = facts ?: return null
+            return ActivityApprovedPackage(currentMaterialized, currentFacts).also { approval = it }
         }
-
-        internal fun approvalForTestOnly(): ApprovedPackage? = approval
     }
+
+    /** Only the private Activity implementation below can mint this sealed approval capability. */
+    sealed interface ApprovedPackage {
+        fun approvedPlaintextDigest(): ByteArray
+        fun exactBytes(): ByteArray
+        fun matches(bytes: ByteArray): Boolean
+        fun protectionMode(): ProtectionMode
+        fun recipients(): RecipientSet
+        fun transferQuotaReservation(destination: java.nio.file.Path): Boolean
+        fun releaseQuotaReservation()
+    }
+
+    private class ActivityApprovedPackage(
+        private val materialized: MaterializedPackage,
+        private val facts: DisclosureFacts,
+    ) : ApprovedPackage {
+        private val token = ApprovalToken(
+            facts.plaintextDigest.copyOf(),
+            facts.policyEpoch,
+            ProtectionMode.LOCAL_ONLY,
+            RecipientSet.LocalOnly,
+        )
+
+        override fun approvedPlaintextDigest(): ByteArray = token.plaintextDigest.copyOf()
+        override fun exactBytes(): ByteArray = materialized.exactBytes()
+        override fun matches(bytes: ByteArray): Boolean = token.plaintextDigest.contentEquals(bytes)
+        override fun protectionMode(): ProtectionMode = token.protectionMode
+        override fun recipients(): RecipientSet = token.recipients
+        override fun transferQuotaReservation(destination: java.nio.file.Path): Boolean =
+            materialized.transferStagingQuota(destination)
+        override fun releaseQuotaReservation() = materialized.releaseStagingQuota()
+    }
+
+    private class ApprovalToken(
+        val plaintextDigest: ByteArray,
+        val policyEpoch: Long,
+        val protectionMode: ProtectionMode,
+        val recipients: RecipientSet,
+    )
 
     companion object {
         private const val HANDLE = "dev.tracebox.export.ui.package_handle"
@@ -101,9 +144,9 @@ internal object DisclosurePackageRegistry {
 }
 
 internal object ApprovalResultRegistry {
-    private val results = ConcurrentHashMap<String, ApprovedPackage>()
-    fun put(approved: ApprovedPackage): String = UUID.randomUUID().toString().also { results[it] = approved }
-    fun take(handle: String): ApprovedPackage? = results.remove(handle)
+    private val results = ConcurrentHashMap<String, TraceboxDisclosureActivity.ApprovedPackage>()
+    fun put(approved: TraceboxDisclosureActivity.ApprovedPackage): String = UUID.randomUUID().toString().also { results[it] = approved }
+    fun take(handle: String): TraceboxDisclosureActivity.ApprovedPackage? = results.remove(handle)
 }
 
 private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

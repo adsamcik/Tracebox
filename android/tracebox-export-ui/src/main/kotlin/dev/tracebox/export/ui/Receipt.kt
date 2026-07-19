@@ -20,47 +20,52 @@ sealed interface SaveResult {
     data class Failed(val detail: String) : SaveResult
 }
 
-data class ExportReceipt(
-    val approvedPlaintextDigest: ByteArray?,
-    val outputDigest: ByteArray?,
-    val outputSize: Long?,
-    val protectionMode: ProtectionMode?,
-    val recipients: RecipientSet?,
-    val generation: GenerationResult,
-    val save: SaveResult,
-    val handoff: ShareHandoffState,
-    val cancellationObserved: Boolean,
-    val stagingExpiryMillis: Long?,
-)
+/**
+ * Failed and cancelled variants deliberately have no save or handoff fields, making a shareable
+ * receipt unrepresentable until an Activity-issued ApprovedPackage exists.
+ */
+sealed interface ExportReceipt {
+    data class GenerationFailed(val cause: PackagePipelineFailure) : ExportReceipt
+    data object Cancelled : ExportReceipt
+    data class PreviewGenerated(val outputDigest: ByteArray, val outputSize: Long) : ExportReceipt
+    data class Approved(
+        val approvedPlaintextDigest: ByteArray,
+        val outputDigest: ByteArray,
+        val outputSize: Long,
+        val protectionMode: ProtectionMode,
+        val recipients: RecipientSet,
+        val save: SaveResult,
+        val handoff: ShareHandoffState,
+        val cancellationObserved: Boolean,
+        val stagingExpiryMillis: Long?,
+    ) : ExportReceipt
+}
 
 object ReceiptFactory {
     fun fromPipeline(result: PackagePipelineResult): ExportReceipt = when (result) {
-        is PackagePipelineResult.Failed -> ExportReceipt(
-            null, null, null, null, null, GenerationResult.Failed(result.failure),
-            SaveResult.NotRequested, ShareHandoffState.NOT_STARTED, false, null,
-        )
-        is PackagePipelineResult.Ready -> ExportReceipt(
-            null, result.packageBytes.plaintextSha256(), result.packageBytes.exactBytes().size.toLong(),
-            ProtectionMode.LOCAL_ONLY, RecipientSet.LocalOnly,
-            GenerationResult.Finalized(result.packageBytes.plaintextSha256(), result.packageBytes.exactBytes().size.toLong()),
-            SaveResult.NotRequested, ShareHandoffState.NOT_STARTED, false, null,
+        is PackagePipelineResult.Failed -> ExportReceipt.GenerationFailed(result.failure)
+        is PackagePipelineResult.Ready -> ExportReceipt.PreviewGenerated(
+            result.packageBytes.plaintextSha256(),
+            result.packageBytes.exactBytes().size.toLong(),
         )
     }
 
-    internal fun approved(approved: ApprovedPackage, expiryMillis: Long? = null): ExportReceipt {
+    internal fun approved(
+        approved: TraceboxDisclosureActivity.ApprovedPackage,
+        expiryMillis: Long? = null,
+    ): ExportReceipt.Approved {
         val bytes = approved.exactBytes()
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
-        check(approved.token.matches(digest))
-        return ExportReceipt(
-            approved.approvedPlaintextDigest(), digest, bytes.size.toLong(), approved.token.protectionMode, approved.token.recipients,
-            GenerationResult.Finalized(digest, bytes.size.toLong()), SaveResult.NotRequested,
-            ShareHandoffState.NOT_STARTED, false, expiryMillis,
+        check(approved.matches(digest))
+        return ExportReceipt.Approved(
+            approved.approvedPlaintextDigest(), digest, bytes.size.toLong(), approved.protectionMode(), approved.recipients(),
+            SaveResult.NotRequested, ShareHandoffState.NOT_STARTED, false, expiryMillis,
         )
     }
 
-    internal fun regenerate(approved: ApprovedPackage, candidateBytes: ByteArray): GenerationResult {
+    internal fun regenerate(approved: TraceboxDisclosureActivity.ApprovedPackage, candidateBytes: ByteArray): GenerationResult {
         val digest = MessageDigest.getInstance("SHA-256").digest(candidateBytes)
-        return if (approved.token.matches(digest) && approved.exactBytes().contentEquals(candidateBytes)) {
+        return if (approved.matches(digest) && approved.exactBytes().contentEquals(candidateBytes)) {
             GenerationResult.Finalized(digest, candidateBytes.size.toLong())
         } else {
             GenerationResult.ApprovalMismatch
