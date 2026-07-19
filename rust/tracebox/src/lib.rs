@@ -8,7 +8,7 @@ use std::sync::Arc;
 #[cfg(panic = "unwind")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-pub use tracebox_sys::{BreadcrumbV1, HeaderV1, StatusV1};
+pub use tracebox_sys::{BreadcrumbV1, HeaderV1, PanicRecordV1, StatusV1};
 
 /// Compile-time panic behavior used to select the sound boundary path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +67,36 @@ pub struct PanicRecord {
 pub trait PanicRecordSink: Send + Sync + 'static {
     /// Accepts one bounded record before an unwind or abort proceeds.
     fn record(&self, record: PanicRecord);
+}
+
+/// Synchronous bridge from the global hook to the bounded native structured-record ABI.
+pub struct NativePanicRecordSink;
+
+impl PanicRecordSink for NativePanicRecordSink {
+    fn record(&self, record: PanicRecord) {
+        let (payload_kind, has_location, line, column) = match record.location {
+            Some(location) => (payload_kind(record.payload), 1, location.line, location.column),
+            None => (payload_kind(record.payload), 0, 0, 0),
+        };
+        let _ = tracebox_sys::tb_tracebox_record_panic_v1(PanicRecordV1 {
+            header: HeaderV1 {
+                struct_size: std::mem::size_of::<PanicRecordV1>() as u32,
+                abi_version: 1,
+            },
+            payload_kind,
+            has_location,
+            line,
+            column,
+        });
+    }
+}
+
+fn payload_kind(payload: PanicPayloadKind) -> u32 {
+    match payload {
+        PanicPayloadKind::Opaque => 0,
+        PanicPayloadKind::StaticString => 1,
+        PanicPayloadKind::String => 2,
+    }
 }
 
 /// Installs a global hook that emits structured, bounded panic metadata before termination.
@@ -153,5 +183,17 @@ mod tests {
         assert_eq!(panic_strategy(), PanicStrategy::Unwind);
         #[cfg(panic = "abort")]
         assert_eq!(panic_strategy(), PanicStrategy::Abort);
+    }
+
+    #[test]
+    fn bounded_panic_record_crosses_the_native_structured_record_bridge() {
+        NativePanicRecordSink.record(PanicRecord {
+            payload: PanicPayloadKind::StaticString,
+            location: Some(PanicLocation {
+                file: "not-sent-over-abi".to_owned(),
+                line: 7,
+                column: 3,
+            }),
+        });
     }
 }

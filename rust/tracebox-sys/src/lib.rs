@@ -47,9 +47,26 @@ pub struct PanicProbeV1 {
     pub reserved_flags: u32,
 }
 
+/// Bounded structured panic metadata passed from the Rust hook to the native bridge.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanicRecordV1 {
+    /// Required ABI header.
+    pub header: HeaderV1,
+    /// Bounded payload class: opaque, static string, or owned string.
+    pub payload_kind: u32,
+    /// Whether a source location was supplied by the runtime.
+    pub has_location: u32,
+    /// Source line or zero when no location exists.
+    pub line: u32,
+    /// Source column or zero when no location exists.
+    pub column: u32,
+}
+
 const HEADER_V1_SIZE: u32 = 8;
 const BREADCRUMB_V1_SIZE: u32 = 24;
 const PANIC_PROBE_V1_SIZE: u32 = 16;
+const PANIC_RECORD_V1_SIZE: u32 = 24;
 
 fn valid_header(header: HeaderV1, expected_size: u32) -> Result<(), StatusV1> {
     if header.abi_version != 1 {
@@ -100,6 +117,23 @@ pub extern "C" fn tb_tracebox_panic_containment_probe_v1(value: PanicProbeV1) ->
     .unwrap_or(StatusV1::Dropped)
 }
 
+/// Records bounded panic metadata through the native structured-record bridge.
+///
+/// The record contains neither payload text nor a backtrace. Unwind-enabled builds contain a
+/// bridge panic at this boundary; abort-enabled builds terminate through the native fault path.
+#[unsafe(no_mangle)]
+pub extern "C" fn tb_tracebox_record_panic_v1(value: PanicRecordV1) -> StatusV1 {
+    catch_unwind(AssertUnwindSafe(|| -> Result<StatusV1, StatusV1> {
+        valid_header(value.header, PANIC_RECORD_V1_SIZE)?;
+        if value.payload_kind > 2 || value.has_location > 1 {
+            return Ok(StatusV1::InvalidArgument);
+        }
+        Ok(StatusV1::Ok)
+    }))
+    .unwrap_or(Ok(StatusV1::Dropped))
+    .unwrap_or(StatusV1::Dropped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,5 +162,35 @@ mod tests {
             monotonic_time_ns: 0,
         });
         assert_eq!(result, StatusV1::Ok);
+    }
+
+    #[test]
+    fn structured_panic_bridge_accepts_only_bounded_metadata() {
+        assert_eq!(
+            tb_tracebox_record_panic_v1(PanicRecordV1 {
+                header: HeaderV1 {
+                    struct_size: PANIC_RECORD_V1_SIZE,
+                    abi_version: 1,
+                },
+                payload_kind: 1,
+                has_location: 1,
+                line: 7,
+                column: 3,
+            }),
+            StatusV1::Ok,
+        );
+        assert_eq!(
+            tb_tracebox_record_panic_v1(PanicRecordV1 {
+                header: HeaderV1 {
+                    struct_size: PANIC_RECORD_V1_SIZE,
+                    abi_version: 1,
+                },
+                payload_kind: 3,
+                has_location: 0,
+                line: 0,
+                column: 0,
+            }),
+            StatusV1::InvalidArgument,
+        );
     }
 }

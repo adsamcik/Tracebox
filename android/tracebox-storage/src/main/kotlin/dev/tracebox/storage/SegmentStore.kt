@@ -51,7 +51,13 @@ data class SegmentHeader(
     init { require(schemaFingerprint.size == PersistedSegmentIdentity.ID_SIZE) }
 }
 
-data class SegmentFrame(val recordType: Int, val sequence: Long, val payload: ByteArray)
+data class SegmentFrame(
+    val recordType: Int,
+    val sequence: Long,
+    val payload: ByteArray,
+    /** Immutable byte offset of this frame's length prefix in its containing segment. */
+    val offset: Long = -1,
+)
 
 /** Durable append either writes exactly one frame or reports why it was safely dropped. */
 sealed interface SegmentAppendResult {
@@ -210,7 +216,7 @@ class SegmentWriter private constructor(
                     val type = frame.int
                     val sequence = frame.long
                     if (sequence != expectedSequence) { corrupt = true; break }
-                    frames += SegmentFrame(type, sequence, ByteArray(length - FRAME_FIXED_BYTES).also(frame::get))
+                    frames += SegmentFrame(type, sequence, ByteArray(length - FRAME_FIXED_BYTES).also(frame::get), offset)
                     expectedSequence++
                     offset += Int.SIZE_BYTES + length + Int.SIZE_BYTES
                 }

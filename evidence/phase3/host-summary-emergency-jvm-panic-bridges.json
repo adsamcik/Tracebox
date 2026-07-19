@@ -1,0 +1,29 @@
+{
+  "requirement_ids": ["X3.4", "X3.5", "X3.7", "X3.8"],
+  "command": ".\\gradlew.bat :android:tracebox-storage:test --no-daemon --offline --rerun-tasks && cargo test --workspace --offline && cargo build --release --bin panic_abort_probe -p tracebox && target\\release\\panic_abort_probe.exe",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "tool_version": "Gradle 9.6.1; rustc/cargo (workspace toolchain)",
+  "timeout_seconds": 300,
+  "exit_status": "gradle=0; cargo test=0; cargo build=0; panic_abort_probe=-1073740791 (expected abort, not a graceful return)",
+  "matrix_cell": "HOST_UNIT_STATIC",
+  "expected_assertions": [
+    "Deterministic summary_id derivation and the target-segment import acknowledgement sequence (append -> flush/seal -> acknowledgement -> retire) are real and crash-safe at the after-append-before-acknowledgement boundary.",
+    "Startup-time emergency slot ingestion transforms a valid completed Phase 0 record into a generated EmergencyRecord and appends it through the policy-gated segment path, then resets the slot; an incomplete/invalid slot never fabricates a record.",
+    "The bounded JVM uncaught-exception wrapper persists through the same policy-gated segment append path used elsewhere using Phase 1 generated schema types, reporting a typed Dropped result when policy denies the write.",
+    "The Rust global panic hook crosses a real extern \"C\" structured-record bridge (tb_tracebox_record_panic_v1) that validates a bounded ABI struct and contains any unwind at that boundary.",
+    "A release-profile (panic=\"abort\") binary that panics terminates via abort rather than returning through a caught unwind."
+  ],
+  "actual_assertions": [
+    "android:tracebox-storage:test (rerun-tasks, forced fresh compile+test): BUILD SUCCESSFUL, 35 actionable tasks executed. FailureCaptureStoreTest: 8/8 passed including summary_import_recovers_after_target_append_before_acknowledgement_without_duplicate, startup_ingests_valid_emergency_slot_as_generated_record_and_resets_it, startup_ignores_incomplete_emergency_slot_without_fabricating_record, uncaught_thread_exception_reaches_segment_or_reports_typed_policy_drop, uncaught_thread_exception_reports_typed_drop_when_policy_denies_handled_errors. SegmentStoreTest: 11/11 passed (no regression).",
+    "cargo test --workspace --offline: all crates green, including new tests structured_panic_bridge_accepts_only_bounded_metadata (tracebox-sys) and bounded_panic_record_crosses_the_native_structured_record_bridge (tracebox).",
+    "cargo build --release --bin panic_abort_probe -p tracebox: succeeded.",
+    "target\\release\\panic_abort_probe.exe: printed the standard Rust panic message then terminated with exit code -1073740791 (0xC0000409, a Windows abort/fastfail termination code), NOT a normal 0/1 process exit — confirming panic=\"abort\" genuinely aborts rather than unwinding back through main."
+  ],
+  "result": "PASS",
+  "limitations": [
+    "This validation was performed directly by the orchestrator after a task-tool implementer agent was interrupted mid-turn by a client-side tool-availability change; the uncommitted diff it produced was inspected, independently re-built, and independently re-tested (including a fresh --rerun-tasks pass) rather than trusted from the agent's own unverified claim.",
+    "No live Android device/emulator scenario was run for the emergency-ingestion or JVM-capture paths; validation is host-level JVM unit testing against the exact byte layout Phase 0 already validated on-device.",
+    "The abort-mode probe demonstrates process-level abort termination on the host (Windows/MSVC target); it does not itself prove Android/ART's native abort path, though it proves the Rust-level panic=\"abort\" configuration and code path are correct.",
+    "X3.6's native JNI/policy handoff and X3.9/X3.10's device-level validation remain as previously recorded and are unaffected by this round."
+  ]
+}
