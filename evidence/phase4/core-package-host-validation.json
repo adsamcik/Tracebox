@@ -59,6 +59,7 @@
   ],
   "result": "IN_PROGRESS",
   "limitations": [
+    "The snapshot source model is host-tested and quota-backed but is not yet connected to Phase 2 recovered-segment and Phase 3 capture-store selection.",
     "The Rust vector test is compiled but not executed because this host lacks link.exe; therefore cross-language vector execution remains IN_PROGRESS.",
     "P4.4-P4.7 disclosure, approval, FileProvider/Sharesheet, SAF, and receipt integration are not implemented in this core dependency-gate commit."
   ]
