@@ -1,0 +1,29 @@
+{
+  "scope": "staging rollback reservation release review fix",
+  "timestamp": "2026-07-19T15:09:36.001+02:00",
+  "finding_disposition": {
+    "severity": "Major",
+    "disposition": "APPLIED",
+    "implementation": "The rollback path releases its quota reservation in a finally block, so a partial-file deletion failure cannot leak the reservation. The deletion failure remains propagated."
+  },
+  "validation": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-export-ui:test --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL; tracebox-export-ui: 10 tests, 0 failures, 0 errors, 0 skipped.",
+      "new_test": "ExportWorkflowTest.staging_delete_failure_releases_quota_reservation injects an IOException in the partial-file deletion step, observes that IOException, and verifies UidAccounting usage returns to its 0-byte pre-attempt baseline."
+    },
+    {
+      "command": "git diff --exit-code 21e5bef79987814ecd34c2a416caafd8fe39f79a HEAD -- native/crashpad/overlay/tracebox_bridge.cc native/emergency/tracebox_emergency.c",
+      "exit_status": 0,
+      "actual": "No protected native-file diff since Phase 3 close."
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0
+    }
+  ],
+  "limitations": [
+    "No Android emulator or AVD was created, booted, or provisioned."
+  ]
+}

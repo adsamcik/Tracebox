@@ -15,6 +15,7 @@ fun interface ExportClock { fun nowMillis(): Long }
 
 private class StagingLeaseManagerHostTestHooks(
     val afterLeaseFileWritten: () -> Unit,
+    val deletePartialFile: (Path) -> Unit = { Files.deleteIfExists(it) },
 )
 
 class StagingLease internal constructor(
@@ -36,6 +37,16 @@ class StagingLeaseManager private constructor(
         clock: ExportClock,
         afterLeaseFileWrittenForHostTest: () -> Unit,
     ) : this(directory, clock, StagingLeaseManagerHostTestHooks(afterLeaseFileWrittenForHostTest))
+    internal constructor(
+        directory: Path,
+        clock: ExportClock,
+        afterLeaseFileWrittenForHostTest: () -> Unit,
+        deletePartialFileForHostTest: (Path) -> Unit,
+    ) : this(
+        directory,
+        clock,
+        StagingLeaseManagerHostTestHooks(afterLeaseFileWrittenForHostTest, deletePartialFileForHostTest),
+    )
 
     private val leaseLock = Any()
     private val reservationReleases = mutableMapOf<Path, () -> Unit>()
@@ -69,8 +80,11 @@ class StagingLeaseManager private constructor(
             reservationReleases[output] = releaseReservation
             return@synchronized StagingLease(output, expiry) { release(output) }
         } catch (failure: Throwable) {
-            Files.deleteIfExists(output)
-            releaseReservation()
+            try {
+                hostTestHooks?.deletePartialFile?.invoke(output) ?: Files.deleteIfExists(output)
+            } finally {
+                releaseReservation()
+            }
             throw failure
         }
     }

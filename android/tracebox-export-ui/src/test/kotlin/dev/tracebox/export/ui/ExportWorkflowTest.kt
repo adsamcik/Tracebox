@@ -14,6 +14,7 @@ import dev.tracebox.export.StandardSnapshotRequest
 import dev.tracebox.storage.UidAccounting
 import dev.tracebox.storage.UidBucket
 import dev.tracebox.storage.UidQuota
+import java.io.IOException
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -116,6 +117,39 @@ class ExportWorkflowTest {
 
         assertEquals(1, releases.get())
         assertTrue(java.nio.file.Files.list(root).use { !it.findAny().isPresent })
+    }
+
+    @Test fun staging_delete_failure_releases_quota_reservation() {
+        val root = Path.of(
+            "build",
+            "phase4-workflow",
+            "staging-delete-failure-${System.nanoTime()}",
+            StagingLeaseManager.STAGING_DIRECTORY,
+        )
+        val bytes = byteArrayOf(1, 2, 3)
+        val stagingAccounting = UidAccounting(
+            UidQuota(mapOf(UidBucket.SNAPSHOTS to 100L)),
+            mapOf(UidBucket.SNAPSHOTS to 3),
+        )
+        val manager = StagingLeaseManager(
+            root,
+            { 100L },
+            { throw IllegalStateException("injected registration failure") },
+            { throw IOException("injected partial-file deletion failure") },
+        )
+        val reserveLease: (Path) -> (() -> Unit)? = { destination ->
+            if (stagingAccounting.reserve(destination, UidBucket.SNAPSHOTS, bytes.size.toLong())) {
+                { stagingAccounting.release(destination) }
+            } else {
+                null
+            }
+        }
+
+        assertFailsWith<IOException> {
+            manager.stageReservedForHostTest(bytes, reserveLease, ttlMillis = 5)
+        }
+
+        assertEquals(0L, stagingAccounting.used(UidBucket.SNAPSHOTS))
     }
 
     @Test fun simultaneous_staging_leases_hold_independent_exact_byte_reservations() {
