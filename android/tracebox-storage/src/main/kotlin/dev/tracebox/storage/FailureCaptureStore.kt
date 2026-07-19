@@ -41,6 +41,7 @@ data class RawArtifactJournal(
 
 /** CE handler raw-artifact store with a separate, hard byte budget. */
 class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) {
+    private val commitLock = Any()
     init { require(rawQuotaBytes >= 0) }
 
     fun preCapture(id: ByteArray, originProcessInstanceId: ByteArray, originRole: Int, acceptedEpoch: Long): Boolean {
@@ -55,10 +56,10 @@ class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) 
         return true
     }
 
-    fun commitRaw(id: ByteArray, bytes: ByteArray): Boolean {
-        if (journal(id) == null || bytes.size.toLong() + usedRawBytes() > rawQuotaBytes) return false
+    fun commitRaw(id: ByteArray, bytes: ByteArray): Boolean = synchronized(commitLock) {
+        if (journal(id) == null || bytes.size.toLong() + usedRawBytes() > rawQuotaBytes) return@synchronized false
         forceWrite(rawPath(id), bytes)
-        return true
+        true
     }
 
     fun journal(id: ByteArray): RawArtifactJournal? {
@@ -159,7 +160,7 @@ private enum class SpoolState { JOURNALED, APPENDED, ACKNOWLEDGED, RETIRED }
  * and deterministic ID before appending, and `replay` retains source until a durable acknowledgement.
  */
 class StructuralSummarySpool(private val root: Path) {
-    fun stage(rawId: ByteArray, extractorVersion: Int, schema: ByteArray, canonicalBody: ByteArray): String {
+    private fun stage(rawId: ByteArray, extractorVersion: Int, schema: ByteArray, canonicalBody: ByteArray): String {
         require(rawId.size == 32 && schema.size == 32)
         val digest = sha256(canonicalBody)
         val id = summaryId(rawId, extractorVersion, schema, digest)

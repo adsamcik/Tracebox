@@ -161,7 +161,7 @@ class AnrWatchdog(
         val debuggerAffected = Debug.isDebuggerConnected() || Debug.waitingForDebugger()
         val frames = Looper.getMainLooper().thread.stackTrace.take(64)
         val signature = frames.fold(1L) { value, frame -> 31 * value + frame.hashCode() }
-        val transition = stateMachine.heartbeatDelayed(delayedMillis, signature, debuggerAffected, suspendGap = false)
+        val transition = stateMachine.heartbeatDelayed(clockMillis(), delayedMillis, signature, debuggerAffected, suspendGap = false)
         if (transition !is AnrTransition.Captured) return
         val now = clockMillis()
         val requested = if (lastRequestMillis == Long.MIN_VALUE || now - lastRequestMillis >= 600_000) {
@@ -198,13 +198,14 @@ class AnrHeartbeatBinding(
     fun lifecycle(mode: AnrOperatingMode, nowMillis: Long) = stateMachine.mode(mode, nowMillis)
 
     fun delayed(
+        nowMillis: Long,
         delayedMillis: Long,
         stackSignature: Long,
         frames: List<StackTraceElement>,
         debuggerAttached: Boolean,
         suspendGap: Boolean,
     ): AnrTransition {
-        val transition = stateMachine.heartbeatDelayed(delayedMillis, stackSignature, debuggerAttached, suspendGap)
+        val transition = stateMachine.heartbeatDelayed(nowMillis, delayedMillis, stackSignature, debuggerAttached, suspendGap)
         if (transition is AnrTransition.Captured) {
             onCandidate(AnrCandidate(delayedMillis, frames.take(64), requester.request(2_000), debuggerAffected = false))
         }

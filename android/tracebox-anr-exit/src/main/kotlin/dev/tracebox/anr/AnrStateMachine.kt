@@ -68,6 +68,7 @@ class AnrStateMachine(
      */
     @Synchronized
     fun heartbeatDelayed(
+        nowMillis: Long,
         delayedMillis: Long,
         stackSignature: Long,
         debuggerAttached: Boolean,
@@ -80,7 +81,7 @@ class AnrStateMachine(
             watchState = AnrWatchState.HEALTHY
             return AnrTransition.Recovered
         }
-        if (startedAt != 0L && delayedMillis < startupGraceMillis && watchState == AnrWatchState.HEALTHY) {
+        if (startedAt != 0L && nowMillis - startedAt < startupGraceMillis && watchState == AnrWatchState.HEALTHY) {
             return AnrTransition.Suppressed(AnrSuppression.STARTUP_GRACE)
         }
         if (watchState == AnrWatchState.HEALTHY) {
@@ -89,7 +90,7 @@ class AnrStateMachine(
         }
         if (!policy.current().permits(ANR_CATEGORY)) return AnrTransition.Suppressed(AnrSuppression.POLICY)
         if (stackSignature == lastSignature) return AnrTransition.Suppressed(AnrSuppression.DUPLICATE)
-        if (!takeToken(delayedMillis)) return AnrTransition.Suppressed(AnrSuppression.RATE_LIMIT)
+        if (!takeToken(nowMillis)) return AnrTransition.Suppressed(AnrSuppression.RATE_LIMIT)
         watchState = AnrWatchState.CREDIBLE_STALL
         lastSignature = stackSignature
         watchState = AnrWatchState.CAPTURED_CANDIDATE

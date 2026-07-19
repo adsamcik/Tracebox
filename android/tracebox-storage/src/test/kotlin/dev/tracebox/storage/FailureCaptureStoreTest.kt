@@ -5,11 +5,13 @@ import dev.tracebox.core.GateResult
 import dev.tracebox.core.PolicySnapshot
 import dev.tracebox.core.RecordPriority
 import dev.tracebox.core.WriterPolicyGate
+import dev.tracebox.api.generated.GeneratedStructuralSummary
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 import java.util.zip.CRC32C
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -89,8 +91,8 @@ class FailureCaptureStoreTest {
         val root = Files.createTempDirectory("tracebox-spool")
         val spool = StructuralSummarySpool(root)
         val rawId = ByteArray(32) { 3 }
-        val body = byteArrayOf(1, 2, 3)
-        val id = spool.stage(rawId, 1, ByteArray(32) { 4 }, body)
+        val summary = GeneratedStructuralSummary(1u, 2u, 3u, 4u, 5u)
+        val id = spool.stageStructuralSummary(rawId, 1, ByteArray(32) { 4 }, summary)
         val imported = mutableSetOf<String>()
 
         spool.replay { summaryId, _ -> imported += summaryId }
@@ -100,10 +102,27 @@ class FailureCaptureStoreTest {
         assertTrue(spool.isRetired(id))
     }
 
+    @Test fun structural_summary_staging_serializes_only_generated_summary_values() {
+        val spool = StructuralSummarySpool(directory())
+        val summary = GeneratedStructuralSummary(1u, 2u, 3u, 4u, 5u)
+        val id = spool.stageStructuralSummary(ByteArray(32) { 3 }, 1, ByteArray(32) { 4 }, summary)
+        var imported: ByteArray? = null
+
+        spool.replay { _, body -> imported = body }
+
+        assertTrue(GeneratedRecordCodec.encode(summary).contentEquals(imported!!))
+        assertTrue(spool.isRetired(id))
+    }
+
     @Test fun summary_import_recovers_after_target_append_before_acknowledgement_without_duplicate() {
         val root = directory()
         val spool = StructuralSummarySpool(root.resolve("spool"))
-        val id = spool.stage(ByteArray(32) { 3 }, 1, ByteArray(32) { 4 }, byteArrayOf(1, 2, 3))
+        val id = spool.stageStructuralSummary(
+            ByteArray(32) { 3 },
+            1,
+            ByteArray(32) { 4 },
+            GeneratedStructuralSummary(1u, 2u, 3u, 4u, 5u),
+        )
         val targetPath = root.resolve("target.tbseg")
         val harness = writer(targetPath)
         val importer = TargetSegmentSummaryImporter(root.resolve("acks"), targetPath, harness.writer)
@@ -196,6 +215,34 @@ class FailureCaptureStoreTest {
 
         assertEquals(GeneratedRecordAppendResult.Dropped(GateResult.Denied), adapter.latestResult())
         assertTrue(SegmentWriter.recover(root.resolve("jvm-denied.tbseg"), repair = false).frames.isEmpty())
+    }
+
+    @Test fun concurrent_raw_commits_never_exceed_the_hard_quota() {
+        repeat(100) { iteration ->
+            val root = Files.createTempDirectory("tracebox-raw-race")
+            val store = RawArtifactStore(root, rawQuotaBytes = 16)
+            val ready = CountDownLatch(2)
+            val start = CountDownLatch(1)
+            val results = BooleanArray(2)
+            val ids = listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 })
+            ids.forEach { id -> assertTrue(store.preCapture(id, ByteArray(32) { 8 }, 3, 4)) }
+            val threads = ids.mapIndexed { index, id ->
+                Thread {
+                    ready.countDown()
+                    start.await()
+                    results[index] = store.commitRaw(id, ByteArray(16) { index.toByte() })
+                }
+            }
+            threads.forEach(Thread::start)
+            assertTrue(ready.await(5, java.util.concurrent.TimeUnit.SECONDS), "iteration $iteration")
+            start.countDown()
+            threads.forEach { it.join(5_000) }
+
+            assertEquals(1, results.count { it }, "iteration $iteration")
+            assertTrue(Files.list(root).use { paths ->
+                paths.filter { it.fileName.toString().endsWith(".tbraw") }.mapToLong(Files::size).sum() <= 16
+            })
+        }
     }
 
     private fun validEmergencySlot(): ByteArray {
