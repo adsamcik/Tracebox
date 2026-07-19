@@ -78,3 +78,20 @@ object GeneratedDiagnostics {
         }
     }
 }
+
+/** Generated export metadata; snapshot transformation must use this schema contract. */
+object GeneratedExportMetadata {
+    fun transforms(eventId: GeneratedEventId): List<String> = when (eventId) {
+        GeneratedEventId.STRUCTURALSUMMARY -> listOf("none", "none", "none", "none", "none")
+        GeneratedEventId.EMERGENCYRECORD -> listOf("none", "none", "none", "none", "none", "none", "none")
+        GeneratedEventId.BREADCRUMB -> listOf("none", "none")
+        GeneratedEventId.HANDLEDERROR -> listOf("none", "none")
+    }
+
+    fun standardVisible(eventId: GeneratedEventId): Boolean = when (eventId) {
+        GeneratedEventId.STRUCTURALSUMMARY -> true
+        GeneratedEventId.EMERGENCYRECORD -> false
+        GeneratedEventId.BREADCRUMB -> true
+        GeneratedEventId.HANDLEDERROR -> true
+    }
+}

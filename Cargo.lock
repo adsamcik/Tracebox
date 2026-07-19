@@ -92,6 +92,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "tbdiag-format"
+version = "0.1.0"
+
+[[package]]
 name = "tbdiag-phase0"
 version = "0.1.0"
 dependencies = [

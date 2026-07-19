@@ -41,3 +41,9 @@ tasks.register("phase2Check") {
         ":android:tracebox-directboot:testDebugUnitTest",
     )
 }
+
+tasks.register("phase4CoreCheck") {
+    group = "verification"
+    description = "Runs deterministic Phase 4 snapshot, manifest, and ZIP tests."
+    dependsOn(":android:tracebox-export:testDebugUnitTest")
+}
