@@ -25,6 +25,31 @@ class MaterializedPackage internal constructor(bytes: ByteArray, digest: ByteArr
     fun plaintextSha256(): ByteArray = digest.copyOf()
 }
 
+sealed interface PackagePipelineResult {
+    data class Ready(val snapshot: PreparedSnapshot, val packageBytes: MaterializedPackage) : PackagePipelineResult
+    data class Failed(val failure: PackagePipelineFailure) : PackagePipelineResult
+}
+
+sealed interface PackagePipelineFailure {
+    data class Snapshot(val cause: SnapshotFailure) : PackagePipelineFailure
+    data class Materialization(val cause: PackageConstructionFailure) : PackagePipelineFailure
+}
+
+/** The only production path from a Standard request to exact, finalized package bytes. */
+class StandardPackagePipeline(
+    private val preparer: SnapshotPreparer,
+    private val zip: DeterministicZip = DeterministicZip(),
+) {
+    fun finalize(request: StandardSnapshotRequest): PackagePipelineResult = try {
+        val snapshot = preparer.prepare(request)
+        PackagePipelineResult.Ready(snapshot, zip.materialize(snapshot))
+    } catch (failure: SnapshotFailure) {
+        PackagePipelineResult.Failed(PackagePipelineFailure.Snapshot(failure))
+    } catch (failure: PackageConstructionFailure) {
+        PackagePipelineResult.Failed(PackagePipelineFailure.Materialization(failure))
+    }
+}
+
 class DeterministicZip(private val plaintextLimit: Long = DEFAULT_PLAINTEXT_LIMIT) {
     init { require(plaintextLimit in 1..HARD_PLAINTEXT_LIMIT) }
 

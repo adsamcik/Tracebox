@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class PackagePipelineTest {
@@ -128,6 +129,7 @@ class PackagePipelineTest {
         assertFailsWith<PackageConstructionFailure.DuplicatePath> {
             writer.write(listOf(ZipEntryInput("a", byteArrayOf()), ZipEntryInput("a", byteArrayOf())))
         }
+
         assertFailsWith<PackageConstructionFailure.NestedArchive> { writer.write(listOf(ZipEntryInput("nested.zip", byteArrayOf()))) }
         assertFailsWith<PackageConstructionFailure.EntryLimit> {
             writer.write((0..128).map { ZipEntryInput("entries/$it", byteArrayOf()) })
@@ -138,5 +140,17 @@ class PackagePipelineTest {
         assertFailsWith<PackageConstructionFailure.Zip64> {
             writer.write(listOf(ZipEntryInput("zip64", byteArrayOf(), 0x1_0000_0000L)))
         }
+    }
+
+    @Test fun preview_and_approved_generation_use_the_actual_pipeline_and_have_the_same_digest() {
+        fun finalize() = StandardPackagePipeline(
+            SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString())),
+        ).finalize(request())
+
+        val preview = assertIs<PackagePipelineResult.Ready>(finalize())
+        val approvedGeneration = assertIs<PackagePipelineResult.Ready>(finalize())
+
+        assertContentEquals(preview.packageBytes.exactBytes(), approvedGeneration.packageBytes.exactBytes())
+        assertContentEquals(preview.packageBytes.plaintextSha256(), approvedGeneration.packageBytes.plaintextSha256())
     }
 }

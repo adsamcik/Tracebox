@@ -36,11 +36,11 @@
       "actual": "Finished dev profile successfully."
     },
     {
-      "command": "cargo test -p tbdiag-format",
-      "timeout_seconds": 120,
-      "exit_status": 101,
+      "command": "$env:PATH = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;' + $env:PATH; & $env:ComSpec /c \"call \\\"\\\"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\\\"\\\" >nul && cd /d G:\\Github\\Tracebox-worktrees\\tracebox-foundation && cargo test -p tbdiag-format --offline 2>&1\"",
+      "timeout_seconds": 180,
+      "exit_status": 0,
       "expected": "Execute Rust golden-vector test.",
-      "actual": "Host lacks MSVC link.exe; Rust test executable could not link. This is not counted as a pass."
+      "actual": "1 test passed: canonical_cbor_golden_vector_is_stable."
     }
   ],
   "assertions": [
@@ -60,7 +60,6 @@
   "result": "IN_PROGRESS",
   "limitations": [
     "The snapshot source model is host-tested and quota-backed but is not yet connected to Phase 2 recovered-segment and Phase 3 capture-store selection.",
-    "The Rust vector test is compiled but not executed because this host lacks link.exe; therefore cross-language vector execution remains IN_PROGRESS.",
     "P4.4-P4.7 disclosure, approval, FileProvider/Sharesheet, SAF, and receipt integration are not implemented in this core dependency-gate commit."
   ]
 }
