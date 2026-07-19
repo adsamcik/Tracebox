@@ -1,0 +1,26 @@
+{
+  "requirement_ids": ["C1.4", "C1.5"],
+  "scope": "MSVC revalidation of the versioned C ABI and its Rust-binding prerequisite",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "tool_versions": {
+    "cmake": "4.1.2",
+    "msvc": "19.51.36248.0 (Visual Studio 18 Community, VC Tools 14.51.36231)"
+  },
+  "commands": [
+    {
+      "command": "set PATH=C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;%PATH% && call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" && cmake -S native -B native\\build-msvc-validation -G \"NMake Makefiles\" && cmake --build native\\build-msvc-validation && ctest --test-dir native\\build-msvc-validation --output-on-failure",
+      "exit_status": 0,
+      "assertions": [
+        "MSVC C compiler 19.51.36248.0 configured",
+        "MSVC C++ compiler 19.51.36248.0 configured",
+        "tracebox_emergency_test passed",
+        "tracebox_abi_test passed",
+        "tracebox_generated_events_link_test passed",
+        "tracebox_emergency_initialization_test passed",
+        "4 of 4 CTest tests passed"
+      ]
+    }
+  ],
+  "matrix_cell": "HOST_WINDOWS_X86_64_MSVC",
+  "result": "PASS"
+}
