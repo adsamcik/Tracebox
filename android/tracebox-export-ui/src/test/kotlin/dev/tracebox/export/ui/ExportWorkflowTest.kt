@@ -15,6 +15,11 @@ import dev.tracebox.storage.UidAccounting
 import dev.tracebox.storage.UidBucket
 import dev.tracebox.storage.UidQuota
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -109,6 +114,51 @@ class ExportWorkflowTest {
         now = 111L
         manager.cleanupExpired()
         assertEquals(0L, stagingAccounting.used(UidBucket.SNAPSHOTS))
+    }
+
+    @Test fun staging_registration_and_expiry_cleanup_release_each_concurrent_lease_once() {
+        val workers = Executors.newFixedThreadPool(2)
+        try {
+            repeat(100) { iteration ->
+                val root = Path.of(
+                    "build",
+                    "phase4-workflow",
+                    "lease-registration-race-$iteration-${System.nanoTime()}",
+                    StagingLeaseManager.STAGING_DIRECTORY,
+                )
+                val cleanupClock = AtomicBoolean(false)
+                val fileWritten = CountDownLatch(1)
+                val cleanupEntered = CountDownLatch(1)
+                val releases = AtomicInteger()
+                val manager = StagingLeaseManager(root, { if (cleanupClock.get()) 2L else 0L }) {
+                    fileWritten.countDown()
+                    check(cleanupEntered.await(5, TimeUnit.SECONDS)) {
+                        "iteration $iteration did not enter cleanup"
+                    }
+                }
+                val stage = workers.submit {
+                    manager.stageReservedForHostTest(
+                        byteArrayOf(1),
+                        { { releases.incrementAndGet() } },
+                        ttlMillis = 1,
+                    )
+                }
+                val cleanup = workers.submit<List<Path>> {
+                    check(fileWritten.await(5, TimeUnit.SECONDS)) {
+                        "iteration $iteration did not write its lease file"
+                    }
+                    cleanupClock.set(true)
+                    cleanupEntered.countDown()
+                    manager.cleanupExpired()
+                }
+                stage.get(5, TimeUnit.SECONDS)
+                assertEquals(1, cleanup.get(5, TimeUnit.SECONDS).size, "iteration $iteration")
+                assertEquals(1, releases.get(), "iteration $iteration")
+            }
+        } finally {
+            workers.shutdownNow()
+            assertTrue(workers.awaitTermination(5, TimeUnit.SECONDS))
+        }
     }
 
     @Test fun failed_or_cancelled_approved_receipts_have_no_handoff_constructor_parameter() {

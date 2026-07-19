@@ -284,17 +284,20 @@ data class UidQuota(val limits: Map<UidBucket, Long>) {
 
 /** UID accounting with byte and file count bounds for every bucket. */
 class UidAccounting(private val quota: UidQuota, private val maxFiles: Map<UidBucket, Int>) {
+    private val lock = Any()
     private val allocations = linkedMapOf<Path, Pair<UidBucket, Long>>()
-    fun reserve(path: Path, bucket: UidBucket, bytes: Long): Boolean {
-        if (bytes < 0 || path in allocations) return false
+    fun reserve(path: Path, bucket: UidBucket, bytes: Long): Boolean = synchronized(lock) {
+        if (bytes < 0 || path in allocations) return@synchronized false
         val used = allocations.filterValues { it.first == bucket }.values.sumOf { it.second }
         val count = allocations.values.count { it.first == bucket }
-        if (used + bytes > (quota.limits[bucket] ?: 0) || count >= (maxFiles[bucket] ?: 0)) return false
+        if (used + bytes > (quota.limits[bucket] ?: 0) || count >= (maxFiles[bucket] ?: 0)) return@synchronized false
         allocations[path] = bucket to bytes
-        return true
+        true
     }
-    fun release(path: Path) { allocations.remove(path) }
-    fun used(bucket: UidBucket): Long = allocations.filterValues { it.first == bucket }.values.sumOf { it.second }
+    fun release(path: Path) = synchronized(lock) { allocations.remove(path) }
+    fun used(bucket: UidBucket): Long = synchronized(lock) {
+        allocations.filterValues { it.first == bucket }.values.sumOf { it.second }
+    }
 }
 
 /** Stable process-role quota policy. Unknown roles have zero storage unless fallback is explicit. */

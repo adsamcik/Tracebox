@@ -13,6 +13,10 @@ import java.util.UUID
 
 fun interface ExportClock { fun nowMillis(): Long }
 
+private class StagingLeaseManagerHostTestHooks(
+    val afterLeaseFileWritten: () -> Unit,
+)
+
 class StagingLease internal constructor(
     val path: Path,
     val expiresAtMillis: Long,
@@ -21,7 +25,19 @@ class StagingLease internal constructor(
     internal fun release() = releaseReservation()
 }
 
-class StagingLeaseManager(private val directory: Path, private val clock: ExportClock) {
+class StagingLeaseManager private constructor(
+    private val directory: Path,
+    private val clock: ExportClock,
+    private val hostTestHooks: StagingLeaseManagerHostTestHooks?,
+) {
+    constructor(directory: Path, clock: ExportClock) : this(directory, clock, null)
+    internal constructor(
+        directory: Path,
+        clock: ExportClock,
+        afterLeaseFileWrittenForHostTest: () -> Unit,
+    ) : this(directory, clock, StagingLeaseManagerHostTestHooks(afterLeaseFileWrittenForHostTest))
+
+    private val leaseLock = Any()
     private val reservationReleases = mutableMapOf<Path, () -> Unit>()
     init { require(directory.fileName.toString() == STAGING_DIRECTORY) }
 
@@ -38,7 +54,7 @@ class StagingLeaseManager(private val directory: Path, private val clock: Export
         exactBytes: ByteArray,
         reserveLease: (Path) -> (() -> Unit)?,
         ttlMillis: Long,
-    ): StagingLease {
+    ): StagingLease = synchronized(leaseLock) {
         require(ttlMillis > 0)
         Files.createDirectories(directory)
         val output = directory.resolve("tbdiag-${UUID.randomUUID()}.tbdiag")
@@ -51,21 +67,28 @@ class StagingLeaseManager(private val directory: Path, private val clock: Export
         }
         val expiry = clock.nowMillis() + ttlMillis
         Files.setLastModifiedTime(output, FileTime.fromMillis(expiry))
+        hostTestHooks?.afterLeaseFileWritten?.invoke()
         reservationReleases[output] = releaseReservation
-        return StagingLease(output, expiry, releaseReservation)
+        StagingLease(output, expiry) { release(output) }
     }
 
     fun cleanupExpired(): List<Path> {
-        if (!Files.exists(directory)) return emptyList()
-        return Files.list(directory).use { paths ->
-            paths.filter { Files.isRegularFile(it) && Files.getLastModifiedTime(it).toMillis() <= clock.nowMillis() }
-                .toList().also { expired ->
-                    expired.forEach { path ->
-                        Files.deleteIfExists(path)
-                        reservationReleases.remove(path)?.invoke()
+        return synchronized(leaseLock) {
+            if (!Files.exists(directory)) return@synchronized emptyList()
+            Files.list(directory).use { paths ->
+                paths.filter { Files.isRegularFile(it) && Files.getLastModifiedTime(it).toMillis() <= clock.nowMillis() }
+                    .toList().also { expired ->
+                        expired.forEach { path ->
+                            Files.deleteIfExists(path)
+                            reservationReleases.remove(path)?.invoke()
+                        }
                     }
-                }
+            }
         }
+    }
+
+    private fun release(path: Path) = synchronized(leaseLock) {
+        reservationReleases.remove(path)?.invoke()
     }
 
     companion object {

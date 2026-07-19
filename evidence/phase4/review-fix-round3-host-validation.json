@@ -1,0 +1,57 @@
+{
+  "phase": "Phase 4 review-fix round 3",
+  "baseline_commit": "e27a0a0e9d9b166dcf823260956238ece0ec8c8c",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "finding_disposition": {
+    "finding": "Concurrent staging can exceed the hard quota and leak lease reservations.",
+    "disposition": "APPLIED",
+    "implementation": [
+      "UidAccounting synchronizes reserve's validation and insertion, release, and used queries on one instance lock.",
+      "StagingLeaseManager serializes lease-file creation, callback registration, explicit release, and expiry cleanup on one lease lock. Cleanup removes and invokes a callback while holding that lock."
+    ],
+    "concurrency_tests": [
+      {
+        "name": "SegmentStoreTest.uid_accounting_serializes_concurrent_hard_quota_reservations",
+        "method": "Two ExecutorService worker threads wait on CountDownLatch barriers then concurrently reserve 10 bytes against a one-file/10-byte hard SNAPSHOTS quota.",
+        "iterations_per_run": 100,
+        "assertions_per_iteration": "Exactly one reservation succeeds and final used(SNAPSHOTS) is exactly 10 bytes."
+      },
+      {
+        "name": "ExportWorkflowTest.staging_registration_and_expiry_cleanup_release_each_concurrent_lease_once",
+        "method": "A stage worker and cleanup worker run on separate ExecutorService threads. A host-test hook holds staging after the expired file is written but before callback registration; CountDownLatch barriers make cleanup contend for the lease lock.",
+        "iterations_per_run": 100,
+        "assertions_per_iteration": "Cleanup finds one expired file and the lease reservation release callback runs exactly once."
+      }
+    ]
+  },
+  "commands": [
+    {
+      "run": 1,
+      "command": ".\\gradlew.bat :android:tracebox-export-ui:test :android:tracebox-storage:test --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL; tracebox-storage: 20 tests, 0 failures, 0 errors, 0 skipped; tracebox-export-ui: 7 tests, 0 failures, 0 errors, 0 skipped."
+    },
+    {
+      "run": 2,
+      "command": ".\\gradlew.bat :android:tracebox-export-ui:test :android:tracebox-storage:test --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL; tracebox-storage: 20 tests, 0 failures, 0 errors, 0 skipped; tracebox-export-ui: 7 tests, 0 failures, 0 errors, 0 skipped."
+    },
+    {
+      "run": 3,
+      "command": ".\\gradlew.bat :android:tracebox-export-ui:test :android:tracebox-storage:test --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL; tracebox-storage: 20 tests, 0 failures, 0 errors, 0 skipped; tracebox-export-ui: 7 tests, 0 failures, 0 errors, 0 skipped."
+    },
+    {
+      "command": "git diff --exit-code 21e5bef79987814ecd34c2a416caafd8fe39f79a HEAD -- native/crashpad/overlay/tracebox_bridge.cc native/emergency/tracebox_emergency.c",
+      "exit_status": 0,
+      "actual": "No protected native-file diff since Phase 3 close."
+    }
+  ],
+  "flakiness_check": "All three separate rerun-tasks invocations passed. Each new concurrency test completed 100 iterations per invocation, for 300 passing iterations per test.",
+  "limitations": [
+    "Validation was host-level only. No Android emulator or AVD was created, booted, or provisioned.",
+    "P4.1 remains IN_PROGRESS because the Phase 2/3 recovered-store adapter remains outside this review-fix scope."
+  ]
+}

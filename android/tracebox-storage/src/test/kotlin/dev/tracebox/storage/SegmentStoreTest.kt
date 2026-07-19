@@ -9,6 +9,9 @@ import dev.tracebox.core.WriterPolicyGate
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -157,6 +160,39 @@ class SegmentStoreTest {
         assertTrue(policy.allow(1, 80, 30, RecordPriority.HANDLED_ERROR) is QuotaDecision.Dropped)
         assertTrue(policy.allow(99, 0, 1, RecordPriority.ORDINARY_EVENT) is QuotaDecision.Dropped)
         assertEquals(QuotaDecision.Allowed, RoleQuotaPolicy(mapOf(1 to 100), fallbackRole = 1).allow(99, 0, 1, RecordPriority.ORDINARY_EVENT))
+    }
+
+    @Test fun uid_accounting_serializes_concurrent_hard_quota_reservations() {
+        val workers = Executors.newFixedThreadPool(2)
+        try {
+            repeat(100) { iteration ->
+                val accounting = UidAccounting(
+                    UidQuota(mapOf(UidBucket.SNAPSHOTS to 10L)),
+                    mapOf(UidBucket.SNAPSHOTS to 1),
+                )
+                val ready = CountDownLatch(2)
+                val start = CountDownLatch(1)
+                val reservations = (0..1).map { contender ->
+                    workers.submit<Boolean> {
+                        ready.countDown()
+                        check(start.await(5, TimeUnit.SECONDS)) { "iteration $iteration did not start" }
+                        accounting.reserve(
+                            Path.of("build", "phase2-tests", "quota-$iteration-$contender"),
+                            UidBucket.SNAPSHOTS,
+                            10,
+                        )
+                    }
+                }
+                assertTrue(ready.await(5, TimeUnit.SECONDS), "iteration $iteration did not ready both workers")
+                start.countDown()
+                val successes = reservations.count { it.get(5, TimeUnit.SECONDS) }
+                assertEquals(1, successes, "iteration $iteration")
+                assertEquals(10L, accounting.used(UidBucket.SNAPSHOTS), "iteration $iteration")
+            }
+        } finally {
+            workers.shutdownNow()
+            assertTrue(workers.awaitTermination(5, TimeUnit.SECONDS))
+        }
     }
 
     @Test fun corrupt_or_stale_index_falls_back_to_authoritative_segment_scan() {
