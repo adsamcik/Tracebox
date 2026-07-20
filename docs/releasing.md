@@ -1,0 +1,103 @@
+# Releasing Tracebox
+
+The alpha release source of truth is an annotated Git tag matching exactly:
+
+```text
+vMAJOR.MINOR.PATCH-alpha.N
+```
+
+The GitHub workflow rebuilds the annotated tagged commit, derives the publication
+version from the tag, publishes both AARs to GitHub Packages, verifies that both
+POMs and AARs can be fetched and resolved by a clean Gradle consumer from the
+repository-scoped Maven endpoint, then publishes a GitHub **pre-release** with
+checksums and legal notices.
+
+## One-time repository setup
+
+Before the first tag, a repository administrator must:
+
+1. Push this repository to its final public `OWNER/REPOSITORY` GitHub location.
+2. Make the GitHub repository public and enable GitHub Actions.
+3. Allow GitHub Actions to receive the job-scoped `contents: write` and
+   `packages: write` permissions required by the protected release environment.
+4. Create the `github-packages-alpha` environment and require an appropriate
+   maintainer review; restrict it to protected alpha tags.
+5. Protect `main` and require the `CI / verify` status check.
+6. Create an active repository ruleset for `v*-alpha.*` that explicitly restricts
+   tag creation, updates, and deletion. Keep any bypass list narrowly limited to
+   authorized release maintainers.
+7. Enable private vulnerability reporting and replace the placeholder reporting
+   text in `SECURITY.md` and `CODE_OF_CONDUCT.md`.
+8. Review the Apache-2.0 copyright designation with the actual legal owner.
+9. Never store a personal access token in the repository. The release workflow
+   uses its short-lived `GITHUB_TOKEN`.
+
+GitHub Packages' Gradle registry is repository scoped. Consumers need the
+lowercase endpoint `https://maven.pkg.github.com/owner/repository` and an
+authenticated classic PAT with `read:packages`.
+
+## Alpha release procedure
+
+1. Ensure the final commit is merged to `main` and CI is green.
+2. Confirm `CHANGELOG.md` and dependency notices accurately describe the release.
+3. Create and verify an annotated tag:
+
+   ```bash
+   git tag -a v0.1.0-alpha.1 -m "Tracebox 0.1.0-alpha.1"
+   git push origin v0.1.0-alpha.1
+   ```
+
+4. Approve the protected release environment when GitHub prompts for it. The
+   workflow validates the tag, test suite, AARs, checksums, and unused package
+   coordinates before creating a draft release and publishing immutable packages.
+5. Verify that GitHub Packages contains both AARs and that the GitHub release is
+   marked as a prerelease.
+6. Resolve the packages using the consumer snippet in `README.md`.
+7. Download the two AARs and the checksum asset, then run
+   `sha256sum -c tracebox-0.1.0-alpha.1-sha256sums.txt` from that directory.
+8. Never delete or overwrite a published version. Correct mistakes with a new
+   alpha version and a new tag.
+
+## Failure recovery
+
+GitHub Packages publication and GitHub Release publication are not one atomic
+operation. The tag workflow creates a protected **draft** only after the build
+has passed, and it refuses to publish a coordinate whose Maven POM already
+exists.
+
+- If the workflow fails before a draft exists and both POM URLs return HTTP 404,
+  fix the failure and rerun the tag workflow.
+- If a draft exists and both the `tracebox-api` and `tracebox` POM/AAR URLs are
+  resolvable, run **Finalize alpha release draft** from GitHub Actions with that
+  exact tag. It rebuilds the tagged source, rechecks the consumer endpoints,
+  uploads checksums/legal notices, and publishes only the existing draft; it
+  never republishes Maven artifacts.
+- If only one artifact is visible, or neither is visible after a failed publish,
+  do not publish the draft and do not reuse the version. Preserve the partial
+  state for audit, correct the cause, and roll forward to a new alpha version.
+
+This recovery design prevents an automated retry from accidentally overwriting
+or duplicating immutable package coordinates.
+
+## Local publication smoke test
+
+This only publishes to the local Maven cache; it does not contact GitHub:
+
+```bash
+./gradlew publishToMavenLocal
+```
+
+To exercise the GitHub publication configuration outside Actions, set the
+repository and credentials in an untracked local properties file or the
+environment:
+
+```bash
+./gradlew \
+  -PtraceboxGitHubRepository=OWNER/REPOSITORY \
+  -Pgpr.user=YOUR_GITHUB_USERNAME \
+  -Pgpr.key=YOUR_CLASSIC_PAT \
+  -PtraceboxVersion=0.1.0-alpha.1 \
+  verifyReleaseMetadata publish
+```
+
+Do not use that command to overwrite a release version.

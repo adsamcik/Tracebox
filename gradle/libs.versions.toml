@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[versions]
+agp = "9.1.1"
+coroutines = "1.10.2"
+junit4 = "4.13.2"
+
+[libraries]
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
+

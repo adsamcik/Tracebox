@@ -1,0 +1,229 @@
+name: Publish alpha release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: alpha-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish GitHub Packages alpha
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-packages-alpha
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Check out immutable tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK platform
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3 # v4.4.2
+
+      - name: Validate immutable alpha tag and release state
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACEBOX_EVENT_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]
+          test "$(git cat-file -t "refs/tags/$tag")" = "tag"
+          tag_object="$(git rev-parse "refs/tags/$tag")"
+          release_commit="$(git rev-list -n 1 "$tag")"
+          test "$release_commit" = "$TRACEBOX_EVENT_COMMIT"
+          test "$(git rev-parse HEAD)" = "$release_commit"
+          test "$(./gradlew -q -PtraceboxVersion="$version" printVersion)" = "$version"
+          git merge-base --is-ancestor "$release_commit" origin/main
+          remote_tag_object="$(git ls-remote --refs origin "refs/tags/$tag" | awk '{print $1}')"
+          test "$remote_tag_object" = "$tag_object"
+          echo "tag_object=$tag_object" >> "$GITHUB_OUTPUT"
+
+          lookup="$(mktemp)"
+          set +e
+          gh api --include "repos/$GITHUB_REPOSITORY/releases/tags/$tag" >"$lookup" 2>&1
+          lookup_status=$?
+          set -e
+          if [[ $lookup_status -eq 0 ]]; then
+            echo "A GitHub release or draft already exists for $tag."
+            cat "$lookup"
+            echo "Use the controlled recovery workflow for a draft; never overwrite a published release."
+            exit 1
+          fi
+          if ! grep -Eq 'HTTP/[0-9.]+ 404|HTTP 404' "$lookup"; then
+            echo "Could not determine whether $tag already has a GitHub release."
+            cat "$lookup"
+            exit "$lookup_status"
+          fi
+
+      - name: Verify, test, and checksum release contents
+        env:
+          TRACEBOX_RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          ./gradlew --no-daemon --stacktrace --dependency-verification=strict \
+            -PtraceboxGitHubRepository="${{ github.repository }}" \
+            -PtraceboxVersion="$version" \
+            verifyReleaseMetadata check createReleaseChecksums
+
+      - name: Confirm GitHub Packages coordinates are unused
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          maven_repository="${GITHUB_REPOSITORY,,}"
+          maven_base="https://maven.pkg.github.com/$maven_repository/io/github/tracebox"
+          for artifact in tracebox-api tracebox; do
+            url="$maven_base/$artifact/$version/$artifact-$version.pom"
+            status="$(curl --location --silent --show-error --output /dev/null \
+              --write-out '%{http_code}' \
+              --user "$GITHUB_ACTOR:$GITHUB_TOKEN" "$url")"
+            if [[ "$status" != "404" ]]; then
+              echo "Refusing to publish $artifact:$version: Maven metadata returned HTTP $status."
+              echo "Use a new alpha version, or recover an existing draft without republishing."
+              exit 1
+            fi
+          done
+
+      - name: Create protected alpha draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACEBOX_EXPECTED_TAG_OBJECT: ${{ steps.preflight.outputs.tag_object }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          remote_tag_object="$(git ls-remote --refs origin "refs/tags/$tag" | awk '{print $1}')"
+          test "$remote_tag_object" = "$TRACEBOX_EXPECTED_TAG_OBJECT"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Tracebox $version" \
+            --draft \
+            --prerelease \
+            --verify-tag \
+            --generate-notes
+
+      - name: Publish immutable GitHub Packages artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TRACEBOX_RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          ./gradlew --no-daemon --stacktrace --dependency-verification=strict \
+            -PtraceboxGitHubRepository="${{ github.repository }}" \
+            -PtraceboxVersion="$version" \
+            publish
+
+      - name: Verify GitHub Packages consumer endpoints
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          maven_repository="${GITHUB_REPOSITORY,,}"
+          maven_base="https://maven.pkg.github.com/$maven_repository/io/github/tracebox"
+
+          await_artifact() {
+            local url="$1"
+            for attempt in {1..12}; do
+              if curl --fail --location --silent --show-error --output /dev/null \
+                --user "$GITHUB_ACTOR:$GITHUB_TOKEN" "$url"; then
+                return 0
+              fi
+              if [[ $attempt -lt 12 ]]; then
+                sleep 5
+              fi
+            done
+            echo "Published package was not consumable from $url"
+            return 1
+          }
+
+          for artifact in tracebox-api tracebox; do
+            await_artifact "$maven_base/$artifact/$version/$artifact-$version.pom"
+            await_artifact "$maven_base/$artifact/$version/$artifact-$version.aar"
+          done
+
+      - name: Resolve GitHub Packages as a clean Gradle consumer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          ./gradlew --no-daemon --stacktrace \
+            -p integration/consumer-smoke \
+            -PtraceboxGitHubRepository="${{ github.repository }}" \
+            -PtraceboxVersion="$version" \
+            resolvePublishedArtifacts
+
+      - name: Upload assets to alpha draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACEBOX_EXPECTED_TAG_OBJECT: ${{ steps.preflight.outputs.tag_object }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          remote_tag_object="$(git ls-remote --refs origin "refs/tags/$tag" | awk '{print $1}')"
+          test "$remote_tag_object" = "$TRACEBOX_EXPECTED_TAG_OBJECT"
+          gh release upload "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            android/tracebox-api/build/outputs/aar/tracebox-api-release.aar \
+            android/tracebox/build/outputs/aar/tracebox-release.aar \
+            "build/release/tracebox-$version-sha256sums.txt" \
+            LICENSE \
+            NOTICE \
+            THIRD_PARTY_NOTICES.md
+
+      - name: Publish verified alpha draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACEBOX_EXPECTED_TAG_OBJECT: ${{ steps.preflight.outputs.tag_object }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          remote_tag_object="$(git ls-remote --refs origin "refs/tags/$tag" | awk '{print $1}')"
+          test "$remote_tag_object" = "$TRACEBOX_EXPECTED_TAG_OBJECT"
+          gh release edit "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --prerelease

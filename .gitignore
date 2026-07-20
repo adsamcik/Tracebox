@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android Studio and IntelliJ IDEA
+.idea/
+*.iml
+local.properties
+.cxx/
+.externalNativeBuild/
+
+# Native and Rust build outputs
+*.so
+*.dylib
+*.dll
+native/.cxx/
+rust/target/
+
+# Local publishing credentials and release overrides
+tracebox.local.properties
+*.keystore
+*.jks
+
+# Operating-system noise
+.DS_Store
+Thumbs.db
+
