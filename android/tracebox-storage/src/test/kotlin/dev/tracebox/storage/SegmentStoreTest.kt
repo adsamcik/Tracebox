@@ -183,6 +183,7 @@ class SegmentStoreTest {
                         )
                     }
                 }
+
                 assertTrue(ready.await(5, TimeUnit.SECONDS), "iteration $iteration did not ready both workers")
                 start.countDown()
                 val successes = reservations.count { it.get(5, TimeUnit.SECONDS) }
@@ -193,6 +194,36 @@ class SegmentStoreTest {
             workers.shutdownNow()
             assertTrue(workers.awaitTermination(5, TimeUnit.SECONDS))
         }
+    }
+
+    @Test fun writer_reserves_segment_header_tail_and_frames_in_uid_wide_quota_before_append() {
+        val dir = directory()
+        val path = dir.resolve("uid-wide.tbseg")
+        val page = ControlPage(path.resolveSibling("${path.fileName}.control"))
+        page.commit(PolicySnapshot(1, 0))
+        val gate = WriterPolicyGate(page)
+        assertEquals(GateResult.Reloaded, gate.reload())
+        val quota = UidQuota(UidBucket.entries.associateWith { bucket ->
+            when (bucket) {
+                UidBucket.ROLE_SEGMENTS -> 196L
+                UidBucket.METADATA -> 4_096L
+                else -> 256L
+            }
+        })
+        val coordinator = UidWideQuotaCoordinator(dir, quota, UidBucket.entries.associateWith { 16 })
+        val writer = SegmentWriter.create(
+            path,
+            header(10),
+            gate,
+            RoleQuotaLedger(RoleQuotaPolicy(mapOf(1 to 196L)), dir),
+            uidQuota = coordinator,
+        )
+
+        assertIs<SegmentAppendResult.Appended>(writer.append(3, record(byteArrayOf())))
+        assertEquals(196L, coordinator.used(UidBucket.ROLE_SEGMENTS))
+        assertEquals(SegmentAppendResult.DroppedQuota(RecordPriority.BREADCRUMB), writer.append(3, record(byteArrayOf())))
+        writer.seal()
+        assertEquals(196L, coordinator.used(UidBucket.ROLE_SEGMENTS))
     }
 
     @Test fun corrupt_or_stale_index_falls_back_to_authoritative_segment_scan() {

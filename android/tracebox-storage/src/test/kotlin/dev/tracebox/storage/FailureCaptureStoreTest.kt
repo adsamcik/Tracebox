@@ -55,6 +55,28 @@ class FailureCaptureStoreTest {
         assertFalse(Files.exists(root.resolve("orphan.tbraw")))
     }
 
+    @Test fun handler_raw_lifecycle_charges_uid_wide_raw_and_metadata_ownership() {
+        val root = directory()
+        val quota = UidQuota(UidBucket.entries.associateWith { bucket ->
+            when (bucket) {
+                UidBucket.RAW_ARTIFACTS -> 8L
+                UidBucket.METADATA -> 4_096L
+                else -> 128L
+            }
+        })
+        val coordinator = UidWideQuotaCoordinator(root, quota, UidBucket.entries.associateWith { 16 })
+        val rawRoot = root.resolve("raw")
+        val store = RawArtifactStore(rawRoot, rawQuotaBytes = 8, uidQuota = coordinator)
+        val id = ByteArray(32) { 9 }
+
+        assertTrue(store.preCapture(id, ByteArray(32) { 8 }, originRole = 3, acceptedEpoch = 4))
+        assertTrue(store.commitRaw(id, ByteArray(8)))
+        assertEquals(8L, coordinator.used(UidBucket.RAW_ARTIFACTS))
+        assertTrue(coordinator.used(UidBucket.METADATA) > 1_024L)
+        store.deleteAllOwned()
+        assertEquals(0L, coordinator.used(UidBucket.RAW_ARTIFACTS))
+    }
+
     @Test fun lifecycle_journal_is_forced_before_capture_bytes_and_participates_in_deletion() {
         val root = Files.createTempDirectory("tracebox-raw-lifecycle")
         val store = RawArtifactStore(root, rawQuotaBytes = 128)
@@ -112,6 +134,40 @@ class FailureCaptureStoreTest {
 
         assertTrue(GeneratedRecordCodec.encode(summary).contentEquals(imported!!))
         assertTrue(spool.isRetired(id))
+    }
+
+    @Test fun summary_spool_tombstones_and_global_deletion_release_uid_wide_quota() {
+        val root = directory()
+        val quota = UidQuota(UidBucket.entries.associateWith { bucket ->
+            if (bucket == UidBucket.METADATA) 4_096L else 512L
+        })
+        val coordinator = UidWideQuotaCoordinator(root, quota, UidBucket.entries.associateWith { 16 })
+        val spoolRoot = root.resolve("spool")
+        val spool = StructuralSummarySpool(spoolRoot, uidQuota = coordinator)
+        val id = spool.stageStructuralSummary(
+            ByteArray(32) { 3 },
+            1,
+            ByteArray(32) { 4 },
+            GeneratedStructuralSummary(1u, 2u, 3u, 4u, 5u),
+        )
+
+        assertTrue(coordinator.used(UidBucket.SUMMARY_SPOOL) > 0)
+        assertTrue(spool.tombstone(id))
+        assertTrue(spool.isRetired(id))
+        val deletion = DeletionEngine(
+            root,
+            root.resolve("delete.journal"),
+            object : DeletionHooks {
+                override fun commitDisabledEpoch() = true
+                override fun quiesceWriters() = true
+                override fun invalidateApprovalsAndSnapshotKeys() = Unit
+                override fun closeActiveStores() = Unit
+            },
+            participants = listOf(SummarySpoolDeletionParticipant(spool, spoolRoot)),
+        )
+
+        assertEquals(DeletionState.COMPLETE, deletion.deleteAll())
+        assertEquals(0L, coordinator.used(UidBucket.SUMMARY_SPOOL))
     }
 
     @Test fun summary_import_recovers_after_target_append_before_acknowledgement_without_duplicate() {

@@ -7,10 +7,13 @@ import dev.tracebox.core.WriterPolicyGate
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.zip.CRC32C
 
 /** IDs supplied by the Phase 1 persist-before-use identity allocator. */
@@ -77,6 +80,7 @@ class SegmentWriter private constructor(
     private var sealed: Boolean,
     private val policyGate: WriterPolicyGate,
     private val quotaLedger: RoleQuotaLedger,
+    private val uidQuota: UidWideQuotaCoordinator?,
 ) : AutoCloseable {
     /** Revalidates policy and charges the durable role budget before appending one forced frame. */
     fun append(recordType: Int, record: PolicyTaggedRecord): SegmentAppendResult {
@@ -86,7 +90,11 @@ class SegmentWriter private constructor(
         val frameBytes = Int.SIZE_BYTES + FRAME_FIXED_BYTES + record.payload.size + Int.SIZE_BYTES
         // Section 11.3's hard bound requires every byte to fit. Keep space for the mandatory
         // seal before extending a live segment; seal() then charges those exact bytes atomically.
-        return quotaLedger.appendAtomically(
+        if (uidQuota?.grow(path, UidBucket.ROLE_SEGMENTS, frameBytes.toLong()) == false) {
+            return SegmentAppendResult.DroppedQuota(record.priority)
+        }
+        return try {
+            val result = quotaLedger.appendAtomically(
             header.processRole,
             path,
             frameBytes.toLong(),
@@ -110,7 +118,15 @@ class SegmentWriter private constructor(
                 channel.force(true)
             }
             nextSequence++
-            SegmentAppendResult.Appended(sequence)
+                SegmentAppendResult.Appended(sequence)
+            }
+            if (result !is SegmentAppendResult.Appended) {
+                uidQuota?.resize(path, UidBucket.ROLE_SEGMENTS, Files.size(path) + SEAL_SIZE)
+            }
+            result
+        } catch (failure: java.io.IOException) {
+            uidQuota?.resize(path, UidBucket.ROLE_SEGMENTS, Files.size(path) + SEAL_SIZE)
+            throw failure
         }
     }
 
@@ -155,27 +171,39 @@ class SegmentWriter private constructor(
             header: SegmentHeader,
             policyGate: WriterPolicyGate,
             quotaLedger: RoleQuotaLedger,
+            uidQuota: UidWideQuotaCoordinator? = null,
         ): SegmentWriter {
             DiskIoGuard.assertNotMainThread()
-            val created = quotaLedger.createAtomically(
-                header.processRole,
-                path,
-                HEADER_SIZE.toLong(),
-                RecordPriority.ORDINARY_EVENT,
-                reservedTailBytes = SEAL_SIZE.toLong(),
-            ) {
-                val bytes = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
-                bytes.putInt(MAGIC).putInt(VERSION)
-                bytes.put(header.identity.segmentId).put(header.identity.processInstanceId).put(header.schemaFingerprint)
-                bytes.putLong(header.policyGeneration).putInt(header.flags).putInt(header.processRole)
-                bytes.putInt(crc(bytes.array(), 0, HEADER_SIZE - Int.SIZE_BYTES)).flip()
-                FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use {
-                    it.write(bytes)
-                    it.force(true)
-                }
+            if (uidQuota?.reserve(path, UidBucket.ROLE_SEGMENTS, HEADER_SIZE.toLong() + SEAL_SIZE) == false) {
+                throw SegmentException.Quota
             }
-            if (!created) throw SegmentException.Quota
-            return SegmentWriter(path, header, 0, false, policyGate, quotaLedger)
+            val created = try {
+                quotaLedger.createAtomically(
+                    header.processRole,
+                    path,
+                    HEADER_SIZE.toLong(),
+                    RecordPriority.ORDINARY_EVENT,
+                    reservedTailBytes = SEAL_SIZE.toLong(),
+                ) {
+                    val bytes = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
+                    bytes.putInt(MAGIC).putInt(VERSION)
+                    bytes.put(header.identity.segmentId).put(header.identity.processInstanceId).put(header.schemaFingerprint)
+                    bytes.putLong(header.policyGeneration).putInt(header.flags).putInt(header.processRole)
+                    bytes.putInt(crc(bytes.array(), 0, HEADER_SIZE - Int.SIZE_BYTES)).flip()
+                    FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use {
+                        it.write(bytes)
+                        it.force(true)
+                    }
+                }
+            } catch (failure: java.io.IOException) {
+                uidQuota?.release(path)
+                throw failure
+            }
+            if (!created) {
+                uidQuota?.release(path)
+                throw SegmentException.Quota
+            }
+            return SegmentWriter(path, header, 0, false, policyGate, quotaLedger, uidQuota)
         }
 
         /** Reads a valid prefix and optionally truncates only the damaged tail. */
@@ -277,7 +305,16 @@ object DiskIoGuard {
 }
 
 /** One account bucket, so a path may never be charged to more than one hard reserve. */
-enum class UidBucket { ROLE_SEGMENTS, RAW_ARTIFACTS, SUMMARY_SPOOL, SNAPSHOTS, COMPACTION, EMERGENCY, METADATA }
+enum class UidBucket {
+    ROLE_SEGMENTS,
+    RAW_ARTIFACTS,
+    SUMMARY_SPOOL,
+    SUMMARY_STAGING,
+    SNAPSHOTS,
+    COMPACTION,
+    EMERGENCY,
+    METADATA,
+}
 data class UidQuota(val limits: Map<UidBucket, Long>) {
     fun hardBound(): Long = limits.values.sum()
 }
@@ -297,6 +334,187 @@ class UidAccounting(private val quota: UidQuota, private val maxFiles: Map<UidBu
     fun release(path: Path) = synchronized(lock) { allocations.remove(path) }
     fun used(bucket: UidBucket): Long = synchronized(lock) {
         allocations.filterValues { it.first == bucket }.values.sumOf { it.second }
+    }
+}
+
+/**
+ * Durable UID-wide ownership ledger. Every library-owned byte is reserved to one bucket before
+ * its path is created, and the ledger itself occupies a fixed metadata reserve so its atomic
+ * replacement file cannot silently escape the hard bound.
+ */
+class UidWideQuotaCoordinator(
+    root: Path,
+    private val quota: UidQuota,
+    private val maxFiles: Map<UidBucket, Int>,
+) {
+    private data class Allocation(val bucket: UidBucket, val bytes: Long)
+
+    private val root = root.toAbsolutePath().normalize()
+    private val lockPath = this.root.resolve(".tracebox-uid-quota.lock")
+    private val ledgerPath = this.root.resolve("tracebox-uid-quota-v1")
+    private val temporaryLedgerPath = this.root.resolve("tracebox-uid-quota-v1.new")
+
+    init {
+        require((quota.limits[UidBucket.METADATA] ?: 0) >= COORDINATOR_METADATA_RESERVE)
+        require((maxFiles[UidBucket.METADATA] ?: 0) >= COORDINATOR_METADATA_FILES)
+    }
+
+    /** Reserves a new path before the caller creates or writes it. */
+    fun reserve(path: Path, bucket: UidBucket, bytes: Long): Boolean = locked { allocations ->
+        val owned = ownedPath(path)
+        if (bytes < 0 || owned in allocations || !canFit(allocations, bucket, bytes, additionalFiles = 1)) {
+            return@locked false
+        }
+        allocations[owned] = Allocation(bucket, bytes)
+        true
+    }
+
+    /**
+     * Atomically grows a previously-owned path. Callers use this before extending an append-only
+     * segment or replacing a raw/spool file, then compensate with [resize] if the physical write
+     * fails.
+     */
+    fun grow(path: Path, bucket: UidBucket, additionalBytes: Long): Boolean = locked { allocations ->
+        val owned = ownedPath(path)
+        val allocation = allocations[owned] ?: return@locked false
+        if (allocation.bucket != bucket || additionalBytes < 0 ||
+            !canFit(allocations, bucket, additionalBytes, additionalFiles = 0)
+        ) {
+            return@locked false
+        }
+        allocations[owned] = allocation.copy(bytes = allocation.bytes + additionalBytes)
+        true
+    }
+
+    /** Replaces an existing reservation size after a failed or shortened write. */
+    fun resize(path: Path, bucket: UidBucket, bytes: Long): Boolean = locked { allocations ->
+        val owned = ownedPath(path)
+        val allocation = allocations[owned] ?: return@locked false
+        if (allocation.bucket != bucket || bytes < 0) return@locked false
+        val delta = bytes - allocation.bytes
+        if (delta > 0 && !canFit(allocations, bucket, delta, additionalFiles = 0)) return@locked false
+        allocations[owned] = allocation.copy(bytes = bytes)
+        true
+    }
+
+    /** Removes a path from the hard ledger only after its owning caller removed or retired it. */
+    fun release(path: Path): Boolean = locked { allocations ->
+        allocations.remove(ownedPath(path)) != null
+    }
+
+    /** Returns the durable bucket usage including the coordinator's fixed metadata reserve. */
+    fun used(bucket: UidBucket): Long = locked { allocations ->
+        allocations.values.filter { it.bucket == bucket }.sumOf { it.bytes } + reservedMetadataBytes(bucket)
+    }
+
+    private fun canFit(
+        allocations: Map<Path, Allocation>,
+        bucket: UidBucket,
+        bytes: Long,
+        additionalFiles: Int,
+    ): Boolean {
+        val used = allocations.values.filter { it.bucket == bucket }.sumOf { it.bytes } + reservedMetadataBytes(bucket)
+        val files = allocations.values.count { it.bucket == bucket } + reservedMetadataFiles(bucket)
+        return bytes <= (quota.limits[bucket] ?: 0) - used &&
+            additionalFiles <= (maxFiles[bucket] ?: 0) - files
+    }
+
+    private fun reservedMetadataBytes(bucket: UidBucket): Long =
+        if (bucket == UidBucket.METADATA) COORDINATOR_METADATA_RESERVE else 0
+
+    private fun reservedMetadataFiles(bucket: UidBucket): Int =
+        if (bucket == UidBucket.METADATA) COORDINATOR_METADATA_FILES else 0
+
+    private fun ownedPath(path: Path): Path {
+        val owned = path.toAbsolutePath().normalize()
+        require(owned.startsWith(root)) { "UID-wide quota path must remain inside its root" }
+        return owned
+    }
+
+    private fun <T> locked(block: (MutableMap<Path, Allocation>) -> T): T {
+        Files.createDirectories(root)
+        FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
+            channel.lock().use {
+                val allocations = readLedger()
+                val before = allocations.toMap()
+                val result = block(allocations)
+                if (allocations != before) persistLedger(allocations)
+                return result
+            }
+        }
+    }
+
+    private fun readLedger(): MutableMap<Path, Allocation> {
+        if (!Files.exists(ledgerPath)) return linkedMapOf()
+        val lines = try {
+            Files.readAllLines(ledgerPath, Charsets.US_ASCII)
+        } catch (error: java.io.IOException) {
+            throw UidQuotaLedgerException.Unavailable(error)
+        }
+        if (lines.firstOrNull() != LEDGER_MAGIC) throw UidQuotaLedgerException.Corrupt
+        val allocations = linkedMapOf<Path, Allocation>()
+        lines.drop(1).filter(String::isNotBlank).forEach { line ->
+            val fields = line.split('|')
+            if (fields.size != 3) throw UidQuotaLedgerException.Corrupt
+            val bucket = try {
+                UidBucket.valueOf(fields[0])
+            } catch (_: IllegalArgumentException) {
+                throw UidQuotaLedgerException.Corrupt
+            }
+            val bytes = fields[1].toLongOrNull()?.takeIf { it >= 0 } ?: throw UidQuotaLedgerException.Corrupt
+            val relative = try {
+                Base64.getUrlDecoder().decode(fields[2]).toString(Charsets.UTF_8)
+            } catch (_: IllegalArgumentException) {
+                throw UidQuotaLedgerException.Corrupt
+            }
+            val path = root.resolve(relative).normalize()
+            if (Path.of(relative).isAbsolute || !path.startsWith(root) || allocations.put(path, Allocation(bucket, bytes)) != null) {
+                throw UidQuotaLedgerException.Corrupt
+            }
+        }
+        return allocations
+    }
+
+    private fun persistLedger(allocations: Map<Path, Allocation>) {
+        val contents = buildString {
+            append(LEDGER_MAGIC).append('\n')
+            allocations.toSortedMap(compareBy(Path::toString)).forEach { (path, allocation) ->
+                val relative = root.relativize(path).toString()
+                append(allocation.bucket.name).append('|').append(allocation.bytes).append('|')
+                append(Base64.getUrlEncoder().withoutPadding().encodeToString(relative.toByteArray(Charsets.UTF_8))).append('\n')
+            }
+        }
+        val bytes = contents.toByteArray(Charsets.US_ASCII)
+        if (bytes.size.toLong() > COORDINATOR_METADATA_RESERVE / 2) throw UidQuotaLedgerException.MetadataExhausted
+        try {
+            Files.write(
+                temporaryLedgerPath,
+                bytes,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+            )
+            FileChannel.open(temporaryLedgerPath, StandardOpenOption.WRITE).use { it.force(true) }
+            try {
+                Files.move(temporaryLedgerPath, ledgerPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporaryLedgerPath, ledgerPath, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (error: java.io.IOException) {
+            throw UidQuotaLedgerException.Unavailable(error)
+        }
+    }
+
+    sealed class UidQuotaLedgerException : IllegalStateException() {
+        data object Corrupt : UidQuotaLedgerException()
+        data object MetadataExhausted : UidQuotaLedgerException()
+        data class Unavailable(val ioError: java.io.IOException) : UidQuotaLedgerException()
+    }
+
+    private companion object {
+        const val LEDGER_MAGIC = "tracebox-uid-quota-v1"
+        const val COORDINATOR_METADATA_RESERVE = 1_024L
+        const val COORDINATOR_METADATA_FILES = 2
     }
 }
 

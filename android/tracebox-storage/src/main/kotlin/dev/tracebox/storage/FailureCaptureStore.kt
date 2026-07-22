@@ -40,7 +40,11 @@ data class RawArtifactJournal(
 }
 
 /** CE handler raw-artifact store with a separate, hard byte budget. */
-class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) {
+class RawArtifactStore(
+    private val root: Path,
+    private val rawQuotaBytes: Long,
+    private val uidQuota: UidWideQuotaCoordinator? = null,
+) {
     private val commitLock = Any()
     init { require(rawQuotaBytes >= 0) }
 
@@ -49,17 +53,31 @@ class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) 
         val path = journalPath(id)
         if (Files.exists(path)) return false
         Files.createDirectories(root)
-        forceWrite(
-            path,
-            "${encode(journal.id)}|${encode(journal.originProcessInstanceId)}|${journal.originRole}|${journal.acceptedEpoch}".toByteArray(),
-        )
-        return true
+        val bytes = "${encode(journal.id)}|${encode(journal.originProcessInstanceId)}|${journal.originRole}|${journal.acceptedEpoch}".toByteArray()
+        if (uidQuota?.reserve(path, UidBucket.METADATA, bytes.size.toLong()) == false) return false
+        return try {
+            forceWrite(path, bytes)
+            true
+        } catch (_: java.io.IOException) {
+            uidQuota?.release(path)
+            false
+        }
     }
 
     fun commitRaw(id: ByteArray, bytes: ByteArray): Boolean = synchronized(commitLock) {
-        if (journal(id) == null || bytes.size.toLong() + usedRawBytes() > rawQuotaBytes) return@synchronized false
-        forceWrite(rawPath(id), bytes)
-        true
+        val path = rawPath(id)
+        if (journal(id) == null || bytes.size.toLong() + usedRawBytes() > rawQuotaBytes ||
+            uidQuota?.reserve(path, UidBucket.RAW_ARTIFACTS, bytes.size.toLong()) == false
+        ) {
+            return@synchronized false
+        }
+        try {
+            forceWrite(path, bytes)
+            true
+        } catch (_: java.io.IOException) {
+            uidQuota?.release(path)
+            false
+        }
     }
 
     fun journal(id: ByteArray): RawArtifactJournal? {
@@ -80,7 +98,7 @@ class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) 
         Files.list(root).use { paths ->
             paths.filter { it.fileName.toString().endsWith(".tbraw") }.forEach { raw ->
                 val id = raw.fileName.toString().removeSuffix(".tbraw")
-                if (journalByName(id) == null) Files.deleteIfExists(raw)
+                if (journalByName(id) == null) deleteOwnedPath(raw)
             }
         }
     }
@@ -95,8 +113,8 @@ class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) 
                 .filter { nowMillis - Files.getLastModifiedTime(it).toMillis() >= ttlMillis }
                 .forEach { raw ->
                     val id = raw.fileName.toString().removeSuffix(".tbraw")
-                    if (Files.deleteIfExists(raw)) deleted++
-                    Files.deleteIfExists(root.resolve("$id.tbrawjournal"))
+                    if (deleteOwnedPath(raw)) deleted++
+                    deleteOwnedPath(root.resolve("$id.tbrawjournal"))
                 }
         }
         deleteUnverifiableOrphans()
@@ -108,6 +126,23 @@ class RawArtifactStore(private val root: Path, private val rawQuotaBytes: Long) 
     private fun rawPath(id: ByteArray): Path = root.resolve("${encode(id)}.tbraw")
     private fun journalPath(id: ByteArray): Path = root.resolve("${encode(id)}.tbrawjournal")
     private fun usedRawBytes(): Long = Files.list(root).use { it.filter { path -> path.fileName.toString().endsWith(".tbraw") }.mapToLong(Files::size).sum() }
+    private fun deleteOwnedPath(path: Path): Boolean {
+        val deleted = Files.deleteIfExists(path)
+        uidQuota?.release(path)
+        return deleted
+    }
+
+    /** Deletes every raw byte and lifecycle journal while releasing their UID-wide ownership. */
+    fun deleteAllOwned() {
+        if (!Files.isDirectory(root)) return
+        Files.list(root).use { files ->
+            files.filter {
+                val name = it.fileName.toString()
+                name.endsWith(".tbraw") || name.endsWith(".tbrawjournal")
+            }.forEach(::deleteOwnedPath)
+        }
+    }
+
     private fun encode(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
     private fun decode(value: String): ByteArray = Base64.getUrlDecoder().decode(value)
 }
@@ -131,13 +166,7 @@ class RawArtifactDeletionParticipant(private val rawStore: RawArtifactStore, pri
     override fun markIneligible() = Unit
 
     override fun deleteOwned() {
-        if (!Files.isDirectory(root)) return
-        Files.list(root).use { files ->
-            files.filter {
-                val name = it.fileName.toString()
-                name.endsWith(".tbraw") || name.endsWith(".tbrawjournal")
-            }.forEach { Files.deleteIfExists(it) }
-        }
+        rawStore.deleteAllOwned()
     }
 
     override fun remainingOwned(): List<Path> {
@@ -159,7 +188,10 @@ private enum class SpoolState { JOURNALED, APPENDED, ACKNOWLEDGED, RETIRED }
  * Handler structural-summary spool. Its canonical content excludes IDs; `stage` writes the tuple
  * and deterministic ID before appending, and `replay` retains source until a durable acknowledgement.
  */
-class StructuralSummarySpool(private val root: Path) {
+class StructuralSummarySpool(
+    private val root: Path,
+    private val uidQuota: UidWideQuotaCoordinator? = null,
+) {
     private fun stage(rawId: ByteArray, extractorVersion: Int, schema: ByteArray, canonicalBody: ByteArray): String {
         require(rawId.size == 32 && schema.size == 32)
         val digest = sha256(canonicalBody)
@@ -167,7 +199,7 @@ class StructuralSummarySpool(private val root: Path) {
         val path = recordPath(id)
         if (!Files.exists(path)) {
             Files.createDirectories(root)
-            forceWrite(path, listOf(SpoolState.JOURNALED.name, encode(canonicalBody)).joinToString("|").toByteArray())
+            writeRecord(path, listOf(SpoolState.JOURNALED.name, encode(canonicalBody)).joinToString("|").toByteArray())
         }
         return id
     }
@@ -189,8 +221,8 @@ class StructuralSummarySpool(private val root: Path) {
                 if (fields[0] == SpoolState.RETIRED.name) return@forEach
                 val body = decode(fields[1])
                 import(id, body)
-                forceWrite(path, "${SpoolState.ACKNOWLEDGED.name}|${fields[1]}".toByteArray())
-                forceWrite(path, "${SpoolState.RETIRED.name}|${fields[1]}".toByteArray())
+                writeRecord(path, "${SpoolState.ACKNOWLEDGED.name}|${fields[1]}".toByteArray())
+                writeRecord(path, "${SpoolState.RETIRED.name}|${fields[1]}".toByteArray())
             }
         }
     }
@@ -206,20 +238,81 @@ class StructuralSummarySpool(private val root: Path) {
                         val fields = Files.readString(path).trim().split('|', limit = 2)
                         if (fields.size != 2 || fields[0] == SpoolState.RETIRED.name) return@forEach
                         importer.import(id, id, decode(fields[1]), crashInjector)
-                        forceWrite(path, "${SpoolState.ACKNOWLEDGED.name}|${fields[1]}".toByteArray())
-                        forceWrite(path, "${SpoolState.RETIRED.name}|${fields[1]}".toByteArray())
+                        writeRecord(path, "${SpoolState.ACKNOWLEDGED.name}|${fields[1]}".toByteArray())
+                        writeRecord(path, "${SpoolState.RETIRED.name}|${fields[1]}".toByteArray())
                     }
                 }
             }
 
     fun isRetired(id: String): Boolean = Files.readString(recordPath(id)).startsWith(SpoolState.RETIRED.name)
-    private fun recordPath(id: String): Path = root.resolve("$id.tbsummary")
+
+            /** Writes a durable tombstone before the selected summary can be excluded from replay/export. */
+            fun tombstone(id: String): Boolean {
+                val path = recordPath(id)
+                val fields = try {
+                    Files.readString(path).trim().split('|', limit = 2)
+                } catch (_: java.io.IOException) {
+                    return false
+                }
+                if (fields.size != 2) return false
+                writeRecord(path, "${SpoolState.RETIRED.name}|${fields[1]}".toByteArray())
+                return true
+            }
+
+            /** Deletes all handler spool bytes during a coordinated Disabled/deletion transaction. */
+            fun deleteAllOwned() {
+                if (!Files.isDirectory(root)) return
+                Files.list(root).use { files ->
+                    files.filter { it.fileName.toString().endsWith(".tbsummary") }.forEach { path ->
+                        Files.deleteIfExists(path)
+                        uidQuota?.release(path)
+                    }
+                }
+            }
+
+            private fun recordPath(id: String): Path = root.resolve("$id.tbsummary")
     private fun summaryId(raw: ByteArray, version: Int, schema: ByteArray, digest: ByteArray): String =
         encode(sha256("tracebox-summary-v1".toByteArray() + raw + version.toLittleEndian() + schema + digest))
     private fun Int.toLittleEndian(): ByteArray = byteArrayOf(toByte(), (this shr 8).toByte(), (this shr 16).toByte(), (this shr 24).toByte())
     private fun sha256(value: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(value)
     private fun encode(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
     private fun decode(value: String): ByteArray = Base64.getUrlDecoder().decode(value)
+
+    private fun writeRecord(path: Path, bytes: ByteArray) {
+        val priorSize = if (Files.exists(path)) Files.size(path) else null
+        if (uidQuota != null) {
+            val reserved = if (priorSize == null) {
+                uidQuota.reserve(path, UidBucket.SUMMARY_SPOOL, bytes.size.toLong())
+            } else {
+                uidQuota.resize(path, UidBucket.SUMMARY_SPOOL, bytes.size.toLong())
+            }
+            if (!reserved) throw SegmentException.Quota
+        }
+        try {
+            forceWrite(path, bytes)
+        } catch (failure: java.io.IOException) {
+            if (priorSize == null) uidQuota?.release(path)
+            else uidQuota?.resize(path, UidBucket.SUMMARY_SPOOL, priorSize)
+            throw failure
+        }
+    }
+}
+
+/** R2.8 deletion participant for authoritative handler structural-summary spool files. */
+class SummarySpoolDeletionParticipant(
+    private val spool: StructuralSummarySpool,
+    private val root: Path,
+) : DeletionParticipant {
+    override fun markIneligible() = Unit
+
+    override fun deleteOwned() = spool.deleteAllOwned()
+
+    override fun remainingOwned(): List<Path> {
+        if (!Files.isDirectory(root)) return emptyList()
+        return Files.list(root).use { files ->
+            files.filter { it.fileName.toString().endsWith(".tbsummary") }.toList()
+        }
+    }
 }
 
         /** Location persisted only after the target's forced append and immutable seal. */
