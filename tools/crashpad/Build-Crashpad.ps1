@@ -47,6 +47,10 @@ New-Item -ItemType Directory -Force (Join-Path $overlay 'emergency'),
     (Join-Path $overlay 'include\tracebox') | Out-Null
 Copy-Item (Join-Path $root 'native\emergency\tracebox_emergency.c') `
     (Join-Path $overlay 'emergency\tracebox_emergency.c')
+Copy-Item (Join-Path $root 'native\include\tracebox\abi.h') `
+    (Join-Path $overlay 'include\tracebox\abi.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\generated_events.h') `
+    (Join-Path $overlay 'include\tracebox\generated_events.h')
 Copy-Item (Join-Path $root 'native\include\tracebox\emergency.h') `
     (Join-Path $overlay 'include\tracebox\emergency.h')
 Copy-Item (Join-Path $root 'native\include\tracebox\emergency_initialization.h') `
@@ -64,7 +68,7 @@ foreach ($target in $targets) {
     $args = 'target_os="android" ' +
         "target_cpu=`"$($target.cpu)`" " +
         "android_ndk_root=`"$($ndk.Replace('\', '/'))`" " +
-        'android_api_level=30 is_debug=false ' +
+        'android_api_level=23 is_debug=false ' +
         'extra_cflags="-ffunction-sections -fdata-sections" ' +
         'extra_ldflags="-static-libstdc++ -Wl,--gc-sections -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=4096"'
     & $gn gen $out "--args=$args" --fail-on-unused-args

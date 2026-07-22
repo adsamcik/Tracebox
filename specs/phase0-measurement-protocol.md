@@ -1,17 +1,17 @@
 # Immutable Phase 0 Measurement Protocol
 
-Changing any threshold or workload below requires explicit user acceptance and a complete fresh run.
+Changing any threshold or workload below requires explicit user acceptance and
+a complete fresh run. ADR-0009 replaces the original multi-device matrix.
 
 ## Engineering matrix
 
 | Lane | Required result |
 |---|---|
-| API 30 x86_64 emulator, 4 KiB | PASS |
-| API 37 x86_64 emulator, available page size | PASS |
-| Every connected representative arm64 device | PASS |
-| Missing named external arm64/OEM/page-size device | UNAVAILABLE_EXTERNAL |
+| Existing API 36 x86_64 emulator, 4 KiB | PASS |
 
-API 37.1 is advisory. Debug is required for every spike; minified and debuggable release buildability are checked before the Phase 0 gate.
+Additional API, ABI, page-size, physical-device, and OEM lanes are advisory and
+do not block certification. Debug is required for every spike; minified and
+debuggable release buildability are checked before the Phase 0 gate.
 
 ## Repetition and statistics
 
@@ -61,4 +61,3 @@ Privacy: place unique seeded secrets in stack, heap, environment-like applicatio
 - Exhaustively truncate every boundary for objects up to 64 KiB.
 - For larger bounded objects, test every boundary in the first/last 4 KiB plus 4096 deterministic interior offsets.
 - Flip every fixed header field and run 10,000 deterministic generated length/CRC/count/path corruptions per format.
-

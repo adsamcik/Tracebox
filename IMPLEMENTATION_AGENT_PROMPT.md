@@ -11,7 +11,7 @@ This is an implementation assignment, not a request for another design, research
 MISSION
 ======================================================================
 
-Build Tracebox as a production-quality offline Android diagnostics recorder and user-controlled export system for Android API 30-37.
+Build Tracebox as a production-quality offline Android diagnostics recorder and user-controlled export system for Android API 23-37.
 
 The mandatory foundation includes:
 
@@ -41,6 +41,7 @@ Read these files completely before changing code:
 1. docs/adr/0001-foundation-architecture.md
 2. docs/architecture/tracebox-design.md
 3. docs/implementation-plan.md
+4. docs/adr/0009-api-23-single-emulator-qualification.md
 
 For this assignment, the current revisions of these three documents are the accepted implementation baseline even if their front matter still says Proposed. Baseline their exact contents by Git commit before implementation.
 
@@ -54,6 +55,11 @@ Precedence:
 6. Existing code and comments.
 
 A later instruction overrides a non-negotiable requirement only when it explicitly names that requirement and states that it is being superseded.
+
+The explicit user decision recorded in ADR-0009 supersedes every contrary
+minimum-SDK and platform-matrix statement in this assignment. The active
+contract is `minSdk 23`, `compileSdk 37`, `targetSdk 37`, with the existing API
+36 x86_64 4 KiB emulator as the sole required runtime qualification lane.
 
 If two documents genuinely conflict:
 
@@ -95,7 +101,7 @@ Phase 6 is outside foundation certification and does not block the foundation te
 - Do not expose a production encryption capability that has not passed its gates.
 - Keep any age module isolated, disabled, and outside production dependency graphs.
 - C1/C2 application-layer at-rest encryption requires a separately authorized milestone after the Keystore reliability and migration gates pass.
-- Production age X25519 requires a separately authorized milestone plus interoperability, fuzzing, API 30-37 qualification, and external independent cryptographic review.
+- Production age X25519 requires a separately authorized milestone plus interoperability, fuzzing, qualification on the ADR-0009 required lane, and external independent cryptographic review.
 - Never claim independent cryptographic review was completed by an AI agent.
 - Metrics, traces, profiling, desktop UI, and remote services are outside this assignment.
 
@@ -105,7 +111,7 @@ If an at-rest protection milestone is later authorized, key, nonce, migration, e
 NON-NEGOTIABLE PRODUCT CONSTRAINTS
 ======================================================================
 
-1. minSdk 30 and compileSdk 37.
+1. minSdk 23 and compileSdk 37.
 2. Foundation certification uses a host targetSdk of 37. Other targetSdk values may build but are outside the certified matrix.
 3. No Tracebox-owned INTERNET permission.
 4. No network client, uploader, remote transport/export component, remote configuration, remote key, remote schema, remote symbol service, remote decoder, or activation service. Local user-initiated package creation, file save, and Sharesheet handoff are required.
@@ -252,10 +258,13 @@ Use provisional contracts only for feasibility spikes, then freeze measured prod
 
 Separate Phase 0 outcomes:
 
-- ENGINEERING_FEASIBILITY_PASS permits implementation to continue after Crashpad, handler, emergency, and ANR behavior works in the required API 30/37 x86_64 emulator endpoints and all available representative arm64 hardware.
-- CERTIFICATION_FEASIBILITY_PASS additionally requires the complete declared physical-device, OEM, ABI, and page-size evidence.
+- ENGINEERING_FEASIBILITY_PASS permits implementation to continue after Crashpad, handler, emergency, and ANR behavior works on the required existing API 36 x86_64 4 KiB emulator.
+- CERTIFICATION_FEASIBILITY_PASS requires the same declared single-emulator lane plus all mandatory privacy, performance, and no-network evidence.
 
-Broad implementation requires ENGINEERING_FEASIBILITY_PASS. Missing external hardware may leave certification cells UNAVAILABLE_EXTERNAL without preventing reversible implementation, but it prevents FOUNDATION_CERTIFIED. A functional failure on available required hardware is FAIL and blocks dependent implementation.
+Broad implementation requires ENGINEERING_FEASIBILITY_PASS. Missing advisory
+hardware is reported separately and does not prevent `FOUNDATION_CERTIFIED`.
+A functional failure on the required existing emulator is `FAIL` and blocks
+dependent implementation.
 
 Before collecting feasibility or qualification measurements, freeze immutable finite pass/fail thresholds, workloads, and statistical protocols for:
 
@@ -282,10 +291,9 @@ Mandatory feasibility gates:
    - one private handler process;
    - multiple app-process clients;
    - handler startup, death, restart, hang, and crash loop;
-   - 4 KiB and 16 KiB pages;
-   - API 30 and API 37 early endpoints;
-   - emulator x86_64 for the engineering gate;
-   - physical arm64 for every available representative cell and for certification;
+   - the required emulator's 4 KiB page size;
+   - the existing API 36 x86_64 emulator;
+   - additional API, ABI, page-size, physical-device, and OEM lanes as advisory only;
    - no polling or uploader.
 
 3. Emergency feasibility:
@@ -765,15 +773,12 @@ Create and use these fixture applications:
 
 Platform matrix:
 
-- API 30, 31, 32, 33, 34, 35, 36, and 37;
-- API 37.1 advisory preview lane;
-- x86_64 emulator coverage for every required API level;
-- arm64-v8a physical coverage for every required API level from 30 through 37;
-- 4 KiB and 16 KiB page qualification on supported representative cells;
-- Pixel and at least two materially different OEM families using a Phase 0 accepted pairwise matrix;
+- required: the existing API 36 x86_64 4 KiB emulator;
+- advisory: other API 23-37 levels, API 37.1 previews, arm64-v8a,
+  physical devices, 16 KiB pages, Pixel devices, and other OEM families;
 - debug, minified release, and debuggable release fixtures.
 
-API 37.1 is advisory: failure or unavailability does not block foundation certification and is reported separately.
+Advisory platform failures or unavailability do not block foundation certification and are reported separately.
 
 Fault injection:
 
@@ -897,10 +902,13 @@ When blocked:
 4. Reconcile actual system state before retrying side-effecting operations.
 5. Do not blindly retry after timeouts or ambiguous errors.
 6. Do not weaken mandatory requirements without a product decision.
-7. If external physical devices, OEM access, or independent cryptographic review are unavailable:
+7. If advisory physical devices or OEM access are unavailable:
+   - report those lanes as advisory and continue;
+   - do not claim they were independently tested.
+8. If a separately authorized cryptographic milestone requires independent review and it is unavailable:
    - complete all code, harnesses, and automated gates possible;
-   - mark the unsupported certification item UNAVAILABLE_EXTERNAL;
-   - do not claim foundation certification or production crypto approval.
+   - mark the crypto approval item UNAVAILABLE_EXTERNAL;
+   - do not claim production crypto approval.
 
 Stop and escalate with evidence when:
 
@@ -922,7 +930,7 @@ DEFINITION OF DONE
 
 Terminal states:
 
-- FOUNDATION_CERTIFIED: implementation, automated qualification, required device/OEM matrix, and all external foundation certification are complete.
+- FOUNDATION_CERTIFIED: implementation, automated qualification, and the ADR-0009 required emulator lane are complete.
 - IMPLEMENTATION_COMPLETE_CERTIFICATION_BLOCKED: implementation and all available automated qualification are complete, but one or more named external certification lanes are UNAVAILABLE_EXTERNAL.
 - PRODUCT_DECISION_BLOCKED: dependent work cannot proceed without an explicit user decision.
 - INCOMPLETE: mandatory implementation or an available required certification lane remains failing after the required investigation and retry process, or the user explicitly stops the work.
@@ -935,7 +943,7 @@ External certification lanes use:
 
 - PASS: executed successfully with complete evidence;
 - FAIL: executed on available infrastructure and failed;
-- UNAVAILABLE_EXTERNAL: cannot execute because specifically named hardware, OEM access, or independent external reviewer is unavailable.
+- UNAVAILABLE_EXTERNAL: cannot execute a separately required external review or resource; advisory platform lanes do not use this state to block certification.
 
 NOT_STARTED, pending scheduling, missing harnesses, tool failures, and ordinary environment setup problems are not UNAVAILABLE_EXTERNAL. An available external certification failure is FAIL/INCOMPLETE, not CERTIFICATION_BLOCKED; fix it and rerun it when feasible.
 

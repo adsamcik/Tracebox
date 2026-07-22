@@ -3,7 +3,7 @@
 **Status:** Proposed  
 **Version:** 0.1  
 **Date:** 2026-07-17  
-**Supported Android baseline:** API 30-37  
+**Supported Android baseline:** API 23-37
 
 ## 1. Executive decision
 
@@ -920,7 +920,7 @@ Provisional measurement targets:
 | App-process retained memory | Under 512 KiB plus thread stack |
 | Nonfatal handler request | At most one per 10 minutes/process by default |
 
-These numbers are not release promises until measured on representative physical devices.
+These numbers are not release promises until measured on the required qualification emulator.
 
 ## 14. Exit reconciliation
 
@@ -941,6 +941,7 @@ The reconciler:
 
 API behavior:
 
+- API 23-29: local Tracebox evidence only; OS exit-history import is unavailable.
 - API 30+: exit reasons and ANR trace when retained.
 - API 31+: native tombstone stream when retained.
 - API 37+: structured `AnrInfo` when present.
@@ -1048,7 +1049,7 @@ Production enablement requires:
 - CCTV vectors;
 - differential interoperability with Go `age` and Rust `rage`;
 - malformed-header and chunk fuzzing;
-- API 30-37 and ABI qualification;
+- qualification on the ADR-0009 required emulator lane;
 - independent cryptographic review;
 - no plugin, SSH, passphrase, armor, or network extension in Android v1;
 - no silent downgrade to plaintext.
@@ -1192,12 +1193,9 @@ Budgets may change only from measured evidence and an ADR update. Invariants may
 
 ### 23.1 Platform matrix
 
-- API 30, 31, 33, 34, 35, 36, and 37.
-- API 37.1 preview advisory lane.
-- `arm64-v8a` physical devices.
-- `x86_64` emulators.
-- 4 KiB and 16 KiB page sizes.
-- Pixel and at least two materially different OEM families.
+- Required: the existing API 36 `x86_64`, 4 KiB emulator.
+- Advisory: other API 23-37 levels, API 37.1 previews, `arm64-v8a`,
+  physical devices, 16 KiB pages, Pixel devices, and other OEM families.
 - Debug, minified release, and debuggable-release fixtures.
 
 ### 23.2 Crashpad
@@ -1304,10 +1302,13 @@ Must demonstrate:
 - bounded raw-artifact privacy handling;
 - emergency fallback;
 - acceptable idle memory;
-- 4 KiB and 16 KiB compatibility;
+- compatibility with the required emulator's 4 KiB page size;
 - no networking/uploader closure.
 
-The non-negotiable release matrix is API 30-37 on `arm64-v8a` physical devices and `x86_64` emulators, with both 4 KiB and 16 KiB page qualification where available. Failure blocks the foundation release. Narrowing the matrix or relaxing mandatory capture requires a superseding product ADR.
+ADR-0009 defines the non-negotiable release matrix as the one existing API 36
+`x86_64`, 4 KiB emulator. Additional API, ABI, page-size, physical-device, and
+OEM lanes are advisory. Failure on the required emulator blocks the foundation
+release.
 
 ### Gate B: Live ANR feasibility
 

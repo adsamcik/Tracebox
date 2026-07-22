@@ -79,14 +79,20 @@ function Get-Matrix {
     if ($Source -eq 'ADR0008') {
         return 'PHASE0_GATE_DISPOSITION; PHASE1_5_IMPLEMENTATION_AUTHORIZATION'
     }
+    if ($Source -eq 'ADR0009') {
+        return 'API23_37_SUPPORT; REQUIRED_API36_X86_64_4K_EMULATOR'
+    }
+    if ($Text -match 'API 23|API 36|existing emulator|single-emulator') {
+        return 'REQUIRED_API36_X86_64_4K_EMULATOR; other platform lanes advisory'
+    }
     if ($Text -match 'API 30|API 37|x86_64|arm64|4 KiB|16 KiB|physical|emulator') {
-        return 'API30_API37_X86_64_AND_ALL_AVAILABLE_ARM64; page-size cells where available'
+        return 'HISTORICAL_OR_ADVISORY_PLATFORM_EVIDENCE'
     }
     if ($Text -match 'API 30-37|declared platform matrix|every required API') {
-        return 'API30_31_32_33_34_35_36_37_X86_64; available ARM64; 4K/16K; required build types'
+        return 'SUPERSEDED_BY_ADR0009'
     }
     if ($Text -match 'no-network|network|INTERNET|uploader') {
-        return 'HOST_STATIC; API30_API37_RUNTIME; blocked-egress controls'
+        return 'HOST_STATIC; REQUIRED_API36_EMULATOR_RUNTIME; blocked-egress controls'
     }
     if ($Text -match 'fuzz|truncate|corrupt|malicious') {
         return 'HOST_FUZZ_SMOKE; nightly/certification duration per frozen protocol'

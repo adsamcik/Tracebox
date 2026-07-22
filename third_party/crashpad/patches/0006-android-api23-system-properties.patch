@@ -1,0 +1,41 @@
+diff --git a/snapshot/linux/system_snapshot_linux.cc b/snapshot/linux/system_snapshot_linux.cc
+--- a/snapshot/linux/system_snapshot_linux.cc
++++ b/snapshot/linux/system_snapshot_linux.cc
+@@ -123,6 +123,7 @@ bool ReadCpuFrequency(const std::string& path, uint64_t* hz) {
+ }
+ 
+ #if BUILDFLAG(IS_ANDROID)
++#if __ANDROID_API__ >= 26
+ struct ReadPropertyData {
+   std::string* value;
+   bool read = false;
+@@ -133,6 +134,7 @@ void ReadPropertyCallback(void* cookie,
+   data->value->assign(value);
+   data->read = true;
+ }
++#endif
+ 
+ bool ReadProperty(const char* property, std::string* value) {
+   const prop_info* prop = __system_property_find(property);
+@@ -145,11 +147,21 @@ bool ReadProperty(const char* property, std::string* value) {
++#if __ANDROID_API__ >= 26
+   ReadPropertyData data;
+   data.value = value;
+   __system_property_read_callback(prop, ReadPropertyCallback, &data);
+ 
+   if (!data.read) {
+     LOG(ERROR) << "Couldn't read property " << property;
+     return false;
+   }
++#else
++  char property_value[PROP_VALUE_MAX];
++  const int length = __system_property_read(prop, nullptr, property_value);
++  if (length < 0) {
++    LOG(ERROR) << "Couldn't read property " << property;
++    return false;
++  }
++  value->assign(property_value, static_cast<size_t>(length));
++#endif
+   return true;
+ }
+ #endif  // BUILDFLAG(IS_ANDROID)

@@ -36,7 +36,7 @@ Product invariants and toolchains
 | F0.1 | Freeze terminology and invariants | — | Threat model, privacy classes, evidence grades, readiness states approved | Block coding | S |
 | F0.2 | Pin toolchains and dependencies | F0.1 | Gradle, AGP, Kotlin, JDK, NDK, CMake, Rust, Crashpad revisions locked and verified | Reviewed lock update only | M |
 | F0.3 | Crashpad privacy spike | F0.1-F0.2 | Raw stream inventory, structural-summary prototype, seeded-secret results | Revise raw-artifact policy | XL |
-| F0.4 | Android handler spike | F0.2 | Multi-client handler works on API 30/37, 4/16 KiB, restart/death behavior measured | Block foundation; narrowing requires a superseding ADR | XL |
+| F0.4 | Android handler spike | F0.2 | Multi-client handler works on the required existing API 36 x86_64 4 KiB emulator; restart/death behavior measured | Block foundation; matrix changes require a superseding ADR | XL |
 | F0.5 | Emergency fallback spike | F0.2 | Fixed signal record survives startup/IPC failure and stack overflow on registered threads; unregistered behavior documented | Re-raise without capture | L |
 | F0.6 | Live ANR spike | F0.3-F0.4 | Healthy overhead, candidate capture, nonfatal request, lifecycle adaptation, maximum target pause, timeout/cancellation, and raw-artifact size measured | Local-only candidate plus exit reconciliation | L |
 | F0.7 | Baseline artifact and PSS measurement | F0.3-F0.6 | Per-ABI size, handler PSS/CPU/wakeups, app overhead recorded | Update provisional budgets by ADR | M |
@@ -214,5 +214,5 @@ Foundation is complete only when:
 - Exact preview/package digest equality is proven.
 - Offline retracing and symbolication reject mismatched artifacts.
 - No-network conformance passes for every published module combination.
-- Resource budgets are backed by physical-device measurements.
+- Resource budgets are backed by measurements on the required existing emulator.
 - Unsupported devices or configurations are explicitly documented.

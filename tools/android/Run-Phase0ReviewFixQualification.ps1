@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory)]
     [string] $Serial,
-    [int] $ExpectedApi = 30,
+    [int] $ExpectedApi = 36,
     [int] $ExpectedPageSize = 4096
 )
 
@@ -9,12 +9,12 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $root
 $apk = Join-Path $root `
-    'test-apps\phase0-fixture\build\outputs\apk\qualificationRelease\phase0-fixture-qualificationRelease.apk'
+    'test-apps\phase0-fixture\build\outputs\apk\debuggableRelease\phase0-fixture-debuggableRelease.apk'
 $package = 'dev.tracebox.phase0'
 $component = "$package/.MainActivity"
 $receiver = "$package/.FaultReceiver"
 $tag = 'TraceboxPhase0'
-$dataDirectory = "/data/user/0/$package"
+$dataDirectory = '.'
 $runtimeDirectory = Join-Path $root 'evidence\runtime'
 $seed = 'TRACEBOX_PHASE0_SEEDED_SECRET_7F4C19E2A6B35D80'
 $started = (Get-Date).ToUniversalTime()
@@ -26,6 +26,24 @@ function Invoke-Adb {
         throw "adb failed: $($Arguments -join ' ')"
     }
     return $output
+}
+
+function Get-SourcePatchSha256 {
+    $tracked = (& git -C $root --no-pager diff --binary HEAD -- . ':(exclude)evidence/**') -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to fingerprint tracked source changes'
+    }
+    $untracked = foreach ($path in (& git -C $root ls-files --others --exclude-standard |
+            Where-Object { $_ -notlike 'evidence/*' } |
+            Sort-Object)) {
+        "$path`n$((Get-FileHash (Join-Path $root $path) -Algorithm SHA256).Hash.ToLowerInvariant())`n"
+    }
+    $material = "tracked`n$tracked`nuntracked`n$($untracked -join '')"
+    return [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData(
+            [Text.Encoding]::UTF8.GetBytes($material)
+        )
+    ).ToLowerInvariant()
 }
 
 function Wait-Log {
@@ -87,7 +105,7 @@ function Get-DeathLog {
 
 function Pull-AppFile {
     param([string] $RemotePath, [string] $LocalPath)
-    $arguments = @('-s', $Serial, 'exec-out', 'cat', $RemotePath)
+    $arguments = @('-s', $Serial, 'exec-out', 'run-as', $package, 'cat', $RemotePath)
     $process = Start-Process -FilePath (Get-Command adb).Source `
         -ArgumentList $arguments `
         -RedirectStandardOutput $LocalPath `
@@ -97,9 +115,18 @@ function Pull-AppFile {
     }
 }
 
+function Invoke-AppShell {
+    param([string] $Command)
+    $output = & adb -s $Serial shell "run-as $package sh -c '$Command'"
+    if ($LASTEXITCODE -ne 0) {
+        throw "run-as failed: $Command"
+    }
+    return $output
+}
+
 function Count-Dumps {
-    return [int]((Invoke-Adb shell `
-            "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+    return [int]((Invoke-AppShell `
+            "ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l") -join '').Trim()
 }
 
 function Reset-And-Launch {
@@ -130,7 +157,6 @@ if ($api -ne $ExpectedApi -or $pageSize -ne $ExpectedPageSize -or
     $abi -ne 'x86_64') {
     throw "Endpoint mismatch: API=$api page=$pageSize ABI=$abi"
 }
-Invoke-Adb root | Out-Null
 Invoke-Adb wait-for-device | Out-Null
 Invoke-Adb install '-r' $apk | Out-Null
 Invoke-Adb shell pm enable $package | Out-Null
@@ -167,8 +193,8 @@ Reset-And-Launch
 Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
 Start-Action seeded
 Wait-Log 'seeded_nonfatal_captured=true' 10 | Out-Null
-$dumpPath = ((Invoke-Adb shell `
-        "sh -c 'ls -t $dataDirectory/no_backup/crashpad-db/pending/*.dmp | head -1'") -join '').Trim()
+$dumpPath = ((Invoke-AppShell `
+        "ls -t $dataDirectory/no_backup/crashpad-db/pending/*.dmp | head -1") -join '').Trim()
 $dumpLocal = Join-Path $runtimeDirectory "api$api-review-seeded.dmp"
 Pull-AppFile $dumpPath $dumpLocal
 Start-Action emergency
@@ -284,9 +310,10 @@ $checks = [ordered]@{
         $restartReset.restarted_record_validator_exit -ne 0 -and
         $restartReset.restarted_record_all_zero -and
         -not $restartReset.pm_clear_used
-    unexpected_streams_rejected =
-        $summaryParserExit -eq 0 -and -not $privacy.stream_profile_valid -and
-        $privacy.unexpected_stream_types.Count -gt 0
+    capture_only_stream_profile =
+        $summaryParserExit -eq 0 -and $privacy.stream_profile_valid -and
+        $privacy.unexpected_stream_types.Count -eq 0 -and
+        $privacy.missing_required_stream_types.Count -eq 0
     handler_unavailable_fallback =
         $fallback.validator_exit -eq 0 -and $fallback.slot_sequence -eq 1 -and
         $fallback.flags -eq 3 -and $fallback.raw_dump_delta -eq 0 -and
@@ -305,7 +332,10 @@ $result = [ordered]@{
     command = "tools\android\Run-Phase0ReviewFixQualification.ps1 -Serial $Serial " +
         "-ExpectedApi $ExpectedApi -ExpectedPageSize $ExpectedPageSize"
     working_directory = $root
-    reviewed_implementation_commit = (git -C $root rev-parse HEAD).Trim()
+    source_state = [ordered]@{
+        base_commit = (git -C $root rev-parse HEAD).Trim()
+        working_tree_patch_sha256 = Get-SourcePatchSha256
+    }
     start_time_utc = $started.ToString('o')
     end_time_utc = $ended.ToString('o')
     duration_ms = [math]::Round(($ended - $started).TotalMilliseconds)

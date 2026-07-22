@@ -3,3 +3,5 @@
 0002-android-windows-deterministic-ar.patch
 0003-android-capture-only-handler.patch
 0004-tracebox-overlay-entrypoint.patch
+0005-android-capture-only-minidump-profile.patch
+0006-android-api23-system-properties.patch

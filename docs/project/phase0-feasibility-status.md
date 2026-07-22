@@ -4,13 +4,32 @@
 
 `INCOMPLETE`
 
-`ENGINEERING_FEASIBILITY_PASS` is not reached.
+The ADR-0009 required emulator targeted regression passes. Full qualification
+remains `INCOMPLETE`.
 
-The available API 30 x86_64 lane executes the real handler, emergency, and ANR paths, but its complete frozen run fails immutable startup, handler CPU, heartbeat, target-pause, timeout, and fatal-latency thresholds. A later targeted review-fix run corrected the timeout/fallback/privacy instrumentation defects without rerunning or replacing the frozen matrix. It also confirms that the captured minidump still violates the accepted stream profile. The target-pause gate remained failing after three materially different approaches, recorded in `evidence/phase0/anr-target-pause-approaches.json`.
+## API 23 and matrix supersession
 
-The mandatory API 37 x86_64 emulator cell also cannot provide trustworthy test infrastructure. The API 37.0 revision-6 16 KiB images repeatedly crash SurfaceFlinger in region sampling or fail to boot across the materially different emulator, renderer, feature, and image approaches recorded in `evidence/phase0/API37-x86_64-16384-environment-failure.json`.
+ADR-0009 records the user's 2026-07-22 decision to use `minSdk 23` with
+`compileSdk` and `targetSdk` 37 and to require only the existing API 36
+`x86_64`, 4 KiB emulator. Other API levels, ABIs, page sizes, physical devices,
+and OEM families are advisory.
 
-This is a local required-lane `FAIL`, not `UNAVAILABLE_EXTERNAL`.
+The API-23 Android modules compile and lint with NIO core-library desugaring.
+Capture-only Crashpad builds for x86_64 and arm64 against Android API 23. The
+fresh targeted run on the required emulator passes, including the capture-only
+stream profile, seeded privacy scan, emergency restart reset, handler-unavailable
+fallback, and prior-signal chaining.
+
+## Current required matrix
+
+| Cell | Status | Evidence |
+|---|---|---|
+| Existing API 36 x86_64 emulator, 4 KiB | IN_PROGRESS | Targeted PASS: `evidence/phase0/API36-x86_64-4096-review-fix-qualification.json`; full qualification pending |
+
+## Historical matrix
+
+The following results remain preserved but no longer block release under
+ADR-0009:
 
 ## Explicit prerequisite supersession
 
@@ -19,8 +38,6 @@ ADR-0008 records the user's 2026-07-18 instruction:
 > Explicitly supersede the ENGINEERING_FEASIBILITY_PASS prerequisite and implement Phases 1–5 despite these failures
 
 This permits Phases 1–5 implementation to proceed at risk. It does not change this terminal state, convert any result to `PASS`, relax any frozen threshold or required lane, or authorize certification.
-
-## Matrix
 
 | Cell | Status | Evidence |
 |---|---|---|
@@ -98,13 +115,14 @@ The presubmit and targeted review-fix results record that their configured check
 
 ## Blocker resolution needed
 
-Provide:
+Provide on the existing required emulator:
 
 1. a new safe ANR snapshot implementation that keeps p95 and maximum target pause at or below 100 ms;
 2. startup/handler changes that meet the frozen readiness, CPU, heartbeat, timeout, and fatal-latency thresholds without weakening emergency capture or the single-handler topology; and
-3. a stable API 37 x86_64 16 KiB emulator image/emulator combination on which Android framework services remain available;
-4. a no-network build graph that passes the final static scan; and
-5. byte-identical full APK rebuilds for every artifact in the reproducibility claim.
-6. capture output that suppresses the three forbidden API 30 streams without losing the mandatory useful streams, unless a separately authorized requirement change replaces the frozen profile.
+3. a no-network build graph that passes the final static and runtime scans;
+4. byte-identical full APK rebuilds for every artifact in the reproducibility claim; and
+5. capture output that suppresses the three forbidden streams without losing the mandatory useful streams.
 
-Then rerun the complete frozen qualification command and affected host gates. Changing a threshold, required API/ABI/page-size lane, or mandatory Crashpad/ANR behavior requires separate explicit user acceptance and is not authorized by ADR-0008 or this status record.
+Then rerun the complete qualification command and affected host gates. ADR-0009
+changes only the Android baseline and matrix; mandatory Crashpad, emergency,
+ANR, privacy, and offline behavior remain unchanged.

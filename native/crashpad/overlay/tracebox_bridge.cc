@@ -7,7 +7,6 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
-#include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -754,14 +753,52 @@ bool ResetEmergencySlot(int fd) {
   return fdatasync(fd) == 0;
 }
 
+bool FillRandomBytes(uint8_t* bytes, size_t size) {
+  size_t offset = 0;
+#if defined(SYS_getrandom)
+  while (offset < size) {
+    const ssize_t result =
+        syscall(SYS_getrandom, bytes + offset, size - offset, 0);
+    if (result > 0) {
+      offset += static_cast<size_t>(result);
+      continue;
+    }
+    if (result < 0 && errno == EINTR) {
+      continue;
+    }
+    break;
+  }
+  if (offset == size) {
+    return true;
+  }
+#endif
+
+  const int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    return false;
+  }
+  while (offset < size) {
+    const ssize_t result = read(fd, bytes + offset, size - offset);
+    if (result > 0) {
+      offset += static_cast<size_t>(result);
+      continue;
+    }
+    if (result < 0 && errno == EINTR) {
+      continue;
+    }
+    close(fd);
+    return false;
+  }
+  return close(fd) == 0;
+}
+
 bool InitializeEmergency(const std::string& directory, uint32_t process_role) {
   if (directory.empty()) {
     return false;
   }
   return g_emergency_initialization.Initialize(
       directory, process_role, [&directory, process_role] {
-        if (getrandom(g_process_id.data(), g_process_id.size(), 0) !=
-            static_cast<ssize_t>(g_process_id.size())) {
+        if (!FillRandomBytes(g_process_id.data(), g_process_id.size())) {
           return false;
         }
         const std::string path = directory + "/tracebox-emergency-" +

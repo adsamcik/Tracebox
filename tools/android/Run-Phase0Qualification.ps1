@@ -1,19 +1,18 @@
 param(
     [Parameter(Mandatory)]
     [string] $Serial,
-    [Parameter(Mandatory)]
-    [int] $ExpectedApi,
-    [Parameter(Mandatory)]
-    [int] $ExpectedPageSize,
+    [int] $ExpectedApi = 36,
+    [int] $ExpectedPageSize = 4096,
     [int] $HealthyMinutes = 60,
-    [int] $IneligibleMinutes = 10
+    [int] $IneligibleMinutes = 10,
+    [switch] $Advisory
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $root
 $apk = Join-Path $root `
-    'test-apps\phase0-fixture\build\outputs\apk\qualificationRelease\phase0-fixture-qualificationRelease.apk'
+    'test-apps\phase0-fixture\build\outputs\apk\debuggableRelease\phase0-fixture-debuggableRelease.apk'
 $package = 'dev.tracebox.phase0'
 $component = "$package/.MainActivity"
 $receiver = "$package/.FaultReceiver"
@@ -26,6 +25,24 @@ function Invoke-Adb {
         throw "adb failed: $($Arguments -join ' ')"
     }
     return $output
+}
+
+function Get-SourcePatchSha256 {
+    $tracked = (& git -C $root --no-pager diff --binary HEAD -- . ':(exclude)evidence/**') -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to fingerprint tracked source changes'
+    }
+    $untracked = foreach ($path in (& git -C $root ls-files --others --exclude-standard |
+            Where-Object { $_ -notlike 'evidence/*' } |
+            Sort-Object)) {
+        "$path`n$((Get-FileHash (Join-Path $root $path) -Algorithm SHA256).Hash.ToLowerInvariant())`n"
+    }
+    $material = "tracked`n$tracked`nuntracked`n$($untracked -join '')"
+    return [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData(
+            [Text.Encoding]::UTF8.GetBytes($material)
+        )
+    ).ToLowerInvariant()
 }
 
 function Wait-Log {
@@ -135,7 +152,7 @@ function Get-WatchdogStats {
 function Pull-AppFile {
     param([string] $RemotePath, [string] $LocalPath)
     $arguments = @(
-        '-s', $Serial, 'exec-out', 'cat', $RemotePath
+        '-s', $Serial, 'exec-out', 'run-as', $package, 'cat', $RemotePath
     )
     $process = Start-Process -FilePath (Get-Command adb).Source `
         -ArgumentList $arguments `
@@ -144,6 +161,21 @@ function Pull-AppFile {
     if ($process.ExitCode -ne 0) {
         throw "Failed to pull $RemotePath"
     }
+}
+
+function Invoke-AppShell {
+    param([string] $Command)
+    $output = & adb -s $Serial shell "run-as $package sh -c '$Command'"
+    if ($LASTEXITCODE -ne 0) {
+        throw "run-as failed: $Command"
+    }
+    return $output
+}
+
+function Count-Dumps {
+    param([string] $DataDirectory)
+    return [int]((Invoke-AppShell `
+            "ls $DataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l") -join '').Trim()
 }
 
 function Count-Bytes {
@@ -174,13 +206,22 @@ function Reset-And-Launch {
 }
 
 $started = (Get-Date).ToUniversalTime()
+$requiredApi = 36
+$requiredPageSize = 4096
+if (-not $Advisory -and
+    ($ExpectedApi -ne $requiredApi -or $ExpectedPageSize -ne $requiredPageSize)) {
+    throw "Required qualification is fixed to API=$requiredApi page=$requiredPageSize; use -Advisory for another lane"
+}
 $api = [int]((Invoke-Adb shell getprop ro.build.version.sdk) -join '')
 $pageSize = [int]((Invoke-Adb shell getconf PAGE_SIZE) -join '')
 $abi = ((Invoke-Adb shell getprop ro.product.cpu.abi) -join '').Trim()
+$isEmulator = ((Invoke-Adb shell getprop ro.kernel.qemu) -join '').Trim() -eq '1'
 if ($api -ne $ExpectedApi -or $pageSize -ne $ExpectedPageSize -or $abi -ne 'x86_64') {
     throw "Endpoint mismatch: API=$api page=$pageSize ABI=$abi"
 }
-Invoke-Adb root | Out-Null
+if (-not $Advisory -and -not $isEmulator) {
+    throw 'Required qualification must run on the existing x86_64 emulator'
+}
 Invoke-Adb wait-for-device | Out-Null
 
 Invoke-Adb install '-r' $apk | Out-Null
@@ -303,9 +344,9 @@ Wait-Log 'worker_nonfatal_captured=true' 10 | Out-Null
 Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
 Start-Action seeded
 Wait-Log 'seeded_nonfatal_captured=true' 10 | Out-Null
-$dataDirectory = "/data/user/0/$package"
-$dumpPath = ((Invoke-Adb shell `
-        "sh -c 'ls -t $dataDirectory/no_backup/crashpad-db/pending/*.dmp | head -1'") -join '').Trim()
+$dataDirectory = '.'
+$dumpPath = ((Invoke-AppShell `
+        "ls -t $dataDirectory/no_backup/crashpad-db/pending/*.dmp | head -1") -join '').Trim()
 $runtimeDirectory = Join-Path $root 'evidence\runtime'
 New-Item -ItemType Directory -Force $runtimeDirectory | Out-Null
 $dumpLocal = Join-Path $runtimeDirectory "api$api-seeded.dmp"
@@ -350,8 +391,7 @@ for ($iteration = 1; $iteration -le 9; $iteration++) {
     }
     $quotaResults += $Matches[1] -eq 'true'
 }
-$quotaDumpCount = [int]((Invoke-Adb shell `
-        "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+$quotaDumpCount = Count-Dumps $dataDirectory
 
 $fatalMeasurements = @()
 for ($iteration = 1; $iteration -le 30; $iteration++) {
@@ -362,14 +402,12 @@ for ($iteration = 1; $iteration -le 30; $iteration++) {
         Invoke-Adb shell am start '-W' '-n' $component | Out-Null
         Wait-Log 'main_connected=true' | Out-Null
     }
-    $before = [int]((Invoke-Adb shell `
-            "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+    $before = Count-Dumps $dataDirectory
     $crashTimer = [Diagnostics.Stopwatch]::StartNew()
     Send-Fault fatal
     do {
         Start-Sleep -Milliseconds 50
-        $after = [int]((Invoke-Adb shell `
-                "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+        $after = Count-Dumps $dataDirectory
     } while ($after -le $before -and $crashTimer.Elapsed.TotalSeconds -lt 3)
     $fatalMeasurements += [ordered]@{
         iteration = $iteration
@@ -425,8 +463,7 @@ $emergencyResults = @()
 
 Reset-And-Launch
 $fallbackAppPid = Get-ProcessId $package
-$fallbackDumpCountBefore = [int]((Invoke-Adb shell `
-        "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+$fallbackDumpCountBefore = Count-Dumps $dataDirectory
 Start-Action terminate_handler
 Start-Sleep 4
 Start-Action alive
@@ -441,8 +478,7 @@ $fallbackValidation = & cargo run -q -p tbdiag-phase0 --locked --offline -- `
     emergency $fallbackLocal 2>&1
 $fallbackValidatorExit = $LASTEXITCODE
 $fallbackBytes = [IO.File]::ReadAllBytes($fallbackLocal)
-$fallbackDumpCountAfter = [int]((Invoke-Adb shell `
-        "sh -c 'ls $dataDirectory/no_backup/crashpad-db/pending/*.dmp 2>/dev/null | wc -l'") -join '').Trim()
+$fallbackDumpCountAfter = Count-Dumps $dataDirectory
 $emergencyResults += [ordered]@{
     fault = 'handler_unavailable_fatal'
     validator_exit = $fallbackValidatorExit
@@ -574,13 +610,19 @@ $checks = [ordered]@{
             }).Count -eq 2
 }
 $passed = @($checks.Values | Where-Object { -not $_ }).Count -eq 0
+$qualificationScope = if ($Advisory) { 'ADVISORY' } else { 'REQUIRED' }
+$advisoryArgument = if ($Advisory) { ' -Advisory' } else { '' }
 $result = [ordered]@{
     requirement_id = 'F0.3-F0.7'
     command = "tools\android\Run-Phase0Qualification.ps1 -Serial $Serial " +
         "-ExpectedApi $ExpectedApi -ExpectedPageSize $ExpectedPageSize " +
-        "-HealthyMinutes $HealthyMinutes -IneligibleMinutes $IneligibleMinutes"
+        "-HealthyMinutes $HealthyMinutes -IneligibleMinutes $IneligibleMinutes$advisoryArgument"
+    qualification_scope = $qualificationScope
     working_directory = $root
-    reviewed_implementation_commit = (git -C $root rev-parse HEAD).Trim()
+    source_state = [ordered]@{
+        base_commit = (git -C $root rev-parse HEAD).Trim()
+        working_tree_patch_sha256 = Get-SourcePatchSha256
+    }
     start_time_utc = $started.ToString('o')
     end_time_utc = $ended.ToString('o')
     timeout_seconds = 7200
@@ -590,6 +632,7 @@ $result = [ordered]@{
         api = $api
         abi = $abi
         page_size = $pageSize
+        emulator = $isEmulator
     }
     process_topology = [ordered]@{
         app_pid = $appPid
@@ -674,11 +717,12 @@ $result = [ordered]@{
         retained_dumps = $quotaDumpCount
     }
     pass_checks = $checks
-    matrix_cell = "API${api}_${abi}_${pageSize}B_MINIFIED_RELEASE"
+    matrix_cell = "API${api}_${abi}_${pageSize}B_${qualificationScope}_DEBUGGABLE_RELEASE_RUNTIME"
     result = if ($passed) { 'PASS' } else { 'FAIL' }
 }
 
-$evidence = Join-Path $root "evidence\phase0\API$api-$abi-$pageSize-qualification.json"
+$evidenceSuffix = if ($Advisory) { 'advisory-qualification' } else { 'qualification' }
+$evidence = Join-Path $root "evidence\phase0\API$api-$abi-$pageSize-$evidenceSuffix.json"
 $result | ConvertTo-Json -Depth 10 | Set-Content $evidence -Encoding utf8
 Write-Output $evidence
 if (-not $passed) {

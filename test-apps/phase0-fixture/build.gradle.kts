@@ -23,6 +23,7 @@ android {
         create("debuggableRelease") {
             initWith(getByName("release"))
             isDebuggable = true
+            signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += "release"
         }
     }

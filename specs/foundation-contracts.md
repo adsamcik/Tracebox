@@ -9,10 +9,12 @@ The terms in architecture section 5 are normative. Evidence grades are:
 | E0 | Static declaration or source scan only |
 | E1 | Host unit/integration execution |
 | E2 | Android emulator execution with captured artifacts |
-| E3 | Representative physical-device execution |
+| E3 | Additional physical-device execution (advisory) |
 | E4 | Independent external certification evidence |
 
-An E0/E1 result cannot satisfy an E2/E3 requirement. A watchdog result is always a stall observation or candidate; only `ApplicationExitInfo.REASON_ANR` confirms an ANR.
+An E0/E1 result cannot satisfy a required E2 result. E3 is advisory under
+ADR-0009. A watchdog result is always a stall observation or candidate; only
+`ApplicationExitInfo.REASON_ANR` confirms an ANR on API 30+.
 
 ## Privacy
 
