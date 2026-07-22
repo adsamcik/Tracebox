@@ -65,4 +65,25 @@ class ExitReconciliationTest {
         assertEquals(ExitLinkConfidence.POSSIBLE, ExitLinker.link(exit, possible))
         assertEquals(ExitLinkConfidence.UNMATCHED, ExitLinker.link(exit, null))
     }
+
+    @Test fun documented_android_exit_fields_map_without_using_pid_as_an_identity() {
+        val mapped = ApplicationExitInfoMapper.map(
+            "dev.tracebox.fixture",
+            AndroidExitInfoFields(
+                processName = "dev.tracebox.fixture:worker",
+                packageUid = 12_345,
+                timestampMillis = 99,
+                reason = 6,
+                status = 7,
+                importance = 100,
+                pid = 42,
+                processStateSummary = byteArrayOf(1, 2),
+                artifactKind = ExitArtifactKind.ANR_TRACE,
+            ),
+        )
+
+        assertEquals("dev.tracebox.fixture:worker", mapped?.processName)
+        assertEquals(42, mapped?.pid)
+        assertEquals(ExitArtifactKind.ANR_TRACE, mapped?.artifactKind)
+    }
 }
