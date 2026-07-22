@@ -46,7 +46,7 @@ constexpr int kControlBacklog = 8;
 constexpr int kRegistrationDeadlineMillis = 2'000;
 constexpr int kNonfatalDeadlineMillis = 2'000;
 // The public deadline includes cancellation, descriptor teardown, and JNI return.
-constexpr uint64_t kDeadlineCompletionReserveNanoseconds = UINT64_C(25'000'000);
+constexpr uint64_t kDeadlineCompletionReserveNanoseconds = UINT64_C(100'000'000);
 constexpr long kConnectDelayNanoseconds = 50'000'000;
 constexpr size_t kSignalStackBytes = 64 * 1024;
 constexpr std::array<int, 6> kHandledSignals{

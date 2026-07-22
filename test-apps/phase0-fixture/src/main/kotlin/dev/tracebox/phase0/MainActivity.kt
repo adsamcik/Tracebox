@@ -47,11 +47,14 @@ class MainActivity : Activity() {
         startService(Intent(this, WorkerService::class.java))
         Thread(
             {
-                val connected =
-                    NativeRuntime.connectClient(
-                        "${noBackupFilesDir.absolutePath}/handler.sock",
-                        PROCESS_ROLE_MAIN,
-                    )
+                val socketPath = "${noBackupFilesDir.absolutePath}/handler.sock"
+                var connected = NativeRuntime.connectClient(socketPath, PROCESS_ROLE_MAIN)
+                if (!connected) {
+                    // One installation-triggered retry covers service-process startup ordering; it
+                    // is not a steady-state reconnect poll.
+                    SystemClock.sleep(INITIAL_CONNECT_RETRY_DELAY_MILLIS)
+                    connected = NativeRuntime.connectClient(socketPath, PROCESS_ROLE_MAIN)
+                }
                 Log.i(
                     TAG,
                     "main_connected=$connected " +
@@ -261,6 +264,7 @@ class MainActivity : Activity() {
         const val ACTION_EXTRA = "tracebox.action"
         const val PROCESS_ROLE_MAIN = 1
         const val REASON_ANR_CANDIDATE = 1
+        const val INITIAL_CONNECT_RETRY_DELAY_MILLIS = 250L
         const val TAG = "TraceboxPhase0"
     }
 }
