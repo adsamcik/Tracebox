@@ -37,6 +37,91 @@ if ((Get-Content $mergedManifest -Raw) -match 'android\.permission\.INTERNET') {
     throw "Tracebox-owned INTERNET permission in generated release merged manifest: $mergedManifest"
 }
 
+$apkTask = ':test-apps:phase0-fixture:assembleRelease'
+& (Join-Path $root 'gradlew.bat') $apkTask '--offline' '--no-daemon'
+if ($LASTEXITCODE -ne 0) { throw "$apkTask failed with exit code $LASTEXITCODE" }
+$releaseApks = Get-ChildItem (Join-Path $root 'test-apps\phase0-fixture\build\outputs\apk\release') -Filter '*.apk' -File
+if ($releaseApks.Count -ne 1) { throw "Expected exactly one release APK for DEX/native conformance, found $($releaseApks.Count)" }
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$dexNeedles = @(
+    'Ljava/net/Socket;',
+    'Ljava/net/URLConnection;',
+    'Ljavax/net/',
+    'Lokhttp3/',
+    'Lio/ktor/client/',
+    'Lorg/apache/http/'
+)
+$nativeNeedles = @(
+    'getaddrinfo',
+    'gethostbyname',
+    'android_getaddrinfofornet',
+    'libcurl',
+    'libcronet',
+    'curl_easy',
+    'SSL_connect',
+    'CrashReportUpload'
+)
+# These upstream Crashpad/NDK provenance URLs are retained in error text only; they are not
+# imports, dependencies, or invocation paths. Unknown URL prefixes remain a hard failure below.
+$allowedNativeDiagnosticUrlPrefixes = @(
+    'https://crashpad.chromium.org/',
+    'https://android.googlesource.com/toolchain/llvm-project'
+)
+$dexEntriesScanned = 0
+$nativeEntriesScanned = 0
+$binarySurfaceMatches = @()
+$allowedNativeUrlsObserved = @()
+$archive = [IO.Compression.ZipFile]::OpenRead($releaseApks[0].FullName)
+try {
+    foreach ($entry in $archive.Entries) {
+        $isDex = $entry.FullName -match '(^|/)classes(\d*)?\.dex$'
+        $isNative = $entry.FullName -match '^lib/.+\.so$'
+        if (-not $isDex -and -not $isNative) { continue }
+        if ($entry.Length -gt 64MB) { throw "Oversized binary entry in release APK: $($entry.FullName)" }
+        $stream = $entry.Open()
+        try {
+            $memory = New-Object IO.MemoryStream
+            try {
+                $stream.CopyTo($memory)
+                $contents = [Text.Encoding]::ASCII.GetString($memory.ToArray())
+            } finally {
+                $memory.Dispose()
+            }
+        } finally {
+            $stream.Dispose()
+        }
+        if ($isDex) {
+            $dexEntriesScanned++
+            foreach ($needle in $dexNeedles) {
+                if ($contents.Contains($needle)) { $binarySurfaceMatches += "DEX:$($entry.FullName):$needle" }
+            }
+        } else {
+            $nativeEntriesScanned++
+            foreach ($needle in $nativeNeedles) {
+                if ($contents.Contains($needle)) { $binarySurfaceMatches += "NATIVE:$($entry.FullName):$needle" }
+            }
+            foreach ($urlMatch in [regex]::Matches($contents, 'https?://[^\x00\s]+')) {
+                $url = $urlMatch.Value
+                if ($allowedNativeDiagnosticUrlPrefixes | Where-Object { $url.StartsWith($_, [StringComparison]::Ordinal) }) {
+                    $allowedNativeUrlsObserved += "NATIVE:$($entry.FullName):$url"
+                } else {
+                    $binarySurfaceMatches += "NATIVE:$($entry.FullName):$url"
+                }
+            }
+        }
+    }
+} finally {
+    $archive.Dispose()
+}
+if ($dexEntriesScanned -eq 0 -or $nativeEntriesScanned -eq 0) {
+    throw "Release APK binary scan did not find expected DEX/native entries (DEX=$dexEntriesScanned native=$nativeEntriesScanned)"
+}
+if ($binarySurfaceMatches) {
+    throw "Forbidden DEX/native network surface: $($binarySurfaceMatches -join '; ')"
+}
+
 $lockRoots = @((Join-Path $root 'android'), (Join-Path $root 'test-apps'))
 $runtimeLockFiles = Get-ChildItem $lockRoots -Recurse -File -Filter gradle.lockfile
 if ($runtimeLockFiles.Count -eq 0) { throw 'No Android runtime gradle.lockfile files found' }
@@ -117,8 +202,13 @@ if ($crashpadMatches) { throw "Forbidden Crashpad uploader/network build input: 
     gradle_declarations_scanned = $gradleFiles.Count
     runtime_sources_scanned = $runtimeSources.Count
     crashpad_inputs_scanned = $crashpadInputs.Count
-    dynamic_dex_native_import_and_blocked_egress = 'UNAVAILABLE_EXTERNAL: no physical/emulator Android device is available; runtime observation was not attempted'
+    release_apk = $releaseApks[0].FullName.Substring($root.Length + 1)
+    dex_entries_scanned = $dexEntriesScanned
+    native_entries_scanned = $nativeEntriesScanned
+    dex_native_forbidden_matches = @($binarySurfaceMatches)
+    allowed_native_diagnostic_urls = @($allowedNativeUrlsObserved | Sort-Object -Unique)
+    dynamic_blocked_egress = 'PENDING_REQUIRED_API36_EMULATOR_RUNTIME_PROOF'
     claim = 'Within the checked scope, no INTERNET permission was found in Tracebox-owned source manifests or the generated representative release merged manifest, and no known networking package was found in committed resolved Android release-runtime dependency closures.'
-    claim_scope = 'Best-effort static denylist only; it does not formally prove absence of networking behavior. Gradle plugin JVM build-time dependencies are reported separately and are not claimed to be Android runtime dependencies. Device runtime/Dex/native-import/blocked-egress proof remains unavailable and is not certified.'
+    claim_scope = 'Host-static manifest, dependency, DEX, and native-import denylist only. Runtime blocked-egress proof on the required emulator remains a separate certification gate.'
     result = 'PASS'
 } | ConvertTo-Json -Depth 3
