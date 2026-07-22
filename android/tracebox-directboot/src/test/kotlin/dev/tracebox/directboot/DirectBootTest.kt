@@ -3,6 +3,11 @@ package dev.tracebox.directboot
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import dev.tracebox.api.generated.GeneratedEmergencyRecord
+import dev.tracebox.core.BarrierAck
+import dev.tracebox.core.ControlPage
+import dev.tracebox.core.GlobalPolicyCoordinator
+import dev.tracebox.core.PolicySnapshot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -39,6 +44,22 @@ class DirectBootTest {
         )
     }
 
+    @Test fun generated_emergency_record_is_the_only_production_direct_boot_input() {
+        val dir = directory()
+        val mirror = DenyMirror(dir.resolve("active"), dir.resolve("pending"))
+        mirror.writePending(DenyState(1, false, 0))
+        mirror.promotePending()
+        val generated = GeneratedDirectBootRecord.fromEmergency(
+            ByteArray(32),
+            GeneratedEmergencyRecord(7u, 11u, 6, 1, 2u, 3u, 5u),
+            elapsedMillis = 13,
+            readinessCode = 4,
+            categoryMask = 1,
+        )
+
+        assertEquals(DirectBootWriteResult.WRITTEN, DirectBootStore(dir.resolve("c0.records"), mirror).appendGenerated(generated))
+    }
+
     @Test fun tightening_is_at_least_as_restrictive_after_every_crash_boundary() {
         DirectBootBoundary.entries.forEach { boundary ->
             val dir = directory()
@@ -72,6 +93,23 @@ class DirectBootTest {
         assertTrue(reconciled.disabled)
         assertEquals(1, reconciled.c0DenyMask)
         assertNull(mirror.pending())
+    }
+
+    @Test fun handler_coordinated_ce_transition_keeps_pending_deny_on_partial_global_barrier() {
+        val dir = directory()
+        val mirror = DenyMirror(dir.resolve("active"), dir.resolve("pending"))
+        mirror.writePending(DenyState(1, false, 0))
+        mirror.promotePending()
+        val page = ControlPage(dir.resolve("control"))
+        page.commit(PolicySnapshot(1, 0))
+        val global = GlobalPolicyCoordinator(dir.resolve("coordinator"), page, byteArrayOf(7))
+        val coordinated = HandlerCoordinatedDirectBootPolicyCoordinator(mirror, global) { BarrierAck.Missing }
+
+        val result = coordinated.tighten(DenyState(2, true, 3))
+
+        assertEquals(DirectBootGlobalTransitionResult.PARTIAL, result)
+        assertTrue(mirror.effective()!!.disabled)
+        assertEquals(1L, page.committed().epoch)
     }
 
     private class CrashBoundary : RuntimeException()

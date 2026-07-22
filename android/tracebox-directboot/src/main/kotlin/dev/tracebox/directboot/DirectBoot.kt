@@ -1,5 +1,10 @@
 package dev.tracebox.directboot
 
+import dev.tracebox.api.generated.GeneratedEmergencyRecord
+import dev.tracebox.core.BarrierAck
+import dev.tracebox.core.GlobalPolicyCoordinator
+import dev.tracebox.core.PolicySnapshot
+import dev.tracebox.core.ProfileUpdateResult
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
@@ -23,6 +28,35 @@ data class C0DirectBootRecord(
         require(schemaFingerprint.size == 32)
         require(categoryMask != 0L) { "C0 records require a category" }
     }
+
+}
+
+/**
+ * Generated-only Direct Boot input. It accepts the schema compiler's C0 EmergencyRecord and
+ * exposes no arbitrary payload, text, or privacy-class override.
+ */
+class GeneratedDirectBootRecord private constructor(
+    internal val c0: C0DirectBootRecord,
+) {
+    companion object {
+        fun fromEmergency(
+            schemaFingerprint: ByteArray,
+            value: GeneratedEmergencyRecord,
+            elapsedMillis: Long,
+            readinessCode: Int,
+            categoryMask: Long,
+        ): GeneratedDirectBootRecord = GeneratedDirectBootRecord(
+            C0DirectBootRecord(
+                schemaFingerprint = schemaFingerprint,
+                processRole = value.process_role.toInt(),
+                elapsedMillis = elapsedMillis,
+                readinessCode = readinessCode,
+                signalOrExitReason = value.signal_number,
+                statusCode = value.signal_code,
+                categoryMask = categoryMask,
+            ),
+        )
+    }
 }
 
 /** Immediate typed rejection for any attempted C1/C2 write to device-protected storage. */
@@ -31,6 +65,9 @@ enum class PrivacyClass { C0, C1, C2 }
 
 /** Device-protected C0 store whose typed API accepts only [C0DirectBootRecord]. */
 class DirectBootStore(private val records: Path, private val mirror: DenyMirror) {
+    /** Production entry point: only the generated C0 emergency schema can reach DE persistence. */
+    fun appendGenerated(record: GeneratedDirectBootRecord): DirectBootWriteResult = append(record.c0)
+
     fun append(record: C0DirectBootRecord): DirectBootWriteResult {
         val policy = mirror.effective() ?: return DirectBootWriteResult.DISABLED
         if (policy.disabled) return DirectBootWriteResult.DISABLED
@@ -148,4 +185,44 @@ class DirectBootPolicyCoordinator(
         mirror.promotePending()
         injector?.after(DirectBootBoundary.PENDING_PROMOTED)
     }
+}
+
+/** Exact result of a CE/global barrier before a DE mirror may become permissive. */
+enum class DirectBootGlobalTransitionResult { SUCCESS, PARTIAL, FAILED }
+
+/**
+ * Production CE/DE wiring: a tightening writes the fail-closed DE pending mirror before entering
+ * the handler-owned global barrier. A loosening never changes DE until that barrier succeeds.
+ */
+class HandlerCoordinatedDirectBootPolicyCoordinator(
+    private val mirror: DenyMirror,
+    private val global: GlobalPolicyCoordinator,
+    private val handlerBarrier: () -> BarrierAck,
+) {
+    fun tighten(target: DenyState): DirectBootGlobalTransitionResult {
+        mirror.writePending(target)
+        return when (global.updateProfile(target.toPolicySnapshot(), handlerBarrier)) {
+            is ProfileUpdateResult.Success -> {
+                mirror.promotePending()
+                DirectBootGlobalTransitionResult.SUCCESS
+            }
+            is ProfileUpdateResult.Partial -> DirectBootGlobalTransitionResult.PARTIAL
+            is ProfileUpdateResult.Failed -> DirectBootGlobalTransitionResult.FAILED
+        }
+    }
+
+    fun loosen(target: DenyState): DirectBootGlobalTransitionResult {
+        return when (global.updateProfile(target.toPolicySnapshot(), handlerBarrier)) {
+            is ProfileUpdateResult.Success -> {
+                mirror.writePending(target)
+                mirror.promotePending()
+                DirectBootGlobalTransitionResult.SUCCESS
+            }
+            is ProfileUpdateResult.Partial -> DirectBootGlobalTransitionResult.PARTIAL
+            is ProfileUpdateResult.Failed -> DirectBootGlobalTransitionResult.FAILED
+        }
+    }
+
+    private fun DenyState.toPolicySnapshot(): PolicySnapshot =
+        PolicySnapshot(epoch, c0DenyMask, disabled)
 }
