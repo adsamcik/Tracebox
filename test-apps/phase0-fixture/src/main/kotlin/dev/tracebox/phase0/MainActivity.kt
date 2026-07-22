@@ -48,12 +48,13 @@ class MainActivity : Activity() {
         Thread(
             {
                 val socketPath = "${noBackupFilesDir.absolutePath}/handler.sock"
-                var connected = NativeRuntime.connectClient(socketPath, PROCESS_ROLE_MAIN)
-                if (!connected) {
-                    // One installation-triggered retry covers service-process startup ordering; it
-                    // is not a steady-state reconnect poll.
-                    SystemClock.sleep(INITIAL_CONNECT_RETRY_DELAY_MILLIS)
+                var connected = false
+                for (attempt in 0 until INITIAL_CONNECT_ATTEMPTS) {
                     connected = NativeRuntime.connectClient(socketPath, PROCESS_ROLE_MAIN)
+                    if (connected || attempt + 1 == INITIAL_CONNECT_ATTEMPTS) break
+                    // Bounded installation-triggered retries cover service-process startup
+                    // ordering; steady-state reconnects remain trigger-driven, never polled.
+                    SystemClock.sleep(INITIAL_CONNECT_RETRY_DELAY_MILLIS)
                 }
                 Log.i(
                     TAG,
@@ -264,6 +265,7 @@ class MainActivity : Activity() {
         const val ACTION_EXTRA = "tracebox.action"
         const val PROCESS_ROLE_MAIN = 1
         const val REASON_ANR_CANDIDATE = 1
+        const val INITIAL_CONNECT_ATTEMPTS = 4
         const val INITIAL_CONNECT_RETRY_DELAY_MILLIS = 250L
         const val TAG = "TraceboxPhase0"
     }
