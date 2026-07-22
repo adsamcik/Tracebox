@@ -37,6 +37,10 @@ public abstract class CaptureBuildIdentityTask extends DefaultTask {
     @Input
     public abstract Property<String> getProjectVersion();
 
+    /** Captured at configuration time so this cacheable task never reaches back into Project at execution. */
+    @Input
+    public abstract Property<String> getGradleVersion();
+
     /** Optional R8/ProGuard mapping artifact supplied by a public AGP variant artifact. */
     @Optional
     @InputFile
@@ -53,12 +57,16 @@ public abstract class CaptureBuildIdentityTask extends DefaultTask {
     @OutputFile
     public abstract RegularFileProperty getOutputFile();
 
+    /** Reusable exact-identity symbol catalog consumed by offline retrace/symbolication. */
+    @OutputFile
+    public abstract RegularFileProperty getSymbolCatalogFile();
+
     /** Reads the schema and writes deterministic provenance from the actual applying project. */
     @TaskAction
     public void capture() throws IOException {
         byte[] schema = Files.readAllBytes(getSchemaFile().get().getAsFile().toPath());
         String provenance = getProjectPath().get() + ";version=" + getProjectVersion().get()
-                + ";gradle=" + getProject().getGradle().getGradleVersion();
+                + ";gradle=" + getGradleVersion().get();
         Path mapping = getR8MappingFile().isPresent()
                 ? getR8MappingFile().get().getAsFile().toPath()
                 : null;
@@ -70,5 +78,7 @@ public abstract class CaptureBuildIdentityTask extends DefaultTask {
         Files.createDirectories(getOutputFile().get().getAsFile().toPath().getParent());
         Files.writeString(getOutputFile().get().getAsFile().toPath(), BuildIdentityCapture.toJson(identity),
                 StandardCharsets.UTF_8);
+        Files.writeString(getSymbolCatalogFile().get().getAsFile().toPath(),
+                BuildIdentityCapture.symbolCatalog(identity), StandardCharsets.UTF_8);
     }
 }

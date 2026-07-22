@@ -28,7 +28,7 @@ tasks.register("phase1Check") {
     description = "Runs the Phase 1 Kotlin API and build identity contract tests."
     dependsOn(
         ":android:tracebox-api:testDebugUnitTest",
-        ":tooling:tracebox-gradle-plugin:identityCaptureTest",
+        ":test-apps:phase0-fixture:captureTraceboxBuildIdentityRelease",
     )
 }
 

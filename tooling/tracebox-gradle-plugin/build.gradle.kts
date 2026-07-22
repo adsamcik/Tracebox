@@ -18,7 +18,6 @@ gradlePlugin {
             group = "verification"
             classpath = sourceSets.test.get().runtimeClasspath
             mainClass.set("dev.tracebox.gradle.BuildIdentityTest")
-            dependsOn(":test-apps:phase0-fixture:assembleRelease")
         }
     }
 }

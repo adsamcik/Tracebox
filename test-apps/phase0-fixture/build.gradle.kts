@@ -1,5 +1,6 @@
 plugins {
     id("tracebox.android.application")
+    id("dev.tracebox.identity")
 }
 
 android {

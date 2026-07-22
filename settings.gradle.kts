@@ -1,4 +1,5 @@
 pluginManagement {
+    includeBuild("tooling/tracebox-gradle-plugin")
     repositories {
         google()
         mavenCentral()
@@ -27,7 +28,6 @@ include(
     ":android:tracebox-export",
     ":android:tracebox-export-ui",
     ":android:tracebox-directboot",
-    ":tooling:tracebox-gradle-plugin",
     ":benchmarks:phase0-benchmark",
     ":test-apps:phase0-fixture",
 )

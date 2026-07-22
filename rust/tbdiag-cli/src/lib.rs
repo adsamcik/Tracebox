@@ -3,7 +3,7 @@
 //! v1 accepts only the deterministic STORED ZIP shape emitted by Tracebox.  Rejecting
 //! unsupported compression is intentional: it keeps every declared size checked before
 //! allocating or copying attacker-controlled bytes.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
@@ -44,6 +44,346 @@ pub fn read_archive(path: &Path) -> Result<Archive, ArchiveError> {
         .take(MAX_ARCHIVE_BYTES + 1).read_to_end(&mut bytes).map_err(|error| ArchiveError::Io(error.to_string()))?;
     if bytes.len() > capacity { return Err(ArchiveError::ArchiveTooLarge(bytes.len() as u64)); }
     parse_archive(&bytes)
+}
+
+/// A generated Tracebox record decoded from a finalized package entry.
+///
+/// The fields are numeric, schema-defined values rendered as decimal strings so this type never
+/// treats package bytes as arbitrary text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecodedPackageRecord {
+    /// Package-local deterministic entry path.
+    pub path: String,
+    /// Stable generated event ID.
+    pub event_id: u32,
+    /// Generated event name selected by the stable event ID.
+    pub event_type: String,
+    /// Package-local process ID.
+    pub process_local_id: u32,
+    /// Package-local segment ID.
+    pub segment_local_id: u32,
+    /// Package-local raw-artifact ID, or zero when absent.
+    pub artifact_local_id: u32,
+    /// Package-local record ID.
+    pub record_local_id: u32,
+    /// Source time carried by the package record.
+    pub timestamp_millis: u64,
+    /// Schema-generated bounded field names and decimal values.
+    pub fields: Vec<(String, String)>,
+}
+
+/// A package record body that is not the exact v1 generated-record wire shape.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RecordDecodeError {
+    /// A record entry was shorter than the fixed package-local header.
+    TruncatedHeader(String),
+    /// The package-local record format version is not supported.
+    UnsupportedVersion(u32),
+    /// The stable generated event ID is unknown.
+    UnknownEventType(u32),
+    /// A generated payload did not match its fixed bounded schema size.
+    InvalidPayloadSize {
+        event_id: u32,
+        actual: usize,
+        expected: usize,
+    },
+    /// A package-local record ID appeared more than once.
+    DuplicateRecordId(u32),
+    /// A command asked for an event type that the generated schema does not define.
+    UnknownFilter(String),
+}
+
+impl fmt::Display for RecordDecodeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TruncatedHeader(path) => write!(formatter, "record entry is truncated: {path}"),
+            Self::UnsupportedVersion(version) => {
+                write!(formatter, "unsupported package record version: {version}")
+            }
+            Self::UnknownEventType(event_id) => {
+                write!(formatter, "unknown generated event type: {event_id}")
+            }
+            Self::InvalidPayloadSize {
+                event_id,
+                actual,
+                expected,
+            } => {
+                write!(
+                    formatter,
+                    "invalid payload size for event {event_id}: {actual}, expected {expected}"
+                )
+            }
+            Self::DuplicateRecordId(record_id) => {
+                write!(formatter, "duplicate package-local record ID: {record_id}")
+            }
+            Self::UnknownFilter(selector) => {
+                write!(formatter, "unknown generated event filter: {selector}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RecordDecodeError {}
+
+const PACKAGE_RECORD_HEADER_SIZE: usize = 32;
+
+/// Decodes every generated `records/*.tbr` entry from a validated package.
+///
+/// Archive validation happens before this function is called. This decoder still validates each
+/// bounded record shape and never interprets unknown bytes as text or a guessed schema.
+///
+/// # Errors
+///
+/// Returns an error when a generated package record is truncated, unknown, malformed, or duplicates
+/// a package-local record ID.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
+pub fn decode_package_records(
+    archive: &Archive,
+) -> Result<Vec<DecodedPackageRecord>, RecordDecodeError> {
+    let mut records = Vec::new();
+    let mut record_ids = BTreeSet::new();
+    let mut entries: Vec<_> = archive
+        .entries
+        .iter()
+        .filter(|entry| entry.name.starts_with("records/") && entry.name.ends_with(".tbr"))
+        .collect();
+    entries.sort_by(|left, right| left.name.cmp(&right.name));
+    for entry in entries {
+        let record = decode_package_record(&entry.name, &entry.bytes)?;
+        if !record_ids.insert(record.record_local_id) {
+            return Err(RecordDecodeError::DuplicateRecordId(record.record_local_id));
+        }
+        records.push(record);
+    }
+    Ok(records)
+}
+
+/// Filters decoded records by one exact generated event name or stable numeric ID.
+///
+/// Matching is deliberately schema-defined rather than a substring search over user-controlled
+/// package paths or payload values.
+///
+/// # Errors
+///
+/// Returns an error when `selector` is not a known generated event name or stable event ID.
+pub fn filter_package_records(
+    records: &[DecodedPackageRecord],
+    selector: &str,
+) -> Result<Vec<DecodedPackageRecord>, RecordDecodeError> {
+    let event_id = event_id_for_selector(selector)?;
+    Ok(records
+        .iter()
+        .filter(|record| record.event_id == event_id)
+        .cloned()
+        .collect())
+}
+
+/// Produces a deterministic, line-oriented representation of one decoded generated record.
+#[must_use]
+pub fn format_decoded_record(record: &DecodedPackageRecord) -> String {
+    let fields = record
+        .fields
+        .iter()
+        .map(|(name, value)| format!("\"{name}\":{value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"path\":\"{}\",\"event_id\":{},\"event_type\":\"{}\",\"process\":{},\"segment\":{},\"artifact\":{},\"record\":{},\"time_ms\":{},\"fields\":{{{fields}}}}}",
+        record.path,
+        record.event_id,
+        record.event_type,
+        record.process_local_id,
+        record.segment_local_id,
+        record.artifact_local_id,
+        record.record_local_id,
+        record.timestamp_millis,
+    )
+}
+
+fn decode_package_record(
+    path: &str,
+    bytes: &[u8],
+) -> Result<DecodedPackageRecord, RecordDecodeError> {
+    if bytes.len() < PACKAGE_RECORD_HEADER_SIZE {
+        return Err(RecordDecodeError::TruncatedHeader(path.to_owned()));
+    }
+    let version = be_u32(bytes, 0).expect("fixed header was checked");
+    if version != 1 {
+        return Err(RecordDecodeError::UnsupportedVersion(version));
+    }
+    let event_id = be_u32(bytes, 4).expect("fixed header was checked");
+    let event_type =
+        event_type_name(event_id).ok_or(RecordDecodeError::UnknownEventType(event_id))?;
+    let fields = decode_generated_payload(event_id, &bytes[PACKAGE_RECORD_HEADER_SIZE..])?;
+    Ok(DecodedPackageRecord {
+        path: path.to_owned(),
+        event_id,
+        event_type: event_type.to_owned(),
+        process_local_id: be_u32(bytes, 8).expect("fixed header was checked"),
+        segment_local_id: be_u32(bytes, 12).expect("fixed header was checked"),
+        artifact_local_id: be_u32(bytes, 16).expect("fixed header was checked"),
+        record_local_id: be_u32(bytes, 20).expect("fixed header was checked"),
+        timestamp_millis: be_u64(bytes, 24).expect("fixed header was checked"),
+        fields,
+    })
+}
+
+fn event_id_for_selector(selector: &str) -> Result<u32, RecordDecodeError> {
+    let parsed = selector.parse::<u32>().ok();
+    let event_id = parsed.or_else(|| {
+        [1_u32, 2, 3, 4].into_iter().find(|event_id| {
+            event_type_name(*event_id).is_some_and(|name| name.eq_ignore_ascii_case(selector))
+        })
+    });
+    event_id.ok_or_else(|| RecordDecodeError::UnknownFilter(selector.to_owned()))
+}
+
+fn event_type_name(event_id: u32) -> Option<&'static str> {
+    match event_id {
+        1 => Some("StructuralSummary"),
+        2 => Some("EmergencyRecord"),
+        3 => Some("Breadcrumb"),
+        4 => Some("HandledError"),
+        _ => None,
+    }
+}
+
+fn decode_generated_payload(
+    event_id: u32,
+    payload: &[u8],
+) -> Result<Vec<(String, String)>, RecordDecodeError> {
+    let expected = match event_id {
+        1 => 18,
+        2 => 40,
+        3 => 12,
+        4 => 6,
+        _ => return Err(RecordDecodeError::UnknownEventType(event_id)),
+    };
+    if payload.len() != expected {
+        return Err(RecordDecodeError::InvalidPayloadSize {
+            event_id,
+            actual: payload.len(),
+            expected,
+        });
+    }
+    let fields = match event_id {
+        1 => vec![
+            (
+                "stream_count".into(),
+                le_u32(payload, 0).expect("checked").to_string(),
+            ),
+            (
+                "thread_count".into(),
+                le_u32(payload, 4).expect("checked").to_string(),
+            ),
+            (
+                "module_count".into(),
+                le_u32(payload, 8).expect("checked").to_string(),
+            ),
+            (
+                "exception_code".into(),
+                le_u32(payload, 12).expect("checked").to_string(),
+            ),
+            (
+                "processor_architecture".into(),
+                le_u16(payload, 16).expect("checked").to_string(),
+            ),
+        ],
+        2 => vec![
+            (
+                "slot_sequence".into(),
+                le_u64(payload, 0).expect("checked").to_string(),
+            ),
+            (
+                "policy_epoch".into(),
+                le_u64(payload, 8).expect("checked").to_string(),
+            ),
+            (
+                "signal_number".into(),
+                le_i32(payload, 16).expect("checked").to_string(),
+            ),
+            (
+                "signal_code".into(),
+                le_i32(payload, 20).expect("checked").to_string(),
+            ),
+            (
+                "process_role".into(),
+                le_u32(payload, 24).expect("checked").to_string(),
+            ),
+            (
+                "thread_role".into(),
+                le_u32(payload, 28).expect("checked").to_string(),
+            ),
+            (
+                "flags".into(),
+                le_u64(payload, 32).expect("checked").to_string(),
+            ),
+        ],
+        3 => vec![
+            (
+                "code".into(),
+                le_u32(payload, 0).expect("checked").to_string(),
+            ),
+            (
+                "monotonic_time_ns".into(),
+                le_u64(payload, 4).expect("checked").to_string(),
+            ),
+        ],
+        4 => vec![
+            (
+                "kind".into(),
+                le_u32(payload, 0).expect("checked").to_string(),
+            ),
+            (
+                "frame_count".into(),
+                le_u16(payload, 4).expect("checked").to_string(),
+            ),
+        ],
+        _ => unreachable!("event ID was validated"),
+    };
+    Ok(fields)
+}
+
+fn be_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    bytes
+        .get(offset..offset.checked_add(4)?)
+        .and_then(|value| value.try_into().ok())
+        .map(u32::from_be_bytes)
+}
+
+fn be_u64(bytes: &[u8], offset: usize) -> Option<u64> {
+    bytes
+        .get(offset..offset.checked_add(8)?)
+        .and_then(|value| value.try_into().ok())
+        .map(u64::from_be_bytes)
+}
+
+fn le_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    bytes
+        .get(offset..offset.checked_add(2)?)
+        .and_then(|value| value.try_into().ok())
+        .map(u16::from_le_bytes)
+}
+
+fn le_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    bytes
+        .get(offset..offset.checked_add(4)?)
+        .and_then(|value| value.try_into().ok())
+        .map(u32::from_le_bytes)
+}
+
+fn le_i32(bytes: &[u8], offset: usize) -> Option<i32> {
+    bytes
+        .get(offset..offset.checked_add(4)?)
+        .and_then(|value| value.try_into().ok())
+        .map(i32::from_le_bytes)
+}
+
+fn le_u64(bytes: &[u8], offset: usize) -> Option<u64> {
+    bytes
+        .get(offset..offset.checked_add(8)?)
+        .and_then(|value| value.try_into().ok())
+        .map(u64::from_le_bytes)
 }
 
 /// Parses a deterministic v1 archive without extracting names to the file system.
@@ -168,6 +508,223 @@ pub fn symbolize(catalog: &[SymbolCatalogEntry], raw: RawFrame) -> Symbolication
     }
 }
 
+/// Native and R8 entries emitted by the Gradle `symbol-catalog.tsv` artifact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GeneratedSymbolCatalog {
+    native_entries: Vec<SymbolCatalogEntry>,
+    native_identities: BTreeMap<String, BTreeSet<String>>,
+    r8_entries: Vec<R8CatalogEntry>,
+    r8_identities: BTreeSet<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct R8CatalogEntry {
+    mapping_identity: String,
+    obfuscated: String,
+    original: String,
+}
+
+/// Catalog parsing errors are hard failures: a partial symbol catalog can mislead diagnosis.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CatalogError {
+    /// A non-comment line did not match a supported v1 or legacy catalog shape.
+    MalformedLine { line: usize, detail: String },
+}
+
+impl fmt::Display for CatalogError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MalformedLine { line, detail } => {
+                write!(formatter, "malformed catalog line {line}: {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CatalogError {}
+
+/// Parses the exact, generated tab-separated catalog without accepting unknown record kinds.
+///
+/// # Errors
+///
+/// Returns an error when a non-comment line does not match a strict legacy or generated catalog
+/// record shape.
+pub fn parse_generated_symbol_catalog(
+    contents: &str,
+) -> Result<GeneratedSymbolCatalog, CatalogError> {
+    let mut native_entries = Vec::new();
+    let mut native_identities = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut r8_entries = Vec::new();
+    let mut r8_identities = BTreeSet::new();
+    for (index, raw_line) in contents.lines().enumerate() {
+        let line_number = index + 1;
+        if raw_line.is_empty() || raw_line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<_> = raw_line.split('\t').collect();
+        match fields.first().copied() {
+            Some("native") => {
+                if fields.len() != 6 || fields[1..].iter().any(|field| field.is_empty()) {
+                    return Err(malformed_catalog_line(
+                        line_number,
+                        "expected native<TAB>MODULE<TAB>IDENTITY<TAB>ABI<TAB>OFFSET<TAB>SYMBOL",
+                    ));
+                }
+                let offset = fields[4].parse::<u64>().map_err(|_| {
+                    malformed_catalog_line(line_number, "native offset must be u64")
+                })?;
+                native_identities
+                    .entry(fields[1].to_owned())
+                    .or_default()
+                    .insert(fields[2].to_owned());
+                if fields[5] != "identity-only" {
+                    native_entries.push(SymbolCatalogEntry {
+                        module: fields[1].to_owned(),
+                        identity: fields[2].to_owned(),
+                        offset,
+                        symbol: fields[5].to_owned(),
+                    });
+                }
+            }
+            Some("r8") => {
+                if fields.len() != 4 || fields[1..].iter().any(|field| field.is_empty()) {
+                    return Err(malformed_catalog_line(
+                        line_number,
+                        "expected r8<TAB>MAPPING_ID<TAB>OBFUSCATED<TAB>ORIGINAL",
+                    ));
+                }
+                r8_identities.insert(fields[1].to_owned());
+                if fields[2] != "<identity>" || fields[3] != "<identity>" {
+                    r8_entries.push(R8CatalogEntry {
+                        mapping_identity: fields[1].to_owned(),
+                        obfuscated: fields[2].to_owned(),
+                        original: fields[3].to_owned(),
+                    });
+                }
+            }
+            _ => {
+                if fields.len() != 4 || fields.iter().any(|field| field.is_empty()) {
+                    return Err(malformed_catalog_line(
+                        line_number,
+                        "expected MODULE<TAB>IDENTITY<TAB>OFFSET<TAB>SYMBOL",
+                    ));
+                }
+                let offset = fields[2]
+                    .parse::<u64>()
+                    .map_err(|_| malformed_catalog_line(line_number, "offset must be u64"))?;
+                native_identities
+                    .entry(fields[0].to_owned())
+                    .or_default()
+                    .insert(fields[1].to_owned());
+                native_entries.push(SymbolCatalogEntry {
+                    module: fields[0].to_owned(),
+                    identity: fields[1].to_owned(),
+                    offset,
+                    symbol: fields[3].to_owned(),
+                });
+            }
+        }
+    }
+    Ok(GeneratedSymbolCatalog {
+        native_entries,
+        native_identities,
+        r8_entries,
+        r8_identities,
+    })
+}
+
+/// Resolves only an exact generated native module identity and offset.
+#[must_use]
+pub fn symbolize_generated_catalog(
+    catalog: &GeneratedSymbolCatalog,
+    raw: RawFrame,
+) -> Symbolication {
+    let available = catalog
+        .native_identities
+        .get(&raw.module)
+        .map(|identities| identities.iter().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    if !available.is_empty() && !available.iter().any(|identity| identity == &raw.identity) {
+        return Symbolication::IdentityMismatch { raw, available };
+    }
+    match catalog.native_entries.iter().find(|entry| {
+        entry.module == raw.module && entry.identity == raw.identity && entry.offset == raw.offset
+    }) {
+        Some(entry) => Symbolication::Resolved {
+            raw,
+            symbol: entry.symbol.clone(),
+        },
+        None => Symbolication::Unresolved { raw },
+    }
+}
+
+/// Result of exact R8 retracing against one mapping identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RetraceResult {
+    /// One exact residual frame was mapped to its source name.
+    Resolved {
+        obfuscated: String,
+        original: String,
+    },
+    /// The mapping identity is present but contains no exact residual frame.
+    Unresolved { obfuscated: String },
+    /// Multiple source frames map to the same residual spelling without a line-range discriminator.
+    Ambiguous {
+        obfuscated: String,
+        candidates: Vec<String>,
+    },
+    /// The requested mapping identity is absent; no other mapping is substituted.
+    IdentityMismatch {
+        requested: String,
+        available: Vec<String>,
+    },
+}
+
+/// Retraces only an exact R8 mapping identity and residual frame spelling.
+#[must_use]
+pub fn retrace_generated_catalog(
+    catalog: &GeneratedSymbolCatalog,
+    mapping_identity: String,
+    obfuscated: String,
+) -> RetraceResult {
+    let available = catalog.r8_identities.iter().cloned().collect::<Vec<_>>();
+    if !catalog.r8_identities.contains(&mapping_identity) {
+        return RetraceResult::IdentityMismatch {
+            requested: mapping_identity,
+            available,
+        };
+    }
+    let candidates = catalog
+        .r8_entries
+        .iter()
+        .filter(|entry| {
+            entry.mapping_identity == mapping_identity && entry.obfuscated == obfuscated
+        })
+        .map(|entry| entry.original.clone())
+        .collect::<BTreeSet<_>>();
+    match candidates.len() {
+        0 => RetraceResult::Unresolved { obfuscated },
+        1 => match candidates.into_iter().next() {
+            Some(original) => RetraceResult::Resolved {
+                obfuscated,
+                original,
+            },
+            None => RetraceResult::Unresolved { obfuscated },
+        },
+        _ => RetraceResult::Ambiguous {
+            obfuscated,
+            candidates: candidates.into_iter().collect(),
+        },
+    }
+}
+
+fn malformed_catalog_line(line: usize, detail: &str) -> CatalogError {
+    CatalogError::MalformedLine {
+        line,
+        detail: detail.to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
  use super::*;
@@ -207,5 +764,42 @@ mod tests {
  #[test] fn rejects_payload_with_wrong_crc() { let mut corrupted=zip("manifest.cbor",b"ok"); corrupted[30+"manifest.cbor".len()]^=0xff; assert!(matches!(parse_archive(&corrupted),Err(ArchiveError::CrcMismatch { .. }))); }
  #[test] fn mutation_corpus_never_panics() { let good=zip("manifest.cbor",b"ok"); for index in 0..good.len() { let mut value=good.clone(); value[index]^=0xff; assert!(std::panic::catch_unwind(|| parse_archive(&value)).is_ok()); } for length in 0..good.len() { assert!(std::panic::catch_unwind(|| parse_archive(&good[..length])).is_ok()); } }
  #[test] fn mismatch_preserves_raw_frame() { let raw=RawFrame { module:"libx.so".into(), identity:"bad".into(), offset:42 }; let outcome=symbolize(&[SymbolCatalogEntry{module:"libx.so".into(),identity:"good".into(),offset:42,symbol:"rust_or_cpp".into()}],raw.clone()); assert_eq!(outcome,Symbolication::IdentityMismatch{raw,available:vec!["good".into()]}); }
- #[test] fn missing_entry_is_unresolved() { let raw=RawFrame { module:"libx.so".into(), identity:"good".into(), offset:99 }; assert_eq!(symbolize(&[],raw.clone()),Symbolication::Unresolved{raw}); }
+ #[test] fn missing_entry_is_unresolved() { let raw=RawFrame { module:"libx.so".into(), identity:"good".into(), offset:99 }; assert_eq!(symbolize(&[],raw.clone()),Symbolication::Unresolved{raw}); }    #[test]
+    fn decodes_actual_tracebox_record_bodies_and_filters_by_generated_type() {
+        let mut body = Vec::new();
+        for value in [1_u32, 3, 1, 1, 0, 1] {
+            body.extend_from_slice(&value.to_be_bytes());
+        }
+        body.extend_from_slice(&42_u64.to_be_bytes());
+        body.extend_from_slice(&7_u32.to_le_bytes());
+        body.extend_from_slice(&9_u64.to_le_bytes());
+        let archive = parse_archive(&zip("records/000001.tbr", &body)).unwrap();
+        let records = decode_package_records(&archive).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].event_type, "Breadcrumb");
+        assert_eq!(records[0].timestamp_millis, 42);
+        assert_eq!(
+            records[0].fields,
+            vec![
+                ("code".into(), "7".into()),
+                ("monotonic_time_ns".into(), "9".into())
+            ]
+        );
+        assert_eq!(
+            filter_package_records(&records, "Breadcrumb").unwrap(),
+            records
+        );
+    }
+    #[test]
+    fn retrace_refuses_ambiguous_r8_residual_frames() {
+        let catalog = parse_generated_symbol_catalog(
+            "r8\tsha256:mapping\ta.b.c\tdev.tracebox.First.method\n\
+    r8\tsha256:mapping\ta.b.c\tdev.tracebox.Second.method\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            retrace_generated_catalog(&catalog, "sha256:mapping".into(), "a.b.c".into()),
+            RetraceResult::Ambiguous { .. }
+        ));
+    }
 }
