@@ -24,14 +24,14 @@ class TraceboxAndroidApplicationPlugin : Plugin<Project> {
             }
             compileOptions {
                 isCoreLibraryDesugaringEnabled = true
-                sourceCompatibility = JavaVersion.VERSION_21
-                targetCompatibility = JavaVersion.VERSION_21
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
             }
         }
         val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
         dependencies.add("coreLibraryDesugaring", libs.findLibrary("desugar-jdk-libs-nio").get())
         tasks.withType<KotlinJvmCompile>().configureEach {
-            compilerOptions.jvmTarget.set(JvmTarget.JVM_21)
+            compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
             compilerOptions.allWarningsAsErrors.set(true)
         }
     }
