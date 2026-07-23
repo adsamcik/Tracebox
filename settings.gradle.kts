@@ -28,6 +28,7 @@ include(
     ":android:tracebox-export",
     ":android:tracebox-export-ui",
     ":android:tracebox-directboot",
+    ":android:tracebox",
     ":benchmarks:phase0-benchmark",
     ":test-apps:phase0-fixture",
 )

@@ -1,0 +1,40 @@
+name: Publish Tracebox foundation artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable Maven version to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build and publish foundation AARs
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21.0.8+9"
+      - name: Install pinned Android tools
+        shell: pwsh
+        run: |
+          & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "platforms;android-37.0" "build-tools;37.0.0" "ndk;28.2.13676358" "cmake;4.1.2"
+      - name: Build capture-only Crashpad libraries
+        shell: pwsh
+        run: tools\crashpad\Build-Crashpad.ps1
+      - name: Publish immutable Maven artifacts
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >
+          .\gradlew.bat --no-daemon --console=plain --stacktrace publishFoundation
+          -PtraceboxVersion="${{ inputs.version }}"
+          -PtraceboxGitHubRepository="${{ github.repository }}"

@@ -2,10 +2,31 @@ plugins {
     base
 }
 
+val traceboxGroup = "io.github.tracebox"
+val traceboxVersion = providers.gradleProperty("traceboxVersion").orElse("0.1.0-foundation.1").get()
+
 allprojects {
+    group = traceboxGroup
+    version = traceboxVersion
     dependencyLocking {
         lockAllConfigurations()
     }
+}
+
+tasks.register("publishFoundation") {
+    group = "publishing"
+    description = "Publishes every Tracebox runtime artifact to the configured immutable Maven repository."
+    dependsOn(
+        ":android:tracebox-api:publish",
+        ":android:tracebox-core:publish",
+        ":android:tracebox-storage:publish",
+        ":android:tracebox-directboot:publish",
+        ":android:tracebox-anr-exit:publish",
+        ":android:tracebox-native:publish",
+        ":android:tracebox-export:publish",
+        ":android:tracebox-export-ui:publish",
+        ":android:tracebox:publish",
+    )
 }
 
 tasks.register("phase0Check") {

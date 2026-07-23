@@ -37,7 +37,11 @@ class TraceboxFileProvider : ContentProvider() {
     private fun checkedFile(uri: Uri): File {
         val name = uri.lastPathSegment ?: throw FileNotFoundException("missing export name")
         if (name.contains('/') || name.contains('\\') || name == "." || name == "..") throw FileNotFoundException("invalid export name")
-        val root = checkNotNull(context).filesDir.toPath().resolve(StagingLeaseManager.STAGING_DIRECTORY).toFile().canonicalFile
+        val root = checkNotNull(context).noBackupFilesDir.toPath()
+            .resolve("tracebox")
+            .resolve("export-staging")
+            .toFile()
+            .canonicalFile
         val file = File(root, name).canonicalFile
         if (file.parentFile != root || !file.isFile) throw FileNotFoundException("outside staging")
         return file
@@ -45,7 +49,11 @@ class TraceboxFileProvider : ContentProvider() {
 
     companion object {
         fun uriForFile(context: android.content.Context, path: Path): Uri {
-            val root = context.filesDir.toPath().resolve(StagingLeaseManager.STAGING_DIRECTORY).toFile().canonicalFile
+            val root = context.noBackupFilesDir.toPath()
+                .resolve("tracebox")
+                .resolve("export-staging")
+                .toFile()
+                .canonicalFile
             val file = path.toFile().canonicalFile
             require(file.parentFile == root && file.isFile) { "export must be a direct staging file" }
             return Uri.Builder()

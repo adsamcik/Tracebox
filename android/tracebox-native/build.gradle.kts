@@ -1,9 +1,15 @@
 plugins {
     id("tracebox.android.library")
+    `maven-publish`
 }
 
 android {
     namespace = "dev.tracebox.nativecapture"
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
     defaultConfig {
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -14,6 +20,10 @@ android {
 dependencies {
     implementation(project(":android:tracebox-core"))
 }
+
+extra["traceboxPublicationName"] = "Tracebox native capture"
+extra["traceboxPublicationDescription"] = "Capture-only Crashpad and emergency-native runtime."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
 val verifyCrashpadPrebuilt by tasks.registering {
     val required = listOf(
