@@ -109,15 +109,25 @@ foreach ($relativePatch in $series) {
     if (-not (Test-Path $patch)) {
         throw "Missing patch: $relativePatch"
     }
-    & git -C $root apply --check --unsafe-paths --ignore-space-change --ignore-whitespace `
-        --directory='third_party/crashpad/checkout/crashpad' $patch
-    if ($LASTEXITCODE -ne 0) {
-        throw "Patch check failed: $relativePatch"
-    }
-    & git -C $root apply --unsafe-paths --ignore-space-change --ignore-whitespace `
-        --directory='third_party/crashpad/checkout/crashpad' $patch
-    if ($LASTEXITCODE -ne 0) {
-        throw "Patch apply failed: $relativePatch"
+    $normalizedPatch = Join-Path $downloads "$([IO.Path]::GetFileName($relativePatch)).lf"
+    try {
+        $patchText = [IO.File]::ReadAllText($patch)
+        [IO.File]::WriteAllText(
+            $normalizedPatch,
+            $patchText.Replace("`r`n", "`n").Replace("`r", "`n"),
+            [Text.UTF8Encoding]::new($false))
+        & git -C $root -c core.autocrlf=false -c core.eol=lf apply --check --unsafe-paths --ignore-space-change --ignore-whitespace `
+            --directory='third_party/crashpad/checkout/crashpad' $normalizedPatch
+        if ($LASTEXITCODE -ne 0) {
+            throw "Patch check failed: $relativePatch"
+        }
+        & git -C $root -c core.autocrlf=false -c core.eol=lf apply --unsafe-paths --ignore-space-change --ignore-whitespace `
+            --directory='third_party/crashpad/checkout/crashpad' $normalizedPatch
+        if ($LASTEXITCODE -ne 0) {
+            throw "Patch apply failed: $relativePatch"
+        }
+    } finally {
+        Remove-Item $normalizedPatch -Force -ErrorAction SilentlyContinue
     }
 }
 

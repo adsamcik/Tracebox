@@ -1,2 +1,2 @@
-third_party/crashpad/patches/*.patch whitespace=-blank-at-eol
+third_party/crashpad/patches/*.patch text eol=lf whitespace=-blank-at-eol
 third_party/crashpad/archives/*.tar.gz binary

@@ -1,7 +1,7 @@
 {
   "format": 1,
   "source_date": "2026-07-22",
-  "post_patch_tree_sha256": "c967d7fd2c748bfc2231d561b1797db94f188ca5f6df6779c3517d6b7a953e10",
+  "post_patch_tree_sha256": "20a320689650c8e479c697b1d40151190168777be85c41d5c0920724d650ba6b",
   "post_patch_tree_hash_algorithm": "sha256(UTF8(sorted(relative_path + LF + file_sha256 + LF)))",
   "post_patch_tree_excluded_generated_paths": [
     "verified-sources.json",
