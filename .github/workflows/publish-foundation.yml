@@ -1,6 +1,8 @@
 name: Publish Tracebox foundation artifact
 
 on:
+  push:
+    branches: ["copilot/tracebox-foundation"]
   workflow_dispatch:
     inputs:
       version:
@@ -11,6 +13,9 @@ on:
 permissions:
   contents: read
   packages: write
+
+env:
+  TRACEBOX_VERSION: 0.1.0-foundation.1
 
 jobs:
   publish:
@@ -36,5 +41,5 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: >
           .\gradlew.bat --no-daemon --console=plain --stacktrace publishFoundation
-          -PtraceboxVersion="${{ inputs.version }}"
+          -PtraceboxVersion="${{ inputs.version || env.TRACEBOX_VERSION }}"
           -PtraceboxGitHubRepository="${{ github.repository }}"
