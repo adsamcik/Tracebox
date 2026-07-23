@@ -49,12 +49,12 @@ import dev.tracebox.core.RecordPriority
 import dev.tracebox.core.WriterPolicyGate
 import dev.tracebox.directboot.DenyMirror
 import dev.tracebox.directboot.DenyState
-import dev.tracebox.export.DisclosureDecodeResult
-import dev.tracebox.export.DisclosureRenderer
 import dev.tracebox.export.PackagePipelineResult
 import dev.tracebox.export.RecoveredSnapshotRequestAdapter
 import dev.tracebox.export.SnapshotPreparer
 import dev.tracebox.export.StandardPackagePipeline
+import dev.tracebox.export.ui.DisclosureDecodeResult
+import dev.tracebox.export.ui.DisclosureRenderer
 import dev.tracebox.export.ui.TraceboxFileProvider
 import dev.tracebox.nativecapture.NativeRuntime
 import dev.tracebox.nativecapture.TraceboxHandlerService
@@ -699,7 +699,7 @@ private class DefaultTraceboxHandle(
         RuntimePackageRegistry.intent(context, preview)
 
     internal fun consumeApproval(approval: ApprovalToken): ByteArray? =
-        RuntimePackageRegistry.take(approval.opaque)
+        RuntimePackageRegistry.take(approval.opaqueBytes())
 
     internal fun reserveStaging(path: Path, bytes: Long): Boolean =
         uidQuota?.reserve(path, UidBucket.SNAPSHOTS, bytes) == true
@@ -917,7 +917,7 @@ private class RuntimeDiagnosticPackage(
         if (!runtime.reserveStaging(path, bytes.size.toLong())) return null
         return try {
             Files.write(path, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
-            staged += path
+            staged.add(path)
             path
         } catch (_: IOException) {
             runtime.releaseStaging(path)

@@ -110,6 +110,9 @@ sealed interface PackagePreparationResult {
  * satisfy the runtime's one-time approval registry.
  */
 class ApprovalToken private constructor(internal val opaque: ByteArray) {
+    /** Returns a defensive copy for the runtime's one-time approval registry lookup. */
+    fun opaqueBytes(): ByteArray = opaque.copyOf()
+
     companion object {
         private const val RESULT_EXTRA = "dev.tracebox.api.approval"
 

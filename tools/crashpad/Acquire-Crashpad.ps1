@@ -75,8 +75,17 @@ foreach ($component in $lock.components) {
         $component.archive_sha256 -notmatch '^[0-9a-fA-F]{64}$') {
         throw "Source lock is missing archive authentication: $($component.name)"
     }
-    $archive = Join-Path $downloads "$($component.name).tar.gz"
-    if (-not (Test-Path $archive)) {
+    $vendoredArchive = if ($component.archive_path) {
+        Join-Path $root "third_party\crashpad\$($component.archive_path)"
+    } else {
+        $null
+    }
+    $archive = if ($vendoredArchive -and (Test-Path -LiteralPath $vendoredArchive -PathType Leaf)) {
+        $vendoredArchive
+    } else {
+        Join-Path $downloads "$($component.name).tar.gz"
+    }
+    if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
         & curl.exe -fsSL $component.url -o $archive
         if ($LASTEXITCODE -ne 0) {
             throw "Download failed: $($component.name)"
