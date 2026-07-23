@@ -7,7 +7,6 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.util.Base64
-import java.util.zip.CRC32C
 import dev.tracebox.api.DiagnosticContext
 import dev.tracebox.api.Diagnostics
 import dev.tracebox.api.generated.GeneratedDiagnostics
@@ -21,6 +20,7 @@ import dev.tracebox.core.GateResult
 import dev.tracebox.core.JvmCapturePolicy
 import dev.tracebox.core.PolicyTaggedRecord
 import dev.tracebox.core.RecordPriority
+import dev.tracebox.api.Crc32c
 import dev.tracebox.core.TraceboxUncaughtExceptionHandler
 import dev.tracebox.core.WriterPolicyGate
 
@@ -525,7 +525,7 @@ class SummarySpoolDeletionParticipant(
                     !bytes.copyOfRange(0, 8).contentEquals("TBEMERG1".toByteArray()) ||
                     readInt(bytes, 8) != 1 || readInt(bytes, 12) != EMERGENCY_RECORD_SIZE ||
                     readLong(bytes, 248) != EMERGENCY_COMPLETION ||
-                    CRC32C().also { it.update(bytes, 0, 244) }.value.toInt() != readInt(bytes, 244)
+                    Crc32c.value(bytes, 0, 244) != readInt(bytes, 244)
                 ) return null
                 return EmergencyFields(
                     readLong(bytes, 48), readLong(bytes, 56), readInt(bytes, 80), readInt(bytes, 84),

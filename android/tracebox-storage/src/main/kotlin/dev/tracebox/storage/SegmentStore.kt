@@ -4,6 +4,7 @@ import dev.tracebox.core.RecordPriority
 import dev.tracebox.core.GateResult
 import dev.tracebox.core.PolicyTaggedRecord
 import dev.tracebox.core.WriterPolicyGate
+import dev.tracebox.api.Crc32c
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
@@ -14,7 +15,6 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.util.Base64
-import java.util.zip.CRC32C
 
 /** IDs supplied by the Phase 1 persist-before-use identity allocator. */
 data class PersistedSegmentIdentity(val segmentId: ByteArray, val processInstanceId: ByteArray) {
@@ -292,7 +292,7 @@ class SegmentWriter private constructor(
         }
 
         private fun crc(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size): Int =
-            CRC32C().also { it.update(bytes, offset, length) }.value.toInt()
+            Crc32c.value(bytes, offset, length)
         private fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
     }
 }

@@ -1,6 +1,7 @@
 package dev.tracebox.core
 
 import dev.tracebox.api.Readiness
+import dev.tracebox.api.Crc32c
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -160,9 +161,7 @@ class ControlPage(private val path: Path) : CommittedPolicyProvider {
     }
 
     private fun crc(bytes: ByteArray, offset: Int, length: Int): Int {
-        val crc = java.util.zip.CRC32C()
-        crc.update(bytes, offset, length)
-        return crc.value.toInt()
+        return Crc32c.value(bytes, offset, length)
     }
 
     private companion object {

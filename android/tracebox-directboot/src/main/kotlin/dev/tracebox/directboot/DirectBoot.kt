@@ -1,6 +1,7 @@
 package dev.tracebox.directboot
 
 import dev.tracebox.api.generated.GeneratedEmergencyRecord
+import dev.tracebox.api.Crc32c
 import dev.tracebox.core.BarrierAck
 import dev.tracebox.core.GlobalPolicyCoordinator
 import dev.tracebox.core.PolicySnapshot
@@ -11,7 +12,6 @@ import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import java.util.zip.CRC32C
 
 /** The separate C0-only Direct Boot schema; it has no C1/C2 fields or generic payload. */
 data class C0DirectBootRecord(
@@ -151,7 +151,7 @@ class DenyMirror(private val activePath: Path, private val pendingPath: Path) {
     }
 
     private fun crc(bytes: ByteArray, offset: Int, length: Int): Int =
-        CRC32C().also { it.update(bytes, offset, length) }.value.toInt()
+        Crc32c.value(bytes, offset, length)
 
     private companion object {
         const val MAGIC = 0x5442444d
