@@ -1,9 +1,10 @@
 # Tracebox Persistent Implementation Ledger
 
 - Immutable baseline SHA: `dc87c6f9e2a6576cc554f7cb181ce80a02bf0802`
-- Implementation branch: `copilot/tracebox-foundation`
-- Worktree: `G:\Github\Tracebox-worktrees\tracebox-foundation`
-- Scope currently authorized: Phase 0–5 under ADR-0008; API 23 and the single-emulator qualification matrix are accepted in ADR-0009
+- Implementation history: `copilot/tracebox-foundation`
+- Active requirements branch: `codex/personal-project-scope`
+- Active checkout: `G:\Github\Tracebox`
+- Scope currently authorized: Phase 0-5 under ADR-0008; API 23 and the single-emulator lane under ADR-0009; personal-project completion, consolidated fixtures, and Tracker integration under ADR-0010
 - Allowed states: `NOT_STARTED`, `IN_PROGRESS`, `PASS`, `FAIL`, `BLOCKED_PRODUCT_DECISION`, `UNAVAILABLE_EXTERNAL`, `NOT_APPLICABLE_WITH_RATIONALE`
 - Commit rule: `satisfied-by-prior-commit` is filled only by a later commit; a row never records its containing commit.
 
@@ -16,8 +17,8 @@
 | F0.3 | Crashpad privacy spike | F0.1;F0.2 | Raw stream inventory, structural-summary prototype, seeded-secret results | IN_PROGRESS |  | API-23 x86_64 and arm64 artifacts build. The required API 36 targeted run now passes with exactly the five allowed streams, seeded raw evidence present, no seeded summary value, and no internal-identity match. Full qualification remains pending. Evidence: `evidence/phase0/API36-x86_64-4096-review-fix-qualification.json`. |
 | F0.4 | Android handler spike | F0.2 | Multi-client handler on the required API 36 x86_64 4 KiB emulator, with restart/death evidence | IN_PROGRESS |  | ADR-0009 makes the existing emulator the sole required lane. The targeted API 36 deadline regression passes; the complete lifecycle/performance run remains pending. Historical API 30/API 37 failures are retained but are no longer release gates. |
 | F0.5 | Emergency fallback spike | F0.2 | Fixed signal record survives pre-Durable and Crashpad-unavailable faults on the required emulator | IN_PROGRESS |  | The API 36 targeted run passes emergency restart reset, handler-unavailable fallback, exact prior-action chaining, and observable signal death. The complete required run remains pending. |
-| F0.6 | Live ANR spike | F0.3;F0.4 | Measured watchdog, candidate capture, nonfatal request, lifecycle, timeout/cancellation on the required emulator | IN_PROGRESS |  | The API 36 targeted hung-handler deadline regression passes. Full healthy-overhead, target-pause, and false-positive qualification remains pending. |
-| F0.7 | Baseline artifact and PSS measurement | F0.3;F0.4;F0.5;F0.6 | Artifact and resource evidence on the required emulator | IN_PROGRESS |  | API-23 x86_64 and arm64 Crashpad artifacts build with 16 KiB ELF alignment retained, and the API 36 targeted fixture passes. Full resource, reproducibility, and no-network measurement remains pending. |
+| F0.6 | Live ANR spike | F0.3;F0.4 | Functional watchdog, candidate capture, nonfatal request, lifecycle, bounded-work, timeout/cancellation, and resource smoke on the required emulator | IN_PROGRESS |  | The API 36 targeted hung-handler deadline regression passes. The consolidated functional, false-confirmation, lifecycle, and resource smoke run remains pending. Historical percentile/target values remain evidence but are advisory under ADR-0010. |
+| F0.7 | Baseline artifact and resource smoke measurement | F0.3;F0.4;F0.5;F0.6 | Artifact hashes plus one-emulator app/handler resource baseline | IN_PROGRESS |  | API-23 x86_64 and arm64 Crashpad artifacts build with 16 KiB ELF alignment retained, and the API 36 targeted fixture passes. One pinned-toolchain rebuild pair, resource baseline, and no-network smoke remain pending. Cross-environment byte-identical APKs and physical-device statistics are advisory under ADR-0010. |
 | C1.1 | Formal privacy/event schema | F0.1;F0.3 | Stable bounded privacy-classified schema | PASS |  | `schema/events.json` drives privacy and bounded fields. Evidence: `evidence/phase1/schema-compiler.json`. |
 | C1.2 | Schema model and compiler | C1.1 | Kotlin/C/C++/Rust/protobuf/docs generation and golden tests | PASS |  | One strict model generates Kotlin recording types/functions, C structs/declarations, Rust ABI types, correct protobuf scalar types, decoder metadata, labels, and docs; drift golden test passes. Evidence: `evidence/phase1/schema-compiler.json`. |
 | C1.3 | Kotlin public API | C1.2 | Generated-only recording API | PASS |  | `android/tracebox-api` accepts only schema-generated bounded values; enablement is checked before construction. Evidence: `evidence/phase1/kotlin-api-and-identity.json`. |
@@ -32,7 +33,7 @@
 | R2.6 | Lazy metadata summaries/index | R2.4;R2.5 | Rebuildable index and index-free planning | PASS | 1ae57abc378f352afeb6d98488aa1d702bf8543d | Direct segment scan is authoritative; bounded index rebuild/delete fallback is tested. |
 | R2.7 | Direct Boot C0 module | C1.1;R2.2;R2.4 | C0-only DE store and two-phase deny mirror | IN_PROGRESS |  | Typed C0-only store and crash-safe pending/active mirror are tested; schema compiler generation and production CE/global coordinator wiring remain required. |
 | R2.8 | Crash-recoverable deletion engine | R2.2;R2.3;R2.4;R2.5;R2.6;R2.7 | Journaled deletion and bounded compaction | IN_PROGRESS |  | Phase 2 ordinary-segment/index deletion journal and fault resume are tested; handler stores, summary tombstones, and global quiesce await Phase 3. OS-owned ApplicationExitInfo is unaffected. |
-| X3.1 | Handler service and IPC | F0.4;C1.4;R2.1 | One handler and bounded local IPC | IN_PROGRESS |  | Production non-exported handler service and explicit-trigger/death readiness state are host-tested; transport protocol certification remains. |
+| X3.1 | Handler service and IPC | F0.4;C1.4;R2.1 | One handler and bounded local IPC | IN_PROGRESS |  | Production non-exported handler service and explicit-trigger/death readiness state are host-tested; transport protocol integration and qualification remain. |
 | X3.2 | Production global policy coordinator | R2.2;R2.3;R2.8;X3.1 | Control page, census, leases, global barriers | IN_PROGRESS |  | Durable census, lease probing, reboot fencing, and honest barrier outcomes are host-tested; CE/DE transaction and real multi-process Android validation remain. |
 | X3.3 | Capture-only Crashpad integration | F0.3;C1.1;C1.6;R2.5;R2.8;X3.1;X3.2 | Private capture-only Crashpad lifecycle | IN_PROGRESS |  | Host-tested capture-start lifecycle now forces `raw_artifact_id`, origin process-instance/role, and epoch journal before capture bytes; CE raw artifacts participate in the R2.8 deletion transaction and simulated crash-orphan bytes are deleted without parsing. The Phase 0 C++ Crashpad capture-start hook has not yet invoked this seam, so live Android Crashpad lifecycle qualification remains. |
 | X3.4 | Structural summary derivation and spool | X3.3;C1.2;C1.6;R2.5;R2.8 | Canonical summary staging and replay | IN_PROGRESS |  | Deterministic canonical summary staging, idempotent replay, and the target-segment import acknowledgement sequence (append -> flush/seal -> acknowledgement -> retire) are host-tested, including crash recovery at the after-append-before-acknowledgement boundary. Wiring to Phase 1's Rust `SummaryId::derive` FFI boundary remains pending; the current derivation is Kotlin-side only. |
@@ -53,8 +54,8 @@
 | T5.2 | Gradle build/symbol plugin | C1.6 | Build identity and conformance plugin | IN_PROGRESS |  | Phase 1 public-AGP identity capture already collects R8 SHA-256/ID and genuine GNU ELF build notes with SHA-256 fallback. Merged-manifest/dependency-lock release tasks remain to be integrated. |
 | T5.3 | Offline retrace/symbolication | T5.1;T5.2 | Exact-match offline symbols | IN_PROGRESS |  | CLI exact module-identity/offset resolver returns typed resolved, unresolved, or hard identity mismatch with raw frame retained; R8/ELF catalog adapters remain to be integrated. Evidence: `evidence/phase5/cli-parser-and-symbolication.json`. |
 | T5.4 | No-network conformance | ALL_FOUNDATION | Static, manifest, native, CLI and runtime proof | IN_PROGRESS |  | Repeatable host-static scan reads the generated release merged manifest and locked Android runtime closures. DEX/native-import scanning and blocked-egress runtime proof on the required existing emulator remain pending. Evidence: `evidence/phase5/review-fix-round4-host-validation.json`. |
-| T5.5 | Performance/battery qualification | R2.*;X3.*;P4.* | Measured resource qualification on the required emulator | IN_PROGRESS |  | The existing API 36 emulator is now the sole required measurement lane under ADR-0009. PSS/RSS, CPU wakeups, battery, startup, and capture measurements are in progress or pending there; physical-device measurements are advisory. |
-| T5.6 | Foundation release certification | ALL_PREVIOUS | Complete declared matrix | IN_PROGRESS |  | The required matrix is now the existing API 36 x86_64 4 KiB emulator. Host readiness previously passed; API-23 retarget verification and the fresh emulator qualification must complete before certification. Physical/OEM lanes no longer block under ADR-0009. |
+| T5.5 | Personal-project resource qualification | R2.*;X3.*;P4.* | Architectural invariants plus one-emulator resource baseline | IN_PROGRESS |  | Record one useful API 36 emulator baseline for memory, idle CPU/wakeups, startup/readiness, ANR target pause, capture latency, package memory, and artifact size. Numerical percentile budgets, battery studies, physical devices, and OEM comparisons are advisory under ADR-0010. |
+| T5.6 | Personal release readiness | ALL_PREVIOUS | Host gates, one-emulator suite, current documentation, and final review | IN_PROGRESS |  | `PERSONAL_RELEASE_READY` requires complete implementation, host/static gates, the existing API 36 x86_64 4 KiB emulator suite, and final approval. Tracker at `G:\Github\Tracker-Android` is a downstream evaluation host after `PERSONAL_RELEASE_READY`; physical/OEM lanes do not block. |
 | E6.1 | C1/C2 segment AEAD | STABLE_STORAGE;SEPARATE_AUTHORIZATION | Gated post-foundation encryption | NOT_APPLICABLE_WITH_RATIONALE |  | Outside foundation and requires separate authorization. |
 | E6.2 | Age X25519 | STABLE_PACKAGE;SEPARATE_AUTHORIZATION | Gated recipient encryption | NOT_APPLICABLE_WITH_RATIONALE |  | Outside foundation and requires separate authorization. |
 | E6.3 | Metrics and traces | STABLE_SCHEMA;STABLE_PERFORMANCE | Out of foundation scope | NOT_APPLICABLE_WITH_RATIONALE |  | Outside foundation and requires separate authorization. |
@@ -62,19 +63,22 @@
 ## Ready-work rule
 
 Ordinarily, a package is ready only when every dependency is `PASS`. ADR-0008
-permits Phase 1–5 implementation despite historical Phase 0 failures. ADR-0009
-supersedes the old device matrix: only the existing API 36 x86_64 4 KiB
-emulator is required, while other API/ABI/page-size/physical/OEM lanes are
-advisory. Historical evidence is retained but does not determine the result of
-the new required lane.
+permits Phase 1-5 implementation despite historical Phase 0 failures. ADR-0009
+requires only the existing API 36 x86_64 4 KiB emulator. ADR-0010 makes
+physical/OEM breadth, percentile budgets, full-APK byte reproducibility,
+eleven separate fixture applications, and sentence-level traceability
+advisory. Historical evidence is retained but only current mandatory
+implementation, host/static gates, and the one emulator lane determine
+personal-release readiness.
 
 ## Explicit gate disposition
 
 | Gate | Measured state | Decision | Effect |
 |---|---|---|---|
 | `ENGINEERING_FEASIBILITY_PASS` | NOT REACHED | Explicitly superseded for implementation by ADR-0008 | Phases 1–5 may proceed at risk; Phase 0 results remain unchanged. |
-| `CERTIFICATION_FEASIBILITY_PASS` | NOT REACHED | Not superseded | Certification remains blocked. |
-| `FOUNDATION_CERTIFIED` | NOT REACHED | Not superseded | No certification claim is permitted. |
+| `PERSONAL_RELEASE_FEASIBILITY_PASS` | NOT REACHED | Defined by ADR-0010 | Requires the consolidated functional/privacy/no-network/resource smoke on the single emulator. |
+| `PERSONAL_RELEASE_READY` | NOT REACHED | Defined by ADR-0010 | Requires complete implementation, host/static PASS, required emulator PASS, current docs, and final review approval. |
+| `FOUNDATION_CERTIFIED` | HISTORICAL_TERM | Superseded for personal release by ADR-0010 | No independent, physical-device, OEM, or broad-matrix certification claim is permitted. |
 
 ## Resume protocol
 

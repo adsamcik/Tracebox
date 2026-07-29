@@ -16,11 +16,16 @@ This ADR freezes section-27 decisions 3, 4, and 5.
 - Reconnection occurs only on explicit initialization, foreground/component activation, capture, or package preparation.
 - At most three handler starts are attempted in a rolling ten-minute window. Exceeding the limit enters crash-loop `Degraded` until a later explicit lifecycle trigger outside the window.
 - A hung request is cancelled by closing its request channel. The client enters `Degraded` and retains the emergency path.
-- The default coexistence mode is `Exclusive`. `BestEffortChain` and `DisableOnConflict` remain explicit. `DisableOnConflict` is non-certifying.
+- The default coexistence mode is `Exclusive`. `BestEffortChain` and
+  `DisableOnConflict` remain explicit. `DisableOnConflict` is degraded and
+  never satisfies the required Crashpad gate.
 - Exactly one primary Crashpad result or one emergency fallback result is accepted per dispatch token. Chaining never reports a duplicate Tracebox capture.
 - There is no uploader, network dependency, maintenance timer, or transport abstraction.
 
 ## Rationale
 
-The service gives Android a declared private process while retaining Crashpad's native blocked-handler model. Event-driven reconnect and socket death notification satisfy zero-polling requirements. The supported ABIs match the mandatory engineering emulator and representative physical-device lanes.
-
+The service gives Android a declared private process while retaining Crashpad's
+native blocked-handler model. Event-driven reconnect and socket death
+notification satisfy zero-polling requirements. `x86_64` is the ADR-0009
+required emulator ABI; `arm64-v8a` remains a production build target but
+physical-device execution is advisory under ADR-0010.

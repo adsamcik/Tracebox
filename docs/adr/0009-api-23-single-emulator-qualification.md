@@ -12,7 +12,8 @@ qualification. The user explicitly changed both requirements:
 > Let's retarget to API 23
 
 The clarification selected `minSdk 23` with `compileSdk` and `targetSdk` 37, and
-selected the one existing emulator as the sole required certification matrix.
+selected the one existing emulator as the sole required runtime qualification
+lane.
 That emulator is currently API 36, `x86_64`, with a 4 KiB page size.
 
 Tracebox uses `java.nio.file` and other modern Java library APIs. API 23 support
@@ -27,7 +28,7 @@ therefore requires core-library desugaring with the NIO desugaring library.
 - The sole required runtime qualification lane is the existing API 36
   `x86_64`, 4 KiB emulator.
 - Additional API levels, ABIs, page sizes, physical devices, and OEM families
-  are advisory and do not block foundation certification.
+  are advisory and do not block `PERSONAL_RELEASE_READY`.
 - API-specific integrations remain capability-gated. In particular,
   `ApplicationExitInfo` is unavailable on API 23-29, while the local JVM,
   native, emergency, and live-watchdog paths remain foundation capabilities.
@@ -50,5 +51,10 @@ approval, deterministic package, storage bounds, or no-network requirements.
   and static verification; runtime qualification is performed only on the
   required existing emulator.
 - Physical-device and OEM behavior must not be claimed as independently tested.
-- Foundation certification still requires all mandatory implementation and
-  privacy gates to pass on the required emulator.
+- `PERSONAL_RELEASE_READY` still requires all mandatory implementation,
+  privacy, and functional gates to pass on the required emulator.
+
+ADR-0010 supersedes the enterprise-style completion terminology, fixture
+topology, percentile performance qualification, and exhaustive traceability
+requirements. The single emulator remains the sole required Android lane for
+`PERSONAL_RELEASE_READY`.

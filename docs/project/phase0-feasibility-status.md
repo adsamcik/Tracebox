@@ -7,6 +7,13 @@
 The ADR-0009 required emulator targeted regression passes. Full qualification
 remains `INCOMPLETE`.
 
+ADR-0010 confirms that this is a personal-project release. The historical
+percentile, battery, physical-device, OEM, and byte-identical full-APK results
+below remain useful evidence but no longer block `PERSONAL_RELEASE_READY`.
+Mandatory blockers are incomplete implementation, failed architectural
+invariants or privacy/offline gates, and failure of the consolidated API 36
+emulator suite.
+
 ## API 23 and matrix supersession
 
 ADR-0009 records the user's 2026-07-22 decision to use `minSdk 23` with
@@ -37,7 +44,10 @@ ADR-0008 records the user's 2026-07-18 instruction:
 
 > Explicitly supersede the ENGINEERING_FEASIBILITY_PASS prerequisite and implement Phases 1–5 despite these failures
 
-This permits Phases 1–5 implementation to proceed at risk. It does not change this terminal state, convert any result to `PASS`, relax any frozen threshold or required lane, or authorize certification.
+This permits Phases 1–5 implementation to proceed at risk. It does not change
+historical results or convert any result to `PASS`. ADR-0010 later supersedes
+the enterprise percentile and reproducibility completion gates while retaining
+the single required emulator lane and all correctness/privacy invariants.
 
 | Cell | Status | Evidence |
 |---|---|---|
@@ -97,7 +107,11 @@ No API 37 result is claimed by this targeted run.
 | Targeted review-fix host/native/Rust regressions | PASS | `evidence/phase0/review-fix-host-validation.json` |
 | Round-2 parser/archive/native structural regressions | PASS | `evidence/phase0/review-fix-round2-host-validation.json` |
 
-The presubmit and targeted review-fix results record that their configured checks completed successfully. They do not override the separate final no-network, reproducibility, stream-profile, required-lane, or complete-protocol failures.
+The presubmit and targeted review-fix results record that their configured
+checks completed successfully. They do not override the separate no-network,
+stream-profile, required-lane, or complete-protocol failures. The historical
+full-APK byte-reproducibility failure is advisory under ADR-0010; deterministic
+schema and `.tbdiag` outputs remain mandatory.
 
 ## Implemented reversible foundation
 
@@ -117,12 +131,18 @@ The presubmit and targeted review-fix results record that their configured check
 
 Provide on the existing required emulator:
 
-1. a new safe ANR snapshot implementation that keeps p95 and maximum target pause at or below 100 ms;
-2. startup/handler changes that meet the frozen readiness, CPU, heartbeat, timeout, and fatal-latency thresholds without weakening emergency capture or the single-handler topology; and
-3. a no-network build graph that passes the final static and runtime scans;
-4. byte-identical full APK rebuilds for every artifact in the reproducibility claim; and
-5. capture output that suppresses the three forbidden streams without losing the mandatory useful streams.
+1. a safe, bounded ANR snapshot implementation with no false confirmation,
+   correct lifecycle suppression, and recorded target-pause/latency baselines;
+2. startup/handler behavior with no polling or idle timer loop, bounded
+   timeouts/retries, and recorded readiness/CPU/memory/capture baselines;
+3. a no-network build graph that passes the final static scans and required
+   emulator smoke paths with a working positive control;
+4. two successful pinned-toolchain release builds with artifact hashes, while
+   preserving deterministic generated schema and `.tbdiag` output; and
+5. capture output that suppresses the forbidden streams without losing the
+   mandatory useful streams.
 
 Then rerun the complete qualification command and affected host gates. ADR-0009
-changes only the Android baseline and matrix; mandatory Crashpad, emergency,
-ANR, privacy, and offline behavior remain unchanged.
+changes the Android baseline and matrix; ADR-0010 changes the personal-project
+completion and measurement bar. Mandatory Crashpad, emergency, ANR functional
+behavior, privacy, offline operation, and hard bounds remain unchanged.

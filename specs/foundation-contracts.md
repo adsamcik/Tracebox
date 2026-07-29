@@ -10,11 +10,21 @@ The terms in architecture section 5 are normative. Evidence grades are:
 | E1 | Host unit/integration execution |
 | E2 | Android emulator execution with captured artifacts |
 | E3 | Additional physical-device execution (advisory) |
-| E4 | Independent external certification evidence |
+| E4 | Independent external certification evidence (optional) |
 
 An E0/E1 result cannot satisfy a required E2 result. E3 is advisory under
-ADR-0009. A watchdog result is always a stall observation or candidate; only
-`ApplicationExitInfo.REASON_ANR` confirms an ANR on API 30+.
+ADR-0009 and E4 is not required under ADR-0010. The sole required E2 lane is the
+existing API 36 `x86_64`, 4 KiB emulator. A watchdog result is always a stall
+observation or candidate; only `ApplicationExitInfo.REASON_ANR` confirms an ANR
+on API 30+.
+
+## Personal-project completion
+
+ADR-0010 is normative for fixture topology, performance sampling, review,
+traceability, release terminology, and Tracker integration. It does not weaken
+the privacy, identity, storage, capture, package, deletion, symbol-matching, or
+offline contracts below. `Tracker-Android` is the downstream reference host
+after Tracebox reaches `PERSONAL_RELEASE_READY`.
 
 ## Privacy
 

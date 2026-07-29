@@ -1,7 +1,9 @@
-# Immutable Phase 0 Measurement Protocol
+# Personal-Project Phase 0 Measurement Protocol
 
-Changing any threshold or workload below requires explicit user acceptance and
-a complete fresh run. ADR-0009 replaces the original multi-device matrix.
+ADR-0009 replaces the original multi-device matrix. ADR-0010, accepted by the
+user, replaces the enterprise statistical release gate below with one-emulator
+functional and resource smoke evidence. Historical runs retain their original
+criteria and results.
 
 ## Engineering matrix
 
@@ -10,38 +12,29 @@ a complete fresh run. ADR-0009 replaces the original multi-device matrix.
 | Existing API 36 x86_64 emulator, 4 KiB | PASS |
 
 Additional API, ABI, page-size, physical-device, and OEM lanes are advisory and
-do not block certification. Debug is required for every spike; minified and
-debuggable release buildability are checked before the Phase 0 gate.
+do not block `PERSONAL_RELEASE_READY`. Debug and one minified release-like
+variant are required.
 
-## Repetition and statistics
+## Personal-project repetition
 
 - Use monotonic time for durations.
-- Warm up for 2 minutes unless measuring cold start.
-- Latency/size samples: 30 independent runs; report p50, p95, p99, maximum.
-- Healthy CPU, wakeups, and memory: 10-minute observation after a 30-second settling period, repeated three times.
-- False-positive run: 60 healthy minutes per engineering lane.
+- Warm up for 30 seconds unless measuring cold start.
+- Run latency-sensitive scenarios five times and record median and maximum.
+- Observe healthy CPU, wakeups, and memory for two minutes after settling.
+- Run one ten-minute healthy watchdog false-candidate observation.
 - A flaky-only pass is FAIL. Every required assertion must pass in one complete run.
 
-## Frozen thresholds
+## Targets and release invariants
 
-| Metric | Threshold |
-|---|---:|
-| Install to VolatileCapture p95 | <= 2 ms |
-| Cold Durable p95 | <= 500 ms |
-| Handler idle PSS maximum | <= 12 MiB |
-| Handler healthy CPU | <= 0.05% |
-| Handler timer/poll wakeups | 0 |
-| Fatal crash to durable artifact p95 | <= 2 s |
-| Native compressed size per ABI | <= 4 MiB |
-| Package working memory beyond output | <= 8 MiB |
-| Heartbeat post work p99 | < 50 us |
-| Watchdog healthy CPU | < 0.2% |
-| Interactive watchdog wakeups | <= 30/min |
-| Ineligible watchdog wakeups | 0 |
-| Healthy false candidates | 0 in 60 min/lane |
-| Deterministic six-second stall captures | 10/10 |
-| Handler-hang timeout/cancellation | 10/10 |
-| Target-process pause | p95 and max <= 100 ms |
+| Metric | Personal-project treatment |
+|---|---|
+| Install/readiness, handler PSS/CPU, fatal latency, native size, heartbeat work, interactive wakeups, and target pause | Record and compare with the original targets; investigate large regressions, but numerical values are advisory |
+| Handler timer/poll wakeups | Mandatory zero |
+| Ineligible watchdog wakeups after settling | Mandatory zero |
+| Healthy false confirmations | Mandatory zero; candidates are recorded and investigated |
+| Deterministic six-second stall | Mandatory capture in the complete smoke run |
+| Handler-hang timeout/cancellation | Mandatory bounded completion without deadlock |
+| Package working memory and all configured storage/archive/parser limits | Mandatory hard bounds |
 
 ## Workloads
 
@@ -56,8 +49,7 @@ Privacy: place unique seeded secrets in stack, heap, environment-like applicatio
 ## Fuzz and corruption budgets
 
 - Presubmit: 60 seconds per native parser/writer target with retained crashing inputs.
-- Nightly: 30 minutes per target.
-- Certification: 4 hours per target.
+- Personal release: 5 minutes per parser/writer target.
 - Exhaustively truncate every boundary for objects up to 64 KiB.
 - For larger bounded objects, test every boundary in the first/last 4 KiB plus 4096 deterministic interior offsets.
 - Flip every fixed header field and run 10,000 deterministic generated length/CRC/count/path corruptions per format.

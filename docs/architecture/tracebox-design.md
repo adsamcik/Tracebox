@@ -1118,13 +1118,16 @@ The Gradle plugin uses public AGP Variant and Artifact APIs to:
 - inspect merged manifests;
 - fail release variants on forbidden dependencies or permissions.
 
-An AAR cannot control the host's final `targetSdk`; the plugin reports and certifies the observed host configuration.
+An AAR cannot control the host's final `targetSdk`; the plugin reports and
+verifies the observed host configuration.
 
 ## 20. No-network guarantee
 
 The exact claim is:
 
-> Tracebox-owned runtime and tooling artifacts introduce no network permission, networking dependency, uploader, exporter, remote configuration, or observed runtime network attempt in certified paths.
+> Tracebox-owned runtime and tooling artifacts introduce no network
+> permission, networking dependency, uploader, exporter, remote configuration,
+> or observed runtime network attempt in personal-release paths.
 
 It is not a claim that the host app, share target, or SAF provider is offline.
 
@@ -1189,6 +1192,12 @@ Release gates:
 
 Budgets may change only from measured evidence and an ADR update. Invariants may not be relaxed through tuning.
 
+ADR-0010 supplies that update for the personal-project release: the table is a
+set of tuning and regression targets rather than a release-blocking percentile
+contract. Structural invariants and configured hard bounds remain mandatory.
+The required emulator run records one representative baseline; it does not need
+to establish p50/p95/p99 distributions across a hardware matrix.
+
 ## 23. Testing strategy
 
 ### 23.1 Platform matrix
@@ -1196,7 +1205,13 @@ Budgets may change only from measured evidence and an ADR update. Invariants may
 - Required: the existing API 36 `x86_64`, 4 KiB emulator.
 - Advisory: other API 23-37 levels, API 37.1 previews, `arm64-v8a`,
   physical devices, 16 KiB pages, Pixel devices, and other OEM families.
-- Debug, minified release, and debuggable-release fixtures.
+- Required build coverage: debug plus one minified release-like fixture.
+
+ADR-0010 permits the logical crash, ANR, multiprocess, Direct Boot, deletion,
+network, and R8 scenarios to share one configurable lab application and build
+variants. Scenario coverage is normative; separate application modules are not.
+`Tracker-Android` is the downstream evaluation host after Tracebox reaches
+`PERSONAL_RELEASE_READY`.
 
 ### 23.2 Crashpad
 
@@ -1280,7 +1295,7 @@ Crashpad failure leaves the emergency path available.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Android handler/`ptrace` behavior is not reliable across the matrix | Foundation blocked | Run feasibility spike before broad implementation; certify supported matrix |
+| Android handler/`ptrace` behavior is not reliable on the required emulator | Personal release blocked | Run the consolidated feasibility and regression suite on the one required emulator |
 | Crashpad raw data contains sensitive memory | Critical privacy risk | C2 quarantine, short quota/TTL, no standard export, explicit disclosure |
 | Handler increases memory footprint | Adoption/performance risk | Native-only blocked process, one handler, no pollers, measured PSS gate |
 | Watchdog causes battery drain or false positives | Reliability risk | Adaptive lifecycle policy, rate limit, candidate terminology, measured thresholds |
@@ -1305,10 +1320,10 @@ Must demonstrate:
 - compatibility with the required emulator's 4 KiB page size;
 - no networking/uploader closure.
 
-ADR-0009 defines the non-negotiable release matrix as the one existing API 36
+ADR-0009 and ADR-0010 define the release matrix as the one existing API 36
 `x86_64`, 4 KiB emulator. Additional API, ABI, page-size, physical-device, and
-OEM lanes are advisory. Failure on the required emulator blocks the foundation
-release.
+OEM lanes are advisory. Failure on the required emulator blocks
+`PERSONAL_RELEASE_READY`.
 
 ### Gate B: Live ANR feasibility
 
@@ -1321,9 +1336,14 @@ Must demonstrate:
 - one on-demand handler request;
 - successful OS reconciliation.
 
-### Gate C: Foundation certification
+### Gate C: Personal release readiness
 
-All privacy, persistence, crash, ANR, package, symbol, and no-network invariants pass across the declared platform matrix.
+All mandatory implementation paths are connected; host unit, property,
+fault-injection, native, Rust, build, package, and static no-network gates pass;
+the privacy, persistence, capture, package, symbol, and no-network smoke
+scenarios pass on the single required emulator; the final SHA-bound review is
+approved; and unsupported environments are documented without claiming broad
+certification.
 
 ## 27. Open decisions
 

@@ -40,3 +40,16 @@ Measurements use monotonic clocks, a two-minute warm-up, at least 30 latency sam
 
 The values preserve the design's provisional overhead limits, candidate semantics, finite capture bounds, lifecycle suspension, and conservative rate limiting.
 
+## ADR-0010 disposition
+
+The heartbeat, eligibility, stall, grace, debugger, sample-count/size,
+rate-limit, request-deadline, and artifact-size decisions remain production
+configuration and hard bounds.
+
+ADR-0010 supersedes the requirement that all percentile, CPU, wakeup,
+false-positive-duration, repetition-count, and observed target-pause thresholds
+pass before a personal release. Those values remain tuning and regression
+targets. The required emulator suite must still prove lifecycle suppression, no
+idle polling, no false confirmation, bounded work, bounded cancellation, rate
+limiting, and successful deterministic candidate capture while recording the
+observed values.
