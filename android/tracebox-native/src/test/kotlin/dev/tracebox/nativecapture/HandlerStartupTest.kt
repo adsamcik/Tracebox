@@ -10,7 +10,9 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class HandlerStartupTest {
@@ -260,6 +262,69 @@ class HandlerStartupTest {
         )
         assertContentEquals(ByteArray(HandlerStartPermit.TOKEN_BYTES), token)
     }
+
+    @Test
+    fun android_user_path_detection_starts_at_the_package_directory() {
+        assertEquals(
+            3,
+            androidPrivateStoragePackageIndex(
+                listOf("data", "user", "0", "dev.tracebox.app", "no_backup", "tracebox"),
+            ),
+        )
+        assertNull(
+            androidPrivateStoragePackageIndex(
+                listOf("tmp", "data", "user", "0", "dev.tracebox.app", "tracebox"),
+            ),
+        )
+    }
+
+    @Test
+    fun handler_guard_ignores_only_the_prefix_above_its_boundary_and_rejects_descendant_symlinks() {
+        val handlerDirectory = Path.of(
+            "build",
+            "handler-startup-tests",
+            UUID.randomUUID().toString(),
+            "data",
+            "user",
+            "0",
+            "dev.tracebox.app",
+        ).toAbsolutePath()
+            .resolve("no_backup")
+            .resolve(STORAGE_ROOT_DIRECTORY_NAME)
+            .resolve(HANDLER_DIRECTORY_NAME)
+        val packageBoundary = handlerDirectory.parent.parent.parent
+        val platformAlias = packageBoundary.parent
+        assertFalse(simulatedSymbolicLinkCheck(handlerDirectory, packageBoundary, setOf(platformAlias)))
+        assertTrue(simulatedSymbolicLinkCheck(handlerDirectory, packageBoundary, setOf(packageBoundary)))
+        assertTrue(simulatedSymbolicLinkCheck(handlerDirectory, packageBoundary, setOf(handlerDirectory)))
+
+        val base = Files.createTempDirectory("tracebox-handler-generic-symlink")
+        val outside = base.resolve("outside").also(Files::createDirectories)
+        val genericStorageRoot = base.resolve("generic").resolve(STORAGE_ROOT_DIRECTORY_NAME)
+        Files.createDirectories(genericStorageRoot.parent)
+        if (runCatching { Files.createSymbolicLink(genericStorageRoot, outside) }.isFailure) return
+        val identity = ByteArray(32) { 3 }
+        val token = ByteArray(HandlerStartPermit.TOKEN_BYTES) { 4 }
+        assertFailsWith<IllegalArgumentException> {
+            HandlerStartPermit.write(
+                genericStorageRoot.resolve(HANDLER_DIRECTORY_NAME),
+                identity,
+                1,
+                token,
+            )
+        }
+    }
+
+    private fun simulatedSymbolicLinkCheck(
+        path: Path,
+        firstGuardedComponent: Path,
+        symbolicLinks: Set<Path>,
+    ): Boolean = hasSymbolicLinkComponentAtOrBelow(
+        path = path,
+        firstGuardedComponent = firstGuardedComponent,
+        exists = { true },
+        isSymbolicLink = { it in symbolicLinks },
+    )
 
     private fun root(): Path =
         Path.of(

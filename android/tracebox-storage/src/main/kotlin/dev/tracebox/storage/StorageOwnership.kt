@@ -1162,25 +1162,82 @@ private fun normalizeRelative(value: String): String {
 }
 
 private fun requireNoSymbolicLinkComponent(path: Path) {
-    var cursor = path.root
-    for (part in path) {
-        cursor = cursor.resolve(part)
-        if (Files.exists(cursor, LinkOption.NOFOLLOW_LINKS)) {
-            require(!Files.isSymbolicLink(cursor)) { "symbolic-link storage root is forbidden" }
-        }
-    }
+    require(!hasSymbolicLinkComponent(path)) { "symbolic-link storage root is forbidden" }
 }
 
 internal fun hasSymbolicLinkComponent(path: Path): Boolean {
-    var cursor = path.root
-    for (part in path) {
+    val normalized = path.toAbsolutePath().normalize()
+    if (normalized.nameCount == 0) return false
+    val firstGuardedComponent = androidPrivateStorageBoundary(normalized)
+        ?: normalized.root.resolve(normalized.getName(0))
+    return hasSymbolicLinkComponentAtOrBelow(
+        path = normalized,
+        firstGuardedComponent = firstGuardedComponent,
+        exists = { Files.exists(it, LinkOption.NOFOLLOW_LINKS) },
+        isSymbolicLink = Files::isSymbolicLink,
+    )
+}
+
+/**
+ * Android's per-app mount namespace intentionally exposes `/data/user/0` as a symlink to
+ * `/data/data`. That prefix is created and controlled by zygote, not by the application. Start
+ * guarding at the package directory for recognized private-storage layouts so the platform alias
+ * is accepted without permitting a same-UID process to redirect the package directory or anything
+ * below it.
+ */
+private fun androidPrivateStorageBoundary(path: Path): Path? {
+    if (path.fileSystem.separator != "/") return null
+    val packageIndex = androidPrivateStoragePackageIndex(path.map(Path::toString)) ?: return null
+    return path.root.resolve(path.subpath(0, packageIndex + 1))
+}
+
+internal fun androidPrivateStoragePackageIndex(components: List<String>): Int? {
+    if (components.size >= 4 &&
+        components[0] == "data" &&
+        components[1] in ANDROID_INTERNAL_USER_DIRECTORIES &&
+        components[2].isAndroidUserId()
+    ) {
+        return 3
+    }
+    if (components.size >= 3 &&
+        components[0] == "data" &&
+        components[1] == "data"
+    ) {
+        return 2
+    }
+    if (components.size >= 6 &&
+        components[0] == "mnt" &&
+        components[1] == "expand" &&
+        components[2].isNotBlank() &&
+        components[3] in ANDROID_INTERNAL_USER_DIRECTORIES &&
+        components[4].isAndroidUserId()
+    ) {
+        return 5
+    }
+    return null
+}
+
+internal fun hasSymbolicLinkComponentAtOrBelow(
+    path: Path,
+    firstGuardedComponent: Path,
+    exists: (Path) -> Boolean,
+    isSymbolicLink: (Path) -> Boolean,
+): Boolean {
+    val normalized = path.toAbsolutePath().normalize()
+    val boundary = firstGuardedComponent.toAbsolutePath().normalize()
+    require(normalized.startsWith(boundary)) { "symbolic-link boundary must contain the path" }
+    var cursor = boundary.parent ?: return exists(boundary) && isSymbolicLink(boundary)
+    for (part in cursor.relativize(normalized)) {
         cursor = cursor.resolve(part)
-        if (Files.exists(cursor, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(cursor)) {
-            return true
-        }
+        if (exists(cursor) && isSymbolicLink(cursor)) return true
     }
     return false
 }
+
+private fun String.isAndroidUserId(): Boolean =
+    isNotEmpty() && length <= 10 && all(Char::isDigit)
+
+private val ANDROID_INTERNAL_USER_DIRECTORIES = setOf("user", "user_de")
 
 private fun writeAtomicOwnedFile(path: Path, bytes: ByteArray) {
     Files.createDirectories(path.parent)

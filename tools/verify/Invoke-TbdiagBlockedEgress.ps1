@@ -1,8 +1,10 @@
 param(
+    [string] $TbdiagExecutable,
     [switch] $AllowFirewallMutation
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'PersonalReleaseRunnerSupport.ps1')
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $temporary = Join-Path (
     [IO.Path]::GetTempPath()
@@ -52,16 +54,6 @@ function Invoke-IsolatedTbdiag {
 
 $firewallRuleName = $null
 try {
-    Push-Location $root
-    try {
-        & cargo build -q -p tbdiag-cli --locked --offline
-        if ($LASTEXITCODE -ne 0) {
-            throw "tbdiag build failed with exit code $LASTEXITCODE"
-        }
-    } finally {
-        Pop-Location
-    }
-
     $script:platform = if ($env:OS -eq 'Windows_NT') {
         'windows'
     } elseif ($PSVersionTable.Platform -eq 'Unix' -and
@@ -72,10 +64,11 @@ try {
     } else {
         throw 'No supported process network-isolation mechanism is available'
     }
-    $extension = if ($script:platform -eq 'windows') { '.exe' } else { '' }
-    $script:tbdiag = (
-        Resolve-Path (Join-Path $root "target\debug\tbdiag$extension")
-    ).Path
+    $script:tbdiag = if ($TbdiagExecutable) {
+        (Resolve-Path -LiteralPath $TbdiagExecutable).Path
+    } else {
+        Build-TbdiagExecutable -Root $root
+    }
 
     Add-Type -AssemblyName System.IO.Compression
     $recordBytes = [Collections.Generic.List[byte]]::new()

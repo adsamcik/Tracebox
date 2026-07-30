@@ -9,15 +9,35 @@ param(
     [string] $Output,
     [switch] $SkipBuild,
     [switch] $SkipHostChecks,
-    [switch] $RunHostBlockedEgress
+    [switch] $RunHostBlockedEgress,
+    [switch] $FullDiagnosticSuite
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'PersonalReleaseRunnerSupport.ps1')
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $gradle = Join-Path $root 'gradlew.bat'
 $scenarioPath = Join-Path $root 'tooling\fixtures\personal-release-scenarios.json'
 $scenarioManifest = Get-Content $scenarioPath -Raw | ConvertFrom-Json
-$requiredIds = @($scenarioManifest.scenarios | ForEach-Object id)
+$inventoryIds = @($scenarioManifest.scenarios | ForEach-Object id)
+$personalReleaseIds = @($scenarioManifest.personal_release_required)
+if ($personalReleaseIds.Count -eq 0) {
+    throw 'Scenario manifest has no personal-release-required scenarios'
+}
+$unknownPersonalReleaseIds = @(
+    $personalReleaseIds | Where-Object { $_ -notin $inventoryIds }
+)
+if ($unknownPersonalReleaseIds) {
+    throw (
+        'Personal-release-required scenario IDs are absent from the inventory: ' +
+        ($unknownPersonalReleaseIds -join ', ')
+    )
+}
+$requiredIds = if ($FullDiagnosticSuite) {
+    $inventoryIds
+} else {
+    $personalReleaseIds
+}
 $noInternetPackage = 'dev.tracebox.phase0'
 $hostNetworkPackage = 'dev.tracebox.phase0.hostnetwork'
 $productionActivity = 'MainActivity'
@@ -37,52 +57,13 @@ if (-not $Output) {
     )
 }
 
-function Convert-HashBytesToHex {
-    param([byte[]] $Bytes)
-    return ([BitConverter]::ToString($Bytes) -replace '-', '').ToLowerInvariant()
-}
-
-function Get-TextSha256 {
-    param([string] $Text)
-    $algorithm = [Security.Cryptography.SHA256]::Create()
-    try {
-        return Convert-HashBytesToHex (
-            $algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))
-        )
-    } finally {
-        $algorithm.Dispose()
-    }
-}
-
-function Get-SourcePatchSha256 {
-    $tracked = (& git -C $root --no-pager diff --binary HEAD -- . ':(exclude)evidence/**') -join "`n"
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to fingerprint tracked source changes'
-    }
-    $untracked = foreach ($path in (
-        & git -C $root ls-files --others --exclude-standard |
-            Where-Object { $_ -notlike 'evidence/*' } |
-            Sort-Object
-    )) {
-        $absolute = Join-Path $root $path
-        "$path`n$((Get-FileHash $absolute -Algorithm SHA256).Hash.ToLowerInvariant())`n"
-    }
-    return Get-TextSha256 "tracked`n$tracked`nuntracked`n$($untracked -join '')"
-}
-
-if ($SkipBuild -or $SkipHostChecks) {
-    throw (
-        'Non-certifying shortcuts are rejected by the personal-release gate. ' +
-        'Run without -SkipBuild and -SkipHostChecks so host checks and fixture artifacts ' +
-        'are derived from one frozen source state.'
-    )
-}
 $sourceBaseCommitOutput = & git -C $root rev-parse HEAD
 if ($LASTEXITCODE -ne 0) {
-    throw 'Failed to capture the source base commit before certification'
+    throw 'Failed to capture the source base commit before validation'
 }
 $sourceBaseCommit = ($sourceBaseCommitOutput -join '').Trim()
-$sourcePatchSha256 = Get-SourcePatchSha256
+$sourceState = Get-RepositorySourceState -Root $root
+$sourcePatchSha256 = $sourceState.sha256
 $scenarioManifestSha256 =
     (Get-FileHash $scenarioPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
@@ -500,6 +481,9 @@ function Invoke-CertScenario {
         [string] $Id,
         [scriptblock] $Body
     )
+    if ($Id -notin $requiredIds) {
+        return
+    }
     try {
         $evidence = @(& $Body)
         Add-ScenarioResult $Id 'PASS' $evidence
@@ -562,6 +546,57 @@ function Wait-BootCompleted {
         Start-Sleep -Milliseconds 500
     } while ($timer.Elapsed.TotalSeconds -lt 180)
     throw 'Emulator did not finish boot within 180 seconds'
+}
+
+function Assert-AdbRoot {
+    param([string] $Context = 'personal-release preflight')
+
+    $rootOutput = @()
+    $rootExitCode = -1
+    try {
+        $rootOutput = @(& adb -s $Serial root 2>&1)
+        $rootExitCode = $LASTEXITCODE
+    } catch {
+        $rootOutput += $_.Exception.Message
+        if ($LASTEXITCODE -is [int]) {
+            $rootExitCode = $LASTEXITCODE
+        }
+    }
+
+    $rootDetail = ($rootOutput -join [Environment]::NewLine).Trim()
+    if ($rootExitCode -ne 0) {
+        throw (
+            'Tracebox personal-release validation requires a rootable adb emulator image. ' +
+            "adb root failed during $Context with exit code $rootExitCode. " +
+            'Use an AOSP or Google APIs userdebug image; Google Play images commonly ' +
+            "disable adb root. adb root output: $rootDetail"
+        )
+    }
+
+    try {
+        # adb root can restart adbd. Do not trust its exit code or success text:
+        # reconnect, wait for Android to remain boot-complete, and inspect the shell UID.
+        Wait-BootCompleted
+        $uid = ((Invoke-Adb shell id '-u') -join '').Trim()
+    } catch {
+        throw (
+            'Tracebox personal-release validation requires a rootable adb emulator image. ' +
+            "adbd did not reconnect as root during $Context. " +
+            'Use an AOSP or Google APIs userdebug image; Google Play images commonly ' +
+            "disable adb root. adb root output: $rootDetail. " +
+            "Reconnect failure: $($_.Exception.Message)"
+        )
+    }
+
+    if ($uid -ne '0') {
+        throw (
+            'Tracebox personal-release validation requires a rootable adb emulator image. ' +
+            "adb shell id -u returned '$uid' after adb root and reconnect during $Context. " +
+            'Use an AOSP or Google APIs userdebug image; Google Play images commonly ' +
+            "disable adb root. adb root output: $rootDetail"
+        )
+    }
+    return $uid
 }
 
 function Get-UserUnlocked {
@@ -767,12 +802,9 @@ function Invoke-PackageUi {
 
 function Get-AppUid {
     param([string] $Package)
-    $dump = Invoke-Adb shell dumpsys package $Package
-    $line = $dump | Select-String 'userId=(\d+)' | Select-Object -First 1
-    if (-not $line -or $line -notmatch 'userId=(\d+)') {
-        throw "Unable to read UID for $Package"
-    }
-    return [int]$Matches[1]
+    $rows =
+        Invoke-Adb shell pm list packages '-U' '--user' '0' $Package
+    return ConvertFrom-PmPackageUid -Package $Package -Lines $rows
 }
 
 function Invoke-WithUidPacketCounter {
@@ -782,8 +814,7 @@ function Invoke-WithUidPacketCounter {
         [scriptblock] $Body,
         [switch] $Drop
     )
-    Invoke-Adb root | Out-Null
-    Wait-BootCompleted
+    Assert-AdbRoot -Context "UID packet counter for $Package" | Out-Null
     $uid = Get-AppUid $Package
     & adb -s $Serial shell iptables '-D' OUTPUT '-m' owner '--uid-owner' $uid '-j' $Chain 2>$null | Out-Null
     & adb -s $Serial shell iptables '-F' $Chain 2>$null | Out-Null
@@ -879,10 +910,12 @@ function Invoke-CatalogCommand {
     if (-not $build) { throw 'Symbol catalog has no full build identity row' }
     $buildId = ($build -split "`t")[1]
 
-    & cargo build -q -p tbdiag-cli --locked --offline
-    if ($LASTEXITCODE -ne 0) { throw 'tbdiag build failed' }
-    $extension = if ($env:OS -eq 'Windows_NT') { '.exe' } else { '' }
-    $tbdiag = Resolve-Path (Join-Path $root "target\debug\tbdiag$extension")
+    if (
+        -not $script:tbdiagExecutable -or
+        -not (Test-Path -LiteralPath $script:tbdiagExecutable -PathType Leaf)
+    ) {
+        throw 'The mandatory tbdiag build artifact is unavailable'
+    }
     if ($Kind -eq 'r8') {
         $row = $lines |
             Where-Object {
@@ -892,7 +925,8 @@ function Invoke-CatalogCommand {
             Select-Object -First 1
         if (-not $row) { throw 'Symbol catalog has no concrete R8 mapping row' }
         $fields = $row -split "`t"
-        $output = & $tbdiag retrace $catalog $buildId $fields[1] $fields[2] 2>&1
+        $output = & $script:tbdiagExecutable `
+            retrace $catalog $buildId $fields[1] $fields[2] 2>&1
         if ($LASTEXITCODE -ne 0 -or ($output -join '') -notmatch [regex]::Escape($fields[3])) {
             throw "R8 retrace did not resolve exact catalog row: $($output -join ' ')"
         }
@@ -906,7 +940,7 @@ function Invoke-CatalogCommand {
         Select-Object -First 1
     if (-not $row) { throw 'Symbol catalog has no concrete ELF symbol row' }
     $fields = $row -split "`t"
-    $output = & $tbdiag symbolize `
+    $output = & $script:tbdiagExecutable symbolize `
         $catalog $buildId $fields[3] $fields[1] $fields[2] $fields[4] 2>&1
     if ($LASTEXITCODE -ne 0 -or ($output -join '') -notmatch [regex]::Escape($fields[5])) {
         throw "ELF symbolication did not resolve exact catalog row: $($output -join ' ')"
@@ -931,6 +965,28 @@ function Invoke-HostGate {
     }
 }
 
+Invoke-Adb wait-for-device | Out-Null
+$api = [int]((Invoke-Adb shell getprop ro.build.version.sdk) -join '')
+$pageSize = [int]((Invoke-Adb shell getconf PAGE_SIZE) -join '')
+$abi = ((Invoke-Adb shell getprop ro.product.cpu.abi) -join '').Trim()
+$emulator = ((Invoke-Adb shell getprop ro.kernel.qemu) -join '').Trim() -eq '1'
+if (
+    $api -ne $ExpectedApi -or
+    $pageSize -ne $ExpectedPageSize -or
+    $abi -ne 'x86_64' -or
+    -not $emulator
+) {
+    throw "Endpoint mismatch: API=$api page=$pageSize ABI=$abi emulator=$emulator"
+}
+Assert-AdbRoot -Context 'initial endpoint preflight' | Out-Null
+Wait-UserUnlocked -Expected $true
+$needsTbdiag =
+    $FullDiagnosticSuite -or
+    ($RunHostBlockedEgress -and -not $SkipHostChecks)
+if ($needsTbdiag) {
+    $script:tbdiagExecutable = Build-TbdiagExecutable -Root $root
+}
+
 if (-not $SkipHostChecks) {
     Invoke-HostGate 'static_release_artifacts' {
         & (Join-Path $PSScriptRoot 'Verify-Phase5NoNetworkStatic.ps1') -SkipBuild:$SkipBuild
@@ -941,6 +997,7 @@ if (-not $SkipHostChecks) {
     if ($RunHostBlockedEgress) {
         Invoke-HostGate 'tbdiag_blocked_egress' {
             & (Join-Path $PSScriptRoot 'Invoke-TbdiagBlockedEgress.ps1') `
+                -TbdiagExecutable $script:tbdiagExecutable `
                 -AllowFirewallMutation:($env:OS -eq 'Windows_NT')
         }
     }
@@ -980,26 +1037,10 @@ $noInternetApkSha256 =
 $hostNetworkApkSha256 =
     (Get-FileHash $hostNetworkApk.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 
-Invoke-Adb wait-for-device | Out-Null
-$api = [int]((Invoke-Adb shell getprop ro.build.version.sdk) -join '')
-$pageSize = [int]((Invoke-Adb shell getconf PAGE_SIZE) -join '')
-$abi = ((Invoke-Adb shell getprop ro.product.cpu.abi) -join '').Trim()
-$emulator = ((Invoke-Adb shell getprop ro.kernel.qemu) -join '').Trim() -eq '1'
-if (
-    $api -ne $ExpectedApi -or
-    $pageSize -ne $ExpectedPageSize -or
-    $abi -ne 'x86_64' -or
-    -not $emulator
-) {
-    throw "Endpoint mismatch: API=$api page=$pageSize ABI=$abi emulator=$emulator"
-}
-
 Invoke-Adb install '-r' '-t' $noInternetApk.FullName | Out-Null
 Invoke-Adb install '-r' '-t' $hostNetworkApk.FullName | Out-Null
 Invoke-Adb shell pm enable $noInternetPackage | Out-Null
 Invoke-Adb shell pm enable $hostNetworkPackage | Out-Null
-Invoke-Adb root | Out-Null
-Wait-BootCompleted
 
 Invoke-CertScenario 'INSTALL.READINESS' {
     Reset-And-Launch -ClearData
@@ -1067,16 +1108,30 @@ Invoke-CertScenario 'HANDLER.DEATH' {
 
 Invoke-CertScenario 'HANDLER.RESTART' {
     Reset-And-Launch -ClearData
+    $main = Get-AppPid $noInternetPackage
     $handlerProcess = "$noInternetPackage`:tracebox_handler"
     $handler = Wait-ProductionHandlerReady $noInternetPackage
+    $participant = Get-AppPid "$noInternetPackage`:production_participant"
+    if ($main -eq 0 -or $participant -eq 0) {
+        throw "Installed production clients are missing: main=$main participant=$participant"
+    }
     Invoke-Adb shell kill '-9' $handler | Out-Null
     Wait-AppPidGone $handlerProcess $handler
+    $mainAfter = Get-AppPid $noInternetPackage
+    $participantAfter = Get-AppPid "$noInternetPackage`:production_participant"
+    if ($mainAfter -ne $main -or $participantAfter -ne $participant) {
+        throw (
+            "A production client died with its handler: " +
+            "main=$main/$mainAfter participant=$participant/$participantAfter"
+        )
+    }
     $replacement = Wait-ProductionHandlerReady $noInternetPackage $handler 30
     Clear-DeviceLog
     Start-LabAction $noInternetPackage 'HANDLER.RESTART' 'policy_barrier'
     $policy =
         Wait-Log 'scenario_result id=MULTIPROCESS\.POLICY_BARRIER outcome=PASS .*standard=SUCCESS' 30
-    "$policy previous_handler=$handler replacement_handler=$replacement"
+    "$policy main=$main participant=$participant " +
+        "previous_handler=$handler replacement_handler=$replacement"
 }
 
 Invoke-CertScenario 'HANDLER.TIMEOUT' {
@@ -1421,6 +1476,7 @@ Invoke-CertScenario 'DIRECT_BOOT.C0_CAPTURE' {
         Clear-DeviceLog
         Invoke-Adb reboot | Out-Null
         Wait-BootCompleted
+        Assert-AdbRoot -Context 'Direct Boot reboot' | Out-Null
         Wait-UserUnlocked -Expected $false
 
         $line =
@@ -1503,12 +1559,14 @@ Invoke-CertScenario 'DELETE.ALL_RESTART' {
             'outcome=PASS readiness=DURABLE health=DISABLED'
         ) 30
     $current = @(Get-TraceboxDiagnosticPayloadFiles $noInternetPackage)
-    $survivors = @($script:deletedPayloadPaths | Where-Object { $_ -in $current })
-    if ($survivors) {
-        throw "Pre-delete diagnostic payload survived restart: $($survivors -join ', ')"
+    if ($current.Count -ne 0) {
+        throw (
+            'Diagnostic payload remains accessible after disabled restart: ' +
+            ($current -join ', ')
+        )
     }
     "$deletion $disabled pre_delete_payloads=$($script:deletedPayloadPaths.Count) " +
-        "surviving=0 current_payloads=$($current.Count)"
+        'surviving=0 current_payloads=0'
 }
 
 Invoke-CertScenario 'DELETE.NO_ACCESSIBLE_DATA' {
@@ -1582,13 +1640,18 @@ Invoke-CertScenario 'NETWORK.HOST_CONTROL' {
 }
 
 Invoke-CertScenario 'NETWORK.BLOCKED_EGRESS' {
+    $blockedEgressActions = if ($FullDiagnosticSuite) {
+        @('readiness', 'policy_barrier', 'storage_pressure', 'package_disclosure')
+    } else {
+        @('readiness', 'package_disclosure')
+    }
     $packets = Invoke-WithUidPacketCounter `
         -Package $hostNetworkPackage `
         -Chain "TBXBE$PID" `
         -Drop `
         -Body {
         Reset-And-Launch -Package $hostNetworkPackage -ClearData
-        foreach ($action in @('readiness', 'policy_barrier', 'storage_pressure', 'package_disclosure')) {
+        foreach ($action in $blockedEgressActions) {
             Clear-DeviceLog
             Start-LabAction $hostNetworkPackage 'NETWORK.BLOCKED_EGRESS' $action
             switch ($action) {
@@ -1602,7 +1665,7 @@ Invoke-CertScenario 'NETWORK.BLOCKED_EGRESS' {
     if ($packets -ne 0) {
         throw "Tracebox runtime workflows emitted $packets packets"
     }
-    "uid_packets=$packets workflows=4"
+    "uid_packets=$packets workflows=$($blockedEgressActions.Count)"
 }
 
 Invoke-CertScenario 'RESOURCE.BASELINE' {
@@ -1750,39 +1813,46 @@ Invoke-CertScenario 'RESOURCE.BASELINE' {
         "package_ready='$packageReady'"
 }
 
-$corpusResult = $null
-try {
-    $corpusJson = & (Join-Path $PSScriptRoot 'Verify-MaliciousCorpora.ps1')
-    $corpusResult = $corpusJson | ConvertFrom-Json
-} catch {
-    $corpusFailure = $_.Exception.Message
-}
-foreach ($corpusScenario in @(
+$corpusScenarios = @(
     [pscustomobject]@{ id = 'CORPUS.PACKAGE'; prefix = 'PACKAGE.' },
     [pscustomobject]@{ id = 'CORPUS.ARCHIVE'; prefix = 'ARCHIVE.' },
     [pscustomobject]@{ id = 'CORPUS.SYMBOL'; prefix = 'SYMBOL.' }
-)) {
-    Invoke-CertScenario $corpusScenario.id {
-        if (-not $corpusResult) {
-            throw "Corpus verifier failed: $corpusFailure"
+)
+if (@($corpusScenarios | Where-Object { $_.id -in $requiredIds }).Count -gt 0) {
+    $corpusResult = $null
+    try {
+        $corpusJson = & (Join-Path $PSScriptRoot 'Verify-MaliciousCorpora.ps1')
+        $corpusResult = $corpusJson | ConvertFrom-Json
+    } catch {
+        $corpusFailure = $_.Exception.Message
+    }
+    foreach ($corpusScenario in $corpusScenarios) {
+        Invoke-CertScenario $corpusScenario.id {
+            if (-not $corpusResult) {
+                throw "Corpus verifier failed: $corpusFailure"
+            }
+            $matches = @(
+                $corpusResult.cases |
+                    Where-Object { $_.id.StartsWith($corpusScenario.prefix) }
+            )
+            if (
+                $matches.Count -eq 0 -or
+                @($matches | Where-Object { -not $_.rejected }).Count -ne 0
+            ) {
+                throw "Corpus group did not fail closed: $($corpusScenario.prefix)"
+            }
+            "rejected_cases=$($matches.Count)"
         }
-        $matches = @(
-            $corpusResult.cases |
-                Where-Object { $_.id.StartsWith($corpusScenario.prefix) }
-        )
-        if ($matches.Count -eq 0 -or @($matches | Where-Object { -not $_.rejected }).Count -ne 0) {
-            throw "Corpus group did not fail closed: $($corpusScenario.prefix)"
-        }
-        "rejected_cases=$($matches.Count)"
     }
 }
 
 $currentBaseCommitOutput = & git -C $root rev-parse HEAD
 if ($LASTEXITCODE -ne 0) {
-    throw 'Failed to recapture the source base commit after certification'
+    throw 'Failed to recapture the source base commit after validation'
 }
 $currentBaseCommit = ($currentBaseCommitOutput -join '').Trim()
-$currentSourcePatchSha256 = Get-SourcePatchSha256
+$currentSourceState = Get-RepositorySourceState -Root $root
+$currentSourcePatchSha256 = $currentSourceState.sha256
 $currentScenarioManifestSha256 =
     (Get-FileHash $scenarioPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $currentNoInternetApkSha256 =
@@ -1798,7 +1868,7 @@ if (
 ) {
     throw (
         'Source, scenario manifest, or installed fixture APK changed during personal-release ' +
-        'certification; refusing to bind emulator results to stale build provenance.'
+        'validation; refusing to bind emulator results to stale build provenance.'
     )
 }
 
@@ -1819,11 +1889,25 @@ $scenarioPass = @($results | Where-Object outcome -ne 'PASS').Count -eq 0
 $hostPass = @($hostGates | Where-Object outcome -ne 'PASS').Count -eq 0
 $passed = $scenarioCoveragePass -and $scenarioPass -and $hostPass
 $ended = (Get-Date).ToUniversalTime()
+$commandParts = @(
+    'tools\verify\Invoke-PersonalReleaseEmulator.ps1',
+    '-Serial',
+    $Serial
+)
+if ($SkipBuild) { $commandParts += '-SkipBuild' }
+if ($SkipHostChecks) { $commandParts += '-SkipHostChecks' }
+if ($RunHostBlockedEgress) { $commandParts += '-RunHostBlockedEgress' }
+if ($FullDiagnosticSuite) { $commandParts += '-FullDiagnosticSuite' }
 
 $report = [ordered]@{
     schema = 'tracebox-personal-release-emulator-result-v1'
-    scope = 'Single API-36 x86_64 4-KiB emulator plus deterministic host checks; personal-project release gate.'
-    command = "tools\verify\Invoke-PersonalReleaseEmulator.ps1 -Serial $Serial"
+    scope = if ($FullDiagnosticSuite) {
+        'Optional full diagnostic inventory on one API-36 x86_64 4-KiB emulator.'
+    } else {
+        'Representative personal-release smoke on one API-36 x86_64 4-KiB emulator.'
+    }
+    mode = if ($FullDiagnosticSuite) { 'FULL_DIAGNOSTIC' } else { 'PERSONAL_RELEASE' }
+    command = $commandParts -join ' '
     start_time_utc = $started.ToString('o')
     end_time_utc = $ended.ToString('o')
     endpoint = [ordered]@{
@@ -1836,6 +1920,9 @@ $report = [ordered]@{
     provenance = [ordered]@{
         base_commit = $sourceBaseCommit
         working_tree_patch_sha256 = $sourcePatchSha256
+        source_state_recheck_sha256 = $currentSourcePatchSha256
+        source_state_stable = $true
+        source_state_entries = @($sourceState.entries)
         scenario_manifest_sha256 = $scenarioManifestSha256
         no_internet_apk_sha256 = $noInternetApkSha256
         host_network_apk_sha256 = $hostNetworkApkSha256
@@ -1844,6 +1931,7 @@ $report = [ordered]@{
     }
     host_gates = @($hostGates)
     scenario_coverage = [ordered]@{
+        inventory = $inventoryIds.Count
         required = $requiredIds.Count
         observed = $observedIds.Count
         missing = $missingIds

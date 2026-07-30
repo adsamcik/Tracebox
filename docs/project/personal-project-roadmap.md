@@ -1,129 +1,115 @@
 # Tracebox Personal-Project Completion Roadmap
 
-## Outcome
+## Decision
 
-Every production implementation, host-test seam, consolidated fixture, and
-host gate is complete. The unified 14-gate host-readiness run is `PASS` in
-`evidence/phase5/personal-release-host-readiness.json`. At candidate freeze,
-the only unfinished Tracebox work is running the scripted validation suite on
-the one required API 36 `x86_64`, 4 KiB emulator and recording the final
-review decision.
+Tracebox is being completed for one personal Android app, Tracker. The release
+bar is confidence that the important code works and remains private/offline,
+not enterprise certification.
 
-Tracker host-side integration may be prepared from this
-`IMPLEMENTATION_COMPLETE` candidate. Tracker pins the final immutable artifact
-after Tracebox reaches `PERSONAL_RELEASE_READY`.
+The implementation is complete when production paths have host tests and no
+known stubs or missing wiring. Runtime validation may use one API 36 `x86_64`,
+4 KiB emulator. A physical-device matrix, repeated certification campaigns,
+and formal release-review rounds are not required.
 
-## Inventory split
+## What earns its complexity
 
-The persistent ledger has no unfinished production or host-tool
-implementation. Its remaining `IN_PROGRESS` rows are validation decisions:
+Keep these capabilities because they directly protect Tracker users or make a
+failure actionable:
 
-- five Phase 0 packages (`F0.3`-`F0.7`) require only the consolidated emulator
-  observations;
-- `T5.4` requires only the emulator blocked-egress observation;
-- `T5.5` is the one-emulator resource baseline; and
-- `T5.6` is the final personal-release decision.
+- JVM and native crash capture, the Rust emergency path, and bounded ANR/exit
+  reconciliation;
+- bounded storage, quota enforcement, crash-safe deletion, and deletion of
+  handler/raw/tombstone data;
+- payload-free structural diagnostics with no networking or uploader;
+- deterministic disclosure, package, save/share, and receipt workflows;
+- build identity and host symbolication; and
+- the Android 16 private-storage path fix: a platform-owned alias above the
+  package directory is allowed, while the package directory and descendants
+  still reject symlinks.
 
-The consolidated lab has 39 stable scenarios across the no-internet and
-host-network variants. Its registry, manifest, build graph, host controls,
-malicious corpora, and production-artifact separation pass on the host; only
-executing its runtime scenarios remains.
+Do not remove these already-tested foundations merely to reduce line count.
+Their failure modes involve lost crash data, undeleted private data, or unsafe
+filesystem behavior.
 
-## Completed host implementation sequence
+## What does not block this project
 
-H1-H5 are complete without relying on an Android endpoint. Their unified proof
-is `evidence/phase5/personal-release-host-readiness.json`.
+The following are optional follow-up work:
 
-| Stage | Work packages | Implementation to finish | Required host proof |
-|---|---|---|---|
-| H1: identity and storage ownership | `C1.6`, `R2.5`, `R2.7` | Finish the build/symbol identity contract; give one production owner responsibility for the UID-wide quota; account for every ordinary, raw, summary, journal, index, staging, temporary, and compaction byte/file; generate Direct-Boot C0 types; connect CE/DE pending/active policy transactions. | JVM/property tests for concurrent reservation and eviction; full-quota progress; metadata/file-count limits; CE/DE crash-boundary replay; schema drift and identity golden tests. |
-| H2: handler and global policy transport | `X3.1`, `X3.2` | Connect the non-exported handler service to the bounded production transport; implement peer/version checks, death/restart state, census/leases, registration fencing, and global tightening/deletion barriers across CE and DE owners. | Fake-transport and Robolectric/JVM tests for bind races, malformed/versioned requests, timeouts, handler death, PID reuse, coordinator restart, registration during every barrier boundary, and honest partial failure. |
-| H3: capture bridges and deletion closure | `R2.8`, `X3.3`-`X3.10` | Invoke the storage lifecycle from Crashpad capture start; call Rust `SummaryId::derive`; wire emergency startup ingestion; implement native policy/coexistence handoff; install the JVM handler; consume the Rust record ring; finish bounded watchdog installation seams; add the real `ApplicationExitInfo` adapter and raw-import journal; extend global deletion to raw artifacts, summaries, tombstones, snapshots, handler stores, and CE/DE state. | C/C++/Rust/JNI/JVM tests using fake clocks, lifecycle, Android-exit rows, IPC, filesystem, and crash hooks; kill-point tests at every journal/copy/append/acknowledgement/retire/delete boundary; exact-once and policy-denial tests; no-message, recursion, panic, timeout, and fallback tests. |
-| H4: build tooling, symbols, and offline proof | `T5.2`-`T5.4` | Enforce release merged-manifest and dependency-lock checks; produce R8/ELF/Rust catalogs; connect exact-match CLI adapters; add DEX reference and native import scanners; complete the blocked-egress runner and control probe without executing it yet. | Gradle TestKit/consumer builds; fixture mapping and ELF catalogs; exact match/mismatch CLI tests; dependency graph and manifest negatives; malicious catalog/parser corpus; static no-network scans for every published module combination. |
-| H5: consolidated lab and candidate automation | `PR-019` | Replace the missing eleven-app topology with one configurable `tracebox-lab`, no-internet/host-network/minified variants, stable scenario IDs, host malicious corpora, and one command that runs the required emulator scenarios and writes provenance-bound results. Production fault controls exist only in lab artifacts. | Variant/build-graph tests; scenario-registry completeness test; manifest and dependency assertions; host controller/state-machine tests; release artifact scan proving fault controls and approval bypasses are absent. |
+- more API, ABI, OEM, emulator, or physical-device cells;
+- long percentile, battery, wakeup, or performance campaigns;
+- repeated review/freeze/provenance rounds;
+- live repetitions of Direct Boot, OOM, stack overflow, recursive faults,
+  multiprocess barriers, storage pressure, and symbol-catalog cases already
+  covered on the host;
+- the original eleven separate lab applications; and
+- Phase 6 encryption, metrics/traces, desktop UI, and advanced profiling.
 
-H3 closes `R2.8` only after all Phase 3-owned stores participate in deletion.
-H4 closes `C1.6` together with `T5.2` so build identity is exercised through
-the real plugin and symbol catalogs rather than an isolated model.
+The consolidated fixture and its additional scenarios may remain useful for
+debugging, but their existence does not make every scenario a release gate.
 
-## Host test bar
+## Remaining completion sequence
 
-Before candidate freeze:
+1. Run the complete host-readiness suite once, sequentially, and keep its JSON
+   result.
+2. Review the final production diff once and freeze an immutable local release
+   candidate because the Android runtime source changed.
+3. On one rootable API 36 `x86_64`, 4 KiB emulator, run the representative
+   smoke set below.
+4. Record `PERSONAL_RELEASE_READY` when the standalone Tracebox gates pass.
+5. Pin Tracker to that candidate, run Tracker host tests, then perform the
+   small downstream Tracker smoke below.
+6. Record the integration result and any explicitly accepted limitation. Do not add more
+   implementation unless a validation exposes a reproducible defect.
 
-- all JVM, Robolectric, Gradle TestKit, CTest/native, Cargo, schema golden,
-  property, fault-injection, parser, consumer, lint, and static-conformance
-  suites pass;
-- every Android framework input used by deterministic logic has a bounded host
-  adapter or fake;
-- production Android adapters contain no TODO, stub, test-only branch, or
-  deferred connection;
-- debug and minified release-like lab variants compile and package;
-- `tbdiag` deterministic bytes and exact approval/package identity remain
-  regression-tested;
-- release artifacts contain no networking surface, uploader, fault injection,
-  approval bypass, or unbounded free-form recording API; and
-- the ledger and personal-release checklist point to the resulting host
-  evidence.
+The validation AVD must expose rootable `adbd`, because UID-scoped packet
+observation and private artifact checks require root shell access. Use an AOSP
+or Google APIs userdebug image, not a Google Play image. The runner verifies
+`adb shell id -u` is exactly `0` and waits for user 0 storage to unlock before
+the first scenario.
 
-Host simulation does not claim Android lifecycle behavior. Its purpose is to
-make the emulator run a validation of completed code, not a place where missing
-integration is discovered by design.
+## Representative Tracebox emulator smoke
 
-## Code-review sequence
+One successful pass is enough:
 
-All code reviews occur against immutable SHAs before the emulator validation
-window:
+1. install, durable readiness, and handler availability;
+2. handler death and restart;
+3. JVM crash capture and restart;
+4. native crash capture and restart;
+5. ANR candidate plus `ApplicationExitInfo` reconciliation;
+6. disable/delete/restart with no accessible diagnostic data;
+7. disclosure, approval, package creation, and save; and
+8. blocked-egress observation with a working host-network control.
 
-1. storage, UID quota, CE/DE policy, and complete deletion;
-2. handler transport, Crashpad/emergency/JVM/Rust capture, ANR, and exit import;
-3. build identity, symbols, CLI, no-network tooling, and consolidated fixtures;
-4. the complete baseline-to-candidate-HEAD implementation diff.
+Startup time and PSS may be recorded as observations. They are not pass/fail
+gates unless the app is visibly unusable.
 
-Each review fixes blocker, critical, and major findings, reruns the affected
-host gates, and reviews the new SHA. Approval of review 4 freezes the emulator
-candidate. If runtime validation exposes a defect, first add a host reproducer,
-fix it, rerun the affected host suites, and reopen every review whose scope
-changed before producing a new candidate.
+## Tracker integration bar
 
-## Emulator-only validation remaining after freeze
+Tracker integrates Tracebox unconditionally, with no product flavor or trial:
 
-The frozen candidate has one required validation window:
+- Tracebox is the sole crash and diagnostic backend;
+- legacy crash/log Room data is read/exported/deleted only during migration and
+  receives no new writes;
+- verbose, debug, info, and generic free-form compatibility logs are discarded;
+- warnings, errors, assertions, and a small set of explicit domain codes are
+  recorded once without payloads or count amplification;
+- the handler process does not initialize Tracker/Hilt application work; and
+- diagnostics disclosure, package, save/share, disable, and deletion remain
+  available in Tracker settings.
 
-1. install/readiness, handler cold/running/death/restart, and multiprocess
-   policy barriers;
-2. managed, C++, Rust, emergency, recursive, OOM, and stack-overflow fault
-   scenarios;
-3. live ANR candidate, responsive-main-looper, timeout/cancellation, lifecycle
-   suppression, and restart/`ApplicationExitInfo` reconciliation;
-4. Direct Boot, storage pressure, expired-package-staging cleanup,
-   disable/delete/restart, and no-accessible-data results;
-5. Standard package disclosure, exact approval, save/share, R8 retrace, and ELF
-   symbolication smoke;
-6. blocked-egress/DNS observation with a working control probe for the
-   no-internet and host-network variants; and
-7. one representative memory, idle CPU/wakeup, readiness, target-pause,
-   capture-latency, package-memory, and artifact-size baseline.
+The Tracker emulator smoke is intentionally small: launch to ready, confirm the
+dedicated handler, record one structural diagnostic, disable and re-enable,
+and exercise either package creation or deletion.
 
-One provenance-recorded successful run is enough. Physical devices, additional
-API/ABI/OEM cells, long percentile campaigns, battery studies, and
-byte-identical full-APK builds across independent environments are advisory.
+## Done
 
-`PERSONAL_RELEASE_READY` is reached when this validation passes, its evidence
-matches the frozen candidate, and the release-readiness evidence audit finds no
-scope or claim mismatch.
+Tracebox is `PERSONAL_RELEASE_READY` when:
 
-## Tracker-Android after Tracebox release
+- the final host-readiness run passes;
+- the representative Tracebox emulator smoke passes on the one selected AVD;
+- no unfinished production implementation remains.
 
-Prepare the host-side integration after `IMPLEMENTATION_COMPLETE`, then pin one
-immutable `PERSONAL_RELEASE_READY` artifact in
-`G:\Github\Tracker-Android`. Implement the dependency/API migration, generated
-Tracker event mapping, Standard Diagnostics as the first-install default with
-persisted user controls, sole JVM/native/Rust crash ownership, replacement of
-active legacy logging writers, separate exit-history responsibilities,
-combined deletion status, package workflow, and notices described in
-`docs/integration/tracker-android.md`.
-
-Finish Tracker host unit tests and its code review before runtime evaluation.
-Then run the small Tracker smoke list on the same emulator. That downstream
-smoke evaluates the library in the real personal app; it does not reopen the
-Tracebox release unless it reveals a reproducible Tracebox defect.
+The downstream Tracker integration is complete when its host tests and small
+smoke pass against that frozen candidate. Tracker does not establish Tracebox's
+ready state, though a reproducible defect discovered there reopens the relevant
+Tracebox gate. Anything beyond these lists is an improvement opportunity.

@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "tbdiag"
+path = "src/main.rs"
+
 [dependencies]
 tbdiag-format = { path = "../tbdiag-format" }
 

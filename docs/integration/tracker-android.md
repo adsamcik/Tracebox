@@ -160,15 +160,13 @@ an Android runtime.
 
 On the ADR-0010 required emulator, exercise:
 
-- clean install with Standard Diagnostics ready;
-- explicit disable, process restart, and disabled-profile restoration;
-- explicit re-enable and profile restoration;
-- one managed crash and legacy-handler migration behavior;
-- one native or Rust fault;
-- one ANR candidate and restart reconciliation;
-- package disclosure and local save;
-- disable/delete/restart with no accessible Tracebox-owned data; and
-- normal-app restart with Tracebox still the sole active crash/logging owner.
+- clean launch with Standard Diagnostics ready and the dedicated handler;
+- one bounded structural Tracker diagnostic with no legacy writer activity;
+- explicit disable and re-enable; and
+- either package creation or whole-store deletion.
 
-This is sufficient downstream validation for the personal project. Physical
-devices and additional OEM/API cells are optional and must not be implied.
+The standalone Tracebox emulator gate already covers managed/native faults,
+ANR/exit, package, deletion, and blocked egress. Repeating those workflows in
+Tracker adds little confidence and is optional. The small downstream smoke
+above is sufficient; physical devices and additional OEM/API cells are
+optional and must not be implied.

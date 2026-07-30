@@ -5,49 +5,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'PersonalReleaseRunnerSupport.ps1')
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $gradle = Join-Path $root 'gradlew.bat'
 $started = (Get-Date).ToUniversalTime()
 $checks = [Collections.Generic.List[object]]::new()
 $script:hostGateFailed = $false
-
-function Convert-HashBytesToHex {
-    param([byte[]] $Bytes)
-    return ([BitConverter]::ToString($Bytes) -replace '-', '').ToLowerInvariant()
-}
-
-function Get-TextSha256 {
-    param([string] $Text)
-    $algorithm = [Security.Cryptography.SHA256]::Create()
-    try {
-        return Convert-HashBytesToHex (
-            $algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))
-        )
-    } finally {
-        $algorithm.Dispose()
-    }
-}
-
-function Get-SourcePatchSha256 {
-    $tracked = (& git -C $root --no-pager diff --binary HEAD -- . ':(exclude)evidence/**') -join "`n"
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to fingerprint tracked source changes'
-    }
-    $untracked = foreach ($path in (
-        & git -C $root ls-files --others --exclude-standard |
-            Where-Object { $_ -notlike 'evidence/*' } |
-            Sort-Object
-    )) {
-        $absolute = Join-Path $root $path
-        if (Test-Path -LiteralPath $absolute -PathType Leaf) {
-            "$path`n$((Get-FileHash -LiteralPath $absolute -Algorithm SHA256).Hash.ToLowerInvariant())`n"
-        }
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to enumerate untracked source changes'
-    }
-    return Get-TextSha256 "tracked`n$tracked`nuntracked`n$($untracked -join '')"
-}
+$initialSourceState = Get-RepositorySourceState -Root $root
 
 function Invoke-HostCheck {
     param(
@@ -263,11 +227,19 @@ if ($LASTEXITCODE -ne 0) {
     $script:hostGateFailed = $true
     $head = 'UNAVAILABLE'
 }
-$patchSha256 = try {
-    Get-SourcePatchSha256
+$currentSourceState = try {
+    Get-RepositorySourceState -Root $root
 } catch {
     $script:hostGateFailed = $true
-    "UNAVAILABLE: $($_.Exception.Message)"
+    [pscustomobject]@{
+        sha256 = "UNAVAILABLE: $($_.Exception.Message)"
+        entries = @()
+    }
+}
+$sourceStateStable =
+    $initialSourceState.sha256 -eq $currentSourceState.sha256
+if (-not $sourceStateStable) {
+    $script:hostGateFailed = $true
 }
 $passed = -not $script:hostGateFailed
 $report = [ordered]@{
@@ -277,7 +249,10 @@ $report = [ordered]@{
     ended_utc = $ended.ToString('o')
     provenance = [ordered]@{
         base_commit = $head
-        working_tree_patch_sha256 = $patchSha256
+        working_tree_patch_sha256 = $initialSourceState.sha256
+        source_state_recheck_sha256 = $currentSourceState.sha256
+        source_state_stable = $sourceStateStable
+        source_state_entries = @($initialSourceState.entries)
     }
     checks = @($checks)
     blocked_egress = if ($RunBlockedEgress) {

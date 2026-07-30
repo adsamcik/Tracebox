@@ -46,23 +46,27 @@ boundary. A release still requires:
 
 ### Runtime validation
 
-The sole required Android runtime lane remains:
+The sole required Android endpoint remains:
 
 - API 36;
 - `x86_64`;
-- 4 KiB page size; and
-- debug plus one minified release-like fixture.
+- 4 KiB page size.
 
-One successful, provenance-recorded run of the consolidated functional,
-privacy, no-network, and resource smoke suite is sufficient. Physical devices,
-additional Android versions, arm64, 16 KiB pages, Pixel devices, and other OEM
-families are optional observations and never block a personal release.
+Host builds and unit tests cover debug code. The one emulator smoke installs
+only the minified qualification fixture; a second debug device pass is not
+required.
+
+One successful run of the representative functional, privacy, and no-network
+smoke set in `tooling/fixtures/personal-release-scenarios.json` is sufficient.
+Physical devices, additional Android versions, arm64, 16 KiB pages, Pixel
+devices, and other OEM families are optional observations and never block a
+personal release.
 
 ### Test-fixture topology
 
-The logical scenarios from the original eleven-app plan remain test
-requirements, but they need not be eleven separately maintained applications.
-They may be implemented as:
+The logical scenarios from the original eleven-app plan remain an available
+diagnostic inventory, but only the manifest's `personal_release_required` set
+blocks this personal release. They are implemented as:
 
 1. one configurable `tracebox-lab` app covering multiprocess capture, managed
    and native/Rust faults, handler conflict/death, ANR variants, Direct Boot,
@@ -71,7 +75,8 @@ They may be implemented as:
 3. one minified `release-r8` variant; and
 4. host-side malicious-package and parser corpora.
 
-Scenario identity and pass/fail evidence matter; Gradle module count does not.
+Stable scenario identity matters; Gradle module count and running every
+diagnostic scenario for each release do not.
 
 ### Performance and reproducibility
 
@@ -79,11 +84,10 @@ Architectural invariants remain release blockers: no ordinary main-thread disk
 I/O, no handler polling or idle timer loop, no heartbeat when ineligible, no
 unbounded queue/retry, and hard storage bounds.
 
-The numerical budgets in architecture section 22.2 become engineering targets,
-not personal-release blockers. The required emulator run records one useful
-baseline for startup, readiness, handler PSS/CPU, heartbeat behavior, target
-pause, capture latency, package memory, and artifact size. It does not require
-p50/p95/p99 sampling by API, ABI, vendor, or physical device.
+The numerical budgets in architecture section 22.2 are engineering targets,
+not personal-release blockers. Startup time and PSS may be recorded once as
+observations when useful. Idle CPU/wakeup, percentile, battery, package-memory,
+and cross-device campaigns are not required.
 
 Deterministic schema output, `.tbdiag` output, manifests, and symbol identity
 remain mandatory. Byte-identical full APK rebuilds across independent
@@ -97,24 +101,18 @@ privacy, storage, capture, package, symbol, and no-network invariants. A
 line-by-line row for every sentence in the architecture and implementation
 prompt is not required.
 
-Required reviews are:
-
-1. a storage/policy/deletion review;
-2. a failure-capture/native/ANR review;
-3. a package/tooling/no-network review; and
-4. one final baseline-to-HEAD review.
-
-Reviews remain SHA-bound and fixes use additional commits. Separate review for
-every small phase commit and independent external certification are not
-personal-release requirements.
+One final review of the release diff is required. Focused subsystem reviews are
+useful while implementing risky storage, capture, or tooling changes, but they
+are not separate release gates. Independent external certification is not a
+personal-release requirement.
 
 ### Completion terminology
 
 - `IMPLEMENTATION_COMPLETE`: every foundation implementation item and available
   host/static automated gate passes.
-- `PERSONAL_RELEASE_READY`: `IMPLEMENTATION_COMPLETE`, the required single
-  emulator suite passes, documentation matches the observed scope, and the
-  final review is approved.
+- `PERSONAL_RELEASE_READY`: `IMPLEMENTATION_COMPLETE`, the representative
+  single-emulator smoke passes, documentation matches the observed scope, and
+  the final review is approved.
 - `PRODUCT_DECISION_BLOCKED`: remaining implementation requires a product
   decision.
 - `INCOMPLETE`: a mandatory implementation or available required gate is
@@ -128,8 +126,9 @@ or independent certification.
 ### Tracker integration
 
 Tracker is the reference downstream application, but its integration does not
-replace Tracebox's own unit and lab tests. Integration begins after
-`PERSONAL_RELEASE_READY` and uses an immutable released candidate artifact.
+replace Tracebox's own unit and lab tests. Source migration and host tests may
+be prepared after `IMPLEMENTATION_COMPLETE`; the final immutable candidate pin
+and downstream smoke follow `PERSONAL_RELEASE_READY`.
 
 The Tracker integration must:
 

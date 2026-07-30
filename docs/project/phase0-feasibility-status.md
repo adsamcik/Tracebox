@@ -1,18 +1,21 @@
 # Phase 0 Feasibility Status
 
-## Terminal state
+## Historical terminal state
 
-`INCOMPLETE`
+`INCOMPLETE` — superseded for personal release by ADR-0008 through ADR-0010
 
-The ADR-0009 required emulator targeted regression passes. Full qualification
-remains `INCOMPLETE`.
+This file preserves the original feasibility campaign and its failures; it is
+not the active personal-release gate. The API 36 targeted regression passes.
+The remaining live requirement is the representative set named by
+`tooling/fixtures/personal-release-scenarios.json`, tracked in the implementation
+ledger and personal-release evidence.
 
 ADR-0010 confirms that this is a personal-project release. The historical
 percentile, battery, physical-device, OEM, and byte-identical full-APK results
 below remain useful evidence but no longer block `PERSONAL_RELEASE_READY`.
-Mandatory blockers are incomplete implementation, failed architectural
-invariants or privacy/offline gates, and failure of the consolidated API 36
-emulator suite.
+Mandatory blockers are incomplete mandatory implementation, failed
+architectural invariants or privacy/offline gates, and failure of the
+representative API 36 emulator smoke.
 
 ## API 23 and matrix supersession
 
@@ -27,11 +30,11 @@ fresh targeted run on the required emulator passes, including the capture-only
 stream profile, seeded privacy scan, emergency restart reset, handler-unavailable
 fallback, and prior-signal chaining.
 
-## Current required matrix
+## Historical required lane
 
 | Cell | Status | Evidence |
 |---|---|---|
-| Existing API 36 x86_64 emulator, 4 KiB | IN_PROGRESS | Targeted PASS: `evidence/phase0/API36-x86_64-4096-review-fix-qualification.json`; full qualification pending |
+| Existing API 36 x86_64 emulator, 4 KiB | TARGETED_PASS | `evidence/phase0/API36-x86_64-4096-review-fix-qualification.json`; personal-release smoke is tracked separately |
 
 ## Historical matrix
 
@@ -129,20 +132,9 @@ schema and `.tbdiag` outputs remain mandatory.
 
 ## Blocker resolution needed
 
-Provide on the existing required emulator:
-
-1. a safe, bounded ANR snapshot implementation with no false confirmation,
-   correct lifecycle suppression, and recorded target-pause/latency baselines;
-2. startup/handler behavior with no polling or idle timer loop, bounded
-   timeouts/retries, and recorded readiness/CPU/memory/capture baselines;
-3. a no-network build graph that passes the final static scans and required
-   emulator smoke paths with a working positive control;
-4. two successful pinned-toolchain release builds with artifact hashes, while
-   preserving deterministic generated schema and `.tbdiag` output; and
-5. capture output that suppresses the forbidden streams without losing the
-   mandatory useful streams.
-
-Then rerun the complete qualification command and affected host gates. ADR-0009
-changes the Android baseline and matrix; ADR-0010 changes the personal-project
-completion and measurement bar. Mandatory Crashpad, emergency, ANR functional
-behavior, privacy, offline operation, and hard bounds remain unchanged.
+No complete Phase 0 rerun is required. Personal release uses the current host
+gates plus the manifest's representative emulator smoke. The historical
+resource, percentile, false-positive-duration, and rebuild campaigns may be
+rerun when investigating a regression, but do not block the personal project.
+Mandatory privacy, offline behavior, hard bounds, and representative
+handler/crash/ANR wiring remain unchanged.

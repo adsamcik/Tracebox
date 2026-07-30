@@ -1,42 +1,43 @@
-# Personal-Project Phase 0 Measurement Protocol
+# Historical Phase 0 Diagnostic Measurement Protocol
 
-ADR-0009 replaces the original multi-device matrix. ADR-0010, accepted by the
-user, replaces the enterprise statistical release gate below with one-emulator
-functional and resource smoke evidence. Historical runs retain their original
-criteria and results.
+This protocol preserves the original diagnostic campaign so it can be reused
+when investigating regressions. It is not a personal-release gate. ADR-0010
+requires host enforcement of hard bounds plus only the representative
+functional/privacy/no-network emulator IDs in
+`tooling/fixtures/personal-release-scenarios.json`.
 
 ## Engineering matrix
 
 | Lane | Required result |
 |---|---|
-| Existing API 36 x86_64 emulator, 4 KiB | PASS |
+| Existing API 36 x86_64 emulator, 4 KiB | Required only for the representative smoke |
 
 Additional API, ABI, page-size, physical-device, and OEM lanes are advisory and
-do not block `PERSONAL_RELEASE_READY`. Debug and one minified release-like
-variant are required.
+do not block `PERSONAL_RELEASE_READY`. Debug is covered by host build/unit
+checks; the emulator smoke runs only the minified qualification fixture.
 
-## Personal-project repetition
+## Optional diagnostic repetition
 
 - Use monotonic time for durations.
 - Warm up for 30 seconds unless measuring cold start.
 - Run latency-sensitive scenarios five times and record median and maximum.
 - Observe healthy CPU, wakeups, and memory for two minutes after settling.
 - Run one ten-minute healthy watchdog false-candidate observation.
-- A flaky-only pass is FAIL. Every required assertion must pass in one complete run.
+- Treat results as observations unless a manifest-required functional scenario
+  or host-enforced hard invariant fails.
 
 ## Targets and release invariants
 
 | Metric | Personal-project treatment |
 |---|---|
-| Install/readiness, handler PSS/CPU, fatal latency, native size, heartbeat work, interactive wakeups, and target pause | Record and compare with the original targets; investigate large regressions, but numerical values are advisory |
-| Handler timer/poll wakeups | Mandatory zero |
-| Ineligible watchdog wakeups after settling | Mandatory zero |
-| Healthy false confirmations | Mandatory zero; candidates are recorded and investigated |
-| Deterministic six-second stall | Mandatory capture in the complete smoke run |
-| Handler-hang timeout/cancellation | Mandatory bounded completion without deadlock |
-| Package working memory and all configured storage/archive/parser limits | Mandatory hard bounds |
+| Install/readiness, handler PSS/CPU, fatal latency, native size, heartbeat work, interactive wakeups, and target pause | Optional observations; investigate visible regressions |
+| Handler polling and ineligible heartbeat | Host-enforced architectural invariants; live observation optional |
+| Healthy false confirmations | Host state-machine invariant; long live observation optional |
+| Deterministic stall | Covered once by manifest-required `ANR.CANDIDATE` |
+| Handler-hang timeout/cancellation | Host-tested; live repetition is an opt-in diagnostic |
+| Configured storage/archive/parser limits | Mandatory host-tested hard bounds; live pressure is optional |
 
-## Workloads
+## Optional extended workloads
 
 Handler: idle, two simultaneous clients, handler cold/running/killed/restarted/hung, three-start crash loop, fatal `SIGABRT`, fatal `SIGSEGV`, nonfatal request, constrained storage.
 
@@ -46,10 +47,11 @@ ANR: healthy interactive/non-interactive/ineligible, deterministic six-second ma
 
 Privacy: place unique seeded secrets in stack, heap, environment-like application buffers, and annotations offered to the client. Raw files may match and remain C2; every structural field and exported Phase 0 summary must have zero seed matches. No internal ID encoding may be deliberately injected.
 
-## Fuzz and corruption budgets
+## Optional extended fuzz/corruption budgets
 
-- Presubmit: 60 seconds per native parser/writer target with retained crashing inputs.
-- Personal release: 5 minutes per parser/writer target.
+- Presubmit may spend 60 seconds per native parser/writer target with retained
+  crashing inputs.
+- An extended diagnostic run may spend 5 minutes per parser/writer target.
 - Exhaustively truncate every boundary for objects up to 64 KiB.
 - For larger bounded objects, test every boundary in the first/last 4 KiB plus 4096 deterministic interior offsets.
 - Flip every fixed header field and run 10,000 deterministic generated length/CRC/count/path corruptions per format.

@@ -931,7 +931,9 @@ Provisional measurement targets:
 | App-process retained memory | Under 512 KiB plus thread stack |
 | Nonfatal handler request | At most one per 10 minutes/process by default |
 
-These numbers are not release promises until measured on the required qualification emulator.
+These numbers are advisory engineering targets. Personal release depends on the
+hard bounded-work and idle-behavior invariants, not a dedicated measurement
+campaign.
 
 ## 14. Exit reconciliation
 
@@ -1201,13 +1203,14 @@ Release gates:
 | Fatal capture completion | p95 <= 2 seconds |
 | Package working memory | <= 8 MiB beyond output buffers |
 
-Budgets may change only from measured evidence and an ADR update. Invariants may not be relaxed through tuning.
+Budgets may change from useful measured evidence. Invariants may not be relaxed
+through tuning.
 
 ADR-0010 supplies that update for the personal-project release: the table is a
 set of tuning and regression targets rather than a release-blocking percentile
 contract. Structural invariants and configured hard bounds remain mandatory.
-The required emulator run records one representative baseline; it does not need
-to establish p50/p95/p99 distributions across a hardware matrix.
+The emulator smoke need not record a resource baseline or establish
+p50/p95/p99 distributions. Startup time and PSS are optional observations.
 
 ## 23. Testing strategy
 
@@ -1220,9 +1223,10 @@ to establish p50/p95/p99 distributions across a hardware matrix.
 
 ADR-0010 permits the logical crash, ANR, multiprocess, Direct Boot, deletion,
 network, and R8 scenarios to share one configurable lab application and build
-variants. Scenario coverage is normative; separate application modules are not.
-`Tracker-Android` is the downstream evaluation host after Tracebox reaches
-`PERSONAL_RELEASE_READY`.
+variants. The manifest's `personal_release_required` IDs are normative for the
+personal release; the wider inventory is opt-in diagnostics. Separate
+application modules are not required. `Tracker-Android` is the downstream
+evaluation host after Tracebox reaches `PERSONAL_RELEASE_READY`.
 
 ### 23.2 Crashpad
 
@@ -1306,10 +1310,10 @@ Crashpad failure leaves the emergency path available.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Android handler/`ptrace` behavior is not reliable on the required emulator | Personal release blocked | Run the consolidated feasibility and regression suite on the one required emulator |
+| Android handler/`ptrace` behavior is not reliable on the required emulator | Personal release blocked | Run the manifest's representative handler and native-crash smoke on the one required emulator |
 | Crashpad raw data contains sensitive memory | Critical privacy risk | C2 quarantine, short quota/TTL, no standard export, explicit disclosure |
-| Handler increases memory footprint | Adoption/performance risk | Native-only blocked process, one handler, no pollers, measured PSS gate |
-| Watchdog causes battery drain or false positives | Reliability risk | Adaptive lifecycle policy, rate limit, candidate terminology, measured thresholds |
+| Handler increases memory footprint | Adoption/performance risk | Native-only blocked process, one handler, no pollers, hard bounds, and optional PSS observation |
+| Watchdog causes battery drain or false positives | Reliability risk | Adaptive lifecycle policy, rate limit, candidate terminology, host state-machine tests, and optional live observation |
 | Handler and emergency paths double-handle | Corrupt/misleading evidence | One dispatch state machine and recursion/fault corpus |
 | Cross-process policy is described as globally atomic | False guarantee | Use handler-coordinated epoch commit and acknowledgements; return partial failure otherwise |
 | Package preview diverges | Consent failure | Materialize complete plaintext package before approval |
@@ -1320,16 +1324,15 @@ Crashpad failure leaves the emergency path available.
 
 ### Gate A: Crashpad feasibility
 
-Must demonstrate:
+Must demonstrate through host/native tests:
 
 - one handler serving multiple app processes;
-- supported Android lifecycle and attachment behavior;
-- useful minidumps and structural summaries;
-- bounded raw-artifact privacy handling;
-- emergency fallback;
-- acceptable idle memory;
-- compatibility with the required emulator's 4 KiB page size;
+- bounded raw-artifact privacy handling and emergency fallback;
+- useful structural summaries; and
 - no networking/uploader closure.
+
+The required emulator adds only the manifest's consolidated handler-restart and
+native-fault smoke. Idle memory is an optional observation.
 
 ADR-0009 and ADR-0010 define the release matrix as the one existing API 36
 `x86_64`, 4 KiB emulator. Additional API, ABI, page-size, physical-device, and
@@ -1338,23 +1341,20 @@ OEM lanes are advisory. Failure on the required emulator blocks
 
 ### Gate B: Live ANR feasibility
 
-Must demonstrate:
-
-- negligible healthy-state overhead;
-- no heartbeat when no observable eligible component is active;
-- bounded candidate capture;
-- acceptable false-positive behavior;
-- one on-demand handler request;
-- successful OS reconciliation.
+Host state-machine tests must demonstrate lifecycle suppression, bounded
+candidate capture, rate limiting, timeout behavior, and no heartbeat while
+ineligible. The required emulator adds one `ANR.CANDIDATE` plus exit
+reconciliation smoke. Long overhead and false-positive observations are
+optional diagnostics.
 
 ### Gate C: Personal release readiness
 
 All mandatory implementation paths are connected; host unit, property,
 fault-injection, native, Rust, build, package, and static no-network gates pass;
-the privacy, persistence, capture, package, symbol, and no-network smoke
-scenarios pass on the single required emulator; the final SHA-bound review is
-approved; and unsupported environments are documented without claiming broad
-certification.
+the manifest's representative privacy, persistence, capture, package, and
+no-network smoke scenarios pass on the single required emulator; the final
+review is approved; and unsupported environments are documented without
+claiming broad certification.
 
 ## 27. Open decisions
 

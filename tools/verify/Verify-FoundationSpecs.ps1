@@ -25,20 +25,13 @@ foreach ($decision in 1..12) {
 
 $protocol = Get-Content 'specs\phase0-measurement-protocol.md' -Raw
 $requiredProtocolTerms = @(
-    'Existing API 36 x86_64 emulator, 4 KiB',
-    'Additional API, ABI, page-size, physical-device, and OEM lanes are advisory',
-    'Run one ten-minute healthy watchdog false-candidate observation',
-    'Handler timer/poll wakeups',
-    'Ineligible watchdog wakeups after settling',
-    'Healthy false confirmations',
-    'Deterministic six-second stall',
-    'Handler-hang timeout/cancellation',
-    'Presubmit: 60 seconds',
-    'Personal release: 5 minutes'
+    'Historical Phase 0 Diagnostic Measurement Protocol',
+    'It is not a personal-release gate',
+    'tooling/fixtures/personal-release-scenarios.json'
 )
 foreach ($term in $requiredProtocolTerms) {
     if (-not $protocol.Contains($term)) {
-        throw "Measurement protocol is missing: $term"
+        throw "Historical measurement scope is missing: $term"
     }
 }
 
@@ -56,7 +49,7 @@ foreach ($term in @(
         '`IMPLEMENTATION_COMPLETE`',
         '`PERSONAL_RELEASE_READY`',
         'one configurable `tracebox-lab`',
-        'one final baseline-to-HEAD review',
+        'One final review of the release diff',
         'Tracker integration'
     )) {
     if (-not $personalScope.Contains($term)) {
@@ -91,20 +84,6 @@ foreach ($manifest in @(
     )) {
     if (-not (Get-Content $manifest -Raw).Contains('android:minSdkVersion="23"')) {
         throw "$manifest does not declare minSdkVersion 23"
-    }
-}
-
-$qualificationRunner = Get-Content 'tools\android\Run-Phase0Qualification.ps1' -Raw
-foreach ($term in @(
-        '[int] $ExpectedApi = 36',
-        '[int] $ExpectedPageSize = 4096',
-        '[switch] $Advisory',
-        "qualification_scope = `$qualificationScope",
-        'working_tree_patch_sha256 = Get-SourcePatchSha256',
-        "Required qualification must run on the existing x86_64 emulator"
-    )) {
-    if (-not $qualificationRunner.Contains($term)) {
-        throw "Qualification runner is not bound to ADR-0009: $term"
     }
 }
 

@@ -6,6 +6,7 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -431,6 +432,63 @@ class ExitReconciliationTest {
         assertTrue(ledger.imported(key))
         assertTrue(Files.exists(outside))
     }
+
+    @Test
+    fun android_user_path_detection_starts_at_the_package_directory() {
+        assertEquals(
+            3,
+            androidPrivateStoragePackageIndex(
+                listOf("data", "user", "0", "dev.tracebox.app", "no_backup", "tracebox"),
+            ),
+        )
+        assertNull(
+            androidPrivateStoragePackageIndex(
+                listOf("tmp", "data", "user", "0", "dev.tracebox.app", "tracebox"),
+            ),
+        )
+    }
+
+    @Test
+    fun exit_guard_ignores_only_the_prefix_above_its_boundary_and_rejects_descendant_symlinks() {
+        val journalRoot = Path.of(
+            "build",
+            "exit-reconciliation-tests",
+            "data",
+            "user",
+            "0",
+            "dev.tracebox.app",
+        ).toAbsolutePath()
+            .resolve("no_backup")
+            .resolve("tracebox")
+            .resolve("exit-import")
+        val packageBoundary = journalRoot.parent.parent.parent
+        val platformAlias = packageBoundary.parent
+        assertFalse(simulatedSymbolicLinkCheck(journalRoot, packageBoundary, setOf(platformAlias)))
+        assertTrue(simulatedSymbolicLinkCheck(journalRoot, packageBoundary, setOf(packageBoundary)))
+        assertTrue(simulatedSymbolicLinkCheck(journalRoot, packageBoundary, setOf(journalRoot)))
+
+        val base = Files.createTempDirectory("tracebox-exit-generic-symlink")
+        val outside = base.resolve("outside").also(Files::createDirectories)
+        val genericRoot = base.resolve("generic-journal")
+        if (runCatching { Files.createSymbolicLink(genericRoot, outside) }.isFailure) return
+        val journal = ExitImportJournal(
+            genericRoot,
+            maxEntries = 1,
+            maxBytes = ExitImportJournal.ENTRY_BYTES,
+        )
+        assertFailsWith<IllegalStateException> { journal.pending() }
+    }
+
+    private fun simulatedSymbolicLinkCheck(
+        path: Path,
+        firstGuardedComponent: Path,
+        symbolicLinks: Set<Path>,
+    ): Boolean = hasSymbolicLinkComponentAtOrBelow(
+        path = path,
+        firstGuardedComponent = firstGuardedComponent,
+        exists = { true },
+        isSymbolicLink = { it in symbolicLinks },
+    )
 
     private fun rawProvenance(): ExitRawArtifactProvenance =
         ExitRawArtifactProvenance(

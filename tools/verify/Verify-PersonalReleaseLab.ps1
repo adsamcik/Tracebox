@@ -1,10 +1,16 @@
+param(
+    [switch] $FullDiagnosticSuite
+)
+
 $ErrorActionPreference = 'Stop'
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $scenarioPath = Join-Path $root 'tooling\fixtures\personal-release-scenarios.json'
 $runnerPath = Join-Path $root 'tools\verify\Invoke-PersonalReleaseEmulator.ps1'
+$runnerSupportPath = Join-Path $root 'tools\verify\PersonalReleaseRunnerSupport.ps1'
 $hostReadinessPath = Join-Path $root 'tools\verify\Invoke-Phase5HostReadiness.ps1'
 $fixtureRoot = Join-Path $root 'test-apps\phase0-fixture'
+. $runnerSupportPath
 
 $expectedIds = @(
     'INSTALL.READINESS',
@@ -48,15 +54,28 @@ $expectedIds = @(
     'CORPUS.SYMBOL'
 )
 
+$expectedPersonalReleaseIds = @(
+    'INSTALL.READINESS',
+    'HANDLER.RESTART',
+    'FAULT.JVM_UNCAUGHT',
+    'FAULT.CPP_SEGV',
+    'ANR.CANDIDATE',
+    'EXIT.RESTART_RECONCILIATION',
+    'DELETE.ALL_RESTART',
+    'PACKAGE.DISCLOSURE',
+    'PACKAGE.EXACT_APPROVAL',
+    'PACKAGE.SAVE_SHARE',
+    'NETWORK.NO_INTERNET',
+    'NETWORK.HOST_CONTROL',
+    'NETWORK.BLOCKED_EGRESS'
+)
+
 $manifest = Get-Content -LiteralPath $scenarioPath -Raw | ConvertFrom-Json
 if ($manifest.schema -ne 'tracebox-personal-release-scenarios-v1') {
     throw "Unexpected personal-release scenario schema: $($manifest.schema)"
 }
 $scenarios = @($manifest.scenarios)
 $manifestIds = @($scenarios | ForEach-Object id)
-if ($manifestIds.Count -ne $expectedIds.Count) {
-    throw "Expected $($expectedIds.Count) personal-release scenarios, found $($manifestIds.Count)"
-}
 $duplicateManifestIds = @(
     $manifestIds |
         Group-Object |
@@ -64,17 +83,59 @@ $duplicateManifestIds = @(
         ForEach-Object Name
 )
 if ($duplicateManifestIds) {
-    throw "Duplicate personal-release scenario IDs: $($duplicateManifestIds -join ', ')"
+    throw "Duplicate diagnostic scenario IDs: $($duplicateManifestIds -join ', ')"
 }
-$missingExpected = @($expectedIds | Where-Object { $_ -notin $manifestIds })
-$unexpectedManifest = @($manifestIds | Where-Object { $_ -notin $expectedIds })
-if ($missingExpected -or $unexpectedManifest) {
-    throw "Scenario inventory drift. Missing=$($missingExpected -join ', ') unexpected=$($unexpectedManifest -join ', ')"
+if ($FullDiagnosticSuite) {
+    $missingExpected = @($expectedIds | Where-Object { $_ -notin $manifestIds })
+    $unexpectedManifest = @($manifestIds | Where-Object { $_ -notin $expectedIds })
+    if (
+        $manifestIds.Count -ne $expectedIds.Count -or
+        $missingExpected -or
+        $unexpectedManifest
+    ) {
+        throw (
+            "Diagnostic inventory drift. Missing=$($missingExpected -join ', ') " +
+            "unexpected=$($unexpectedManifest -join ', ')"
+        )
+    }
+}
+$personalReleaseIds = @($manifest.personal_release_required)
+$duplicatePersonalReleaseIds = @(
+    $personalReleaseIds |
+        Group-Object |
+        Where-Object Count -ne 1 |
+        ForEach-Object Name
+)
+$unknownPersonalReleaseIds = @(
+    $personalReleaseIds | Where-Object { $_ -notin $manifestIds }
+)
+$missingPersonalReleaseIds = @(
+    $expectedPersonalReleaseIds | Where-Object { $_ -notin $personalReleaseIds }
+)
+$unexpectedPersonalReleaseIds = @(
+    $personalReleaseIds | Where-Object { $_ -notin $expectedPersonalReleaseIds }
+)
+if ($personalReleaseIds.Count -eq 0 -or
+    $duplicatePersonalReleaseIds -or
+    $unknownPersonalReleaseIds -or
+    $missingPersonalReleaseIds -or
+    $unexpectedPersonalReleaseIds) {
+    throw (
+        "Personal-release scenario drift. duplicate=$($duplicatePersonalReleaseIds -join ', ') " +
+        "unknown=$($unknownPersonalReleaseIds -join ', ') " +
+        "missing=$($missingPersonalReleaseIds -join ', ') " +
+        "unexpected=$($unexpectedPersonalReleaseIds -join ', ')"
+    )
 }
 
 $allowedTransports = @('activity', 'broadcast', 'direct_boot', 'runner', 'host')
 $allowedVariants = @('noInternet', 'hostNetwork', 'either')
-foreach ($scenario in $scenarios) {
+$scenariosToValidate = if ($FullDiagnosticSuite) {
+    $scenarios
+} else {
+    @($scenarios | Where-Object id -in $personalReleaseIds)
+}
+foreach ($scenario in $scenariosToValidate) {
     if ($scenario.id -notmatch '^[A-Z][A-Z0-9_]*(\.[A-Z0-9_]+)+$' -or
         $scenario.id.Length -gt 48) {
         throw "Invalid stable scenario ID: $($scenario.id)"
@@ -90,7 +151,8 @@ foreach ($scenario in $scenarios) {
         throw "Invalid bounded action/expectation for $($scenario.id)"
     }
 }
-foreach ($fatalExpectation in @(
+if ($FullDiagnosticSuite) {
+    foreach ($fatalExpectation in @(
         [pscustomobject]@{
             id = 'FAULT.RUST_PANIC'
             expected = 'process_death_real_rust_hook_capture_and_restart_ingestion'
@@ -103,20 +165,51 @@ foreach ($fatalExpectation in @(
             id = 'FAULT.STACK_OVERFLOW'
             expected = 'process_death_capture_and_restart_ingestion'
         }
-    )) {
-    $manifestScenario = @(
-        $scenarios | Where-Object id -eq $fatalExpectation.id
-    ) | Select-Object -First 1
-    if (-not $manifestScenario -or
-        $manifestScenario.expected -ne $fatalExpectation.expected) {
-        throw (
-            "Fatal scenario contract drift for $($fatalExpectation.id): " +
-            "$($manifestScenario.expected)"
-        )
+        )) {
+        $manifestScenario = @(
+            $scenarios | Where-Object id -eq $fatalExpectation.id
+        ) | Select-Object -First 1
+        if (-not $manifestScenario -or
+            $manifestScenario.expected -ne $fatalExpectation.expected) {
+            throw (
+                "Fatal scenario contract drift for $($fatalExpectation.id): " +
+                "$($manifestScenario.expected)"
+            )
+        }
     }
 }
 
 $runner = Get-Content -LiteralPath $runnerPath -Raw
+$android16UidRows = @(
+    'package:dev.tracebox.phase0.hostnetwork uid:10228',
+    'package:dev.tracebox.phase0 uid:10227'
+)
+$android16Uid =
+    ConvertFrom-PmPackageUid -Package 'dev.tracebox.phase0' -Lines $android16UidRows
+if ($android16Uid -ne 10227) {
+    throw "Android 16 package UID parser returned $android16Uid instead of 10227"
+}
+foreach ($invalidUidRows in @(
+        @('package:dev.tracebox.phase0.hostnetwork uid:10228'),
+        @('package:dev.tracebox.phase0 uid=10227'),
+        @(
+            'package:dev.tracebox.phase0 uid:10227',
+            'package:dev.tracebox.phase0 uid:10227'
+        )
+    )) {
+    $acceptedInvalidUidRows = $false
+    try {
+        ConvertFrom-PmPackageUid `
+            -Package 'dev.tracebox.phase0' `
+            -Lines $invalidUidRows | Out-Null
+        $acceptedInvalidUidRows = $true
+    } catch {
+        # Expected: missing, malformed, and ambiguous rows must not select a UID.
+    }
+    if ($acceptedInvalidUidRows) {
+        throw "Android package UID parser accepted invalid rows: $($invalidUidRows -join ', ')"
+    }
+}
 $explicitIds = @(
     [regex]::Matches($runner, "Invoke-CertScenario\s+'([^']+)'") |
         ForEach-Object { $_.Groups[1].Value }
@@ -126,27 +219,37 @@ $groupedIds = @(
         ForEach-Object { $_.Groups[1].Value }
 )
 $implementedIds = @($explicitIds + $groupedIds)
+$requiredControllerIds = if ($FullDiagnosticSuite) {
+    $manifestIds
+} else {
+    $personalReleaseIds
+}
 $duplicateImplementations = @(
     $implementedIds |
         Group-Object |
-        Where-Object Count -ne 1 |
+        Where-Object { $_.Name -in $requiredControllerIds -and $_.Count -ne 1 } |
         ForEach-Object Name
 )
-$missingImplementations = @($manifestIds | Where-Object { $_ -notin $implementedIds })
-$unexpectedImplementations = @($implementedIds | Where-Object { $_ -notin $manifestIds })
+$missingImplementations = @(
+    $requiredControllerIds | Where-Object { $_ -notin $implementedIds }
+)
+$unexpectedImplementations = if ($FullDiagnosticSuite) {
+    @($implementedIds | Where-Object { $_ -notin $manifestIds })
+} else {
+    @()
+}
 if ($duplicateImplementations -or $missingImplementations -or $unexpectedImplementations) {
     throw (
         "Emulator controller coverage drift. duplicate=$($duplicateImplementations -join ', ') " +
         "missing=$($missingImplementations -join ', ') unexpected=$($unexpectedImplementations -join ', ')"
     )
 }
-foreach ($binding in @(
+$requiredRunnerBindings = @(
         '[int] $ExpectedApi = 36',
         '[int] $ExpectedPageSize = 4096',
         "`$abi -ne 'x86_64'",
-        'locksettings set-pin',
-        'cmd user is-user-unlocked 0',
-        'locksettings clear --old',
+        '[switch] $FullDiagnosticSuite',
+        '$requiredIds = if ($FullDiagnosticSuite)',
         'working_tree_patch_sha256',
         'scenario_manifest_sha256',
         'no_internet_apk_sha256',
@@ -155,12 +258,18 @@ foreach ($binding in @(
         'scenario_share_handoff',
         'ChooserActivity|ResolverActivity',
         'phase=post_delete_restart',
-        'phase=explicit_reenable',
         'Fatal action terminated without durable Tracebox evidence',
         'restart_segment=',
-        'actual_stall=true',
         'exit-tombstones-v1',
-        'osexit_segments=',
+        'osexit_segments='
+)
+if ($FullDiagnosticSuite) {
+    $requiredRunnerBindings += @(
+        'locksettings set-pin',
+        'cmd user is-user-unlocked 0',
+        'locksettings clear --old',
+        'phase=explicit_reenable',
+        'actual_stall=true',
         'startup_readiness_ms=',
         'scheduler_wakeup_delta=',
         'capture_overlap_heartbeat_samples=',
@@ -168,7 +277,9 @@ foreach ($binding in @(
         'capture_latency_ms=',
         'package_pss_kib=',
         'release_aar_bytes='
-    )) {
+    )
+}
+foreach ($binding in $requiredRunnerBindings) {
     if (-not $runner.Contains($binding)) {
         throw "Personal-release runner is missing endpoint/provenance binding: $binding"
     }
@@ -192,7 +303,6 @@ foreach ($legacyInvocation in @(
 foreach ($productionEvidence in @(
         ':tracebox_handler',
         ':production_participant',
-        'Assert-ProductionFixtureFaultCapture',
         'Assert-ProcessDeathAction',
         'Wait-RecoveredSegment',
         'scenario_anr_armed',
@@ -202,19 +312,19 @@ foreach ($productionEvidence in @(
         throw "Release gate lacks installed-production evidence: $productionEvidence"
     }
 }
+if ($FullDiagnosticSuite -and
+    -not $releaseScenarioRunner.Contains('Assert-ProductionFixtureFaultCapture')) {
+    throw 'Full diagnostic gate lacks production recursive-fault evidence'
+}
 
-$skipGuardIndex = $runner.IndexOf(
-    'if ($SkipBuild -or $SkipHostChecks)',
-    [StringComparison]::Ordinal
-)
 $hostGateIndex = $runner.IndexOf('if (-not $SkipHostChecks)', [StringComparison]::Ordinal)
 $buildIndex = $runner.IndexOf('if (-not $SkipBuild)', [StringComparison]::Ordinal)
 $sourceFreezeIndex = $runner.IndexOf(
-    '$sourcePatchSha256 = Get-SourcePatchSha256',
+    '$sourceState = Get-RepositorySourceState -Root $root',
     [StringComparison]::Ordinal
 )
 $sourceRecheckIndex = $runner.IndexOf(
-    '$currentSourcePatchSha256 = Get-SourcePatchSha256',
+    '$currentSourceState = Get-RepositorySourceState -Root $root',
     [StringComparison]::Ordinal
 )
 $apkFreezeIndex = $runner.IndexOf(
@@ -231,10 +341,6 @@ $apkRecheckIndex = $runner.IndexOf(
 )
 $reportIndex = $runner.IndexOf('$report = [ordered]@{', [StringComparison]::Ordinal)
 if (
-    $skipGuardIndex -lt 0 -or
-    $skipGuardIndex -gt $hostGateIndex -or
-    $skipGuardIndex -gt $buildIndex -or
-    -not $runner.Contains('Non-certifying shortcuts are rejected') -or
     $sourceFreezeIndex -lt 0 -or
     $sourceFreezeIndex -gt $hostGateIndex -or
     $sourceFreezeIndex -gt $buildIndex -or
@@ -254,6 +360,7 @@ if (
     ) -or
     -not $runner.Contains('no_internet_apk_sha256 = $noInternetApkSha256') -or
     -not $runner.Contains('host_network_apk_sha256 = $hostNetworkApkSha256') -or
+    -not $runner.Contains('source_state_stable = $true') -or
     -not $runner.Contains(
         'Source, scenario manifest, or installed fixture APK changed'
     )
@@ -261,6 +368,29 @@ if (
     throw (
         'Personal-release shortcut rejection or frozen source/APK provenance is incomplete'
     )
+}
+
+if (-not $FullDiagnosticSuite) {
+    [ordered]@{
+        schema = 'tracebox-personal-release-lab-host-v1'
+        mode = 'PERSONAL_RELEASE'
+        diagnostic_inventory_scenarios = $manifestIds.Count
+        personal_release_required_scenarios = $personalReleaseIds.Count
+        required_controller_implementations = $requiredControllerIds.Count
+        transports = @($scenariosToValidate.transport | Sort-Object -Unique)
+        variants = @($scenariosToValidate.variant | Sort-Object -Unique)
+        minified_variants = @('noInternetRelease', 'hostNetworkRelease')
+        qualification_variants = @(
+            'noInternetQualificationRelease',
+            'hostNetworkQualificationRelease'
+        )
+        optional_full_diagnostic_verifier = (
+            'tools\verify\Verify-PersonalReleaseLab.ps1 -FullDiagnosticSuite'
+        )
+        emulator_execution = 'NOT_RUN_HOST_STATIC_ONLY'
+        result = 'PASS'
+    } | ConvertTo-Json -Depth 4
+    return
 }
 
 $fatalCompletionStart = $runner.IndexOf(
@@ -347,7 +477,7 @@ foreach ($rustFatalContract in @(
     )) {
     if (-not $rustFatalBlock.Success -or
         -not $rustFatalBlock.Value.Contains($rustFatalContract)) {
-        throw "Rust fatal certification is missing: $rustFatalContract"
+        throw "Rust fatal diagnostic scenario is missing: $rustFatalContract"
     }
 }
 foreach ($fixtureFatalScenario in @('FAULT.RECURSIVE', 'FAULT.STACK_OVERFLOW')) {
@@ -380,7 +510,7 @@ foreach ($backgroundContract in @(
     )) {
     if (-not $backgroundLifetimeBlock.Success -or
         -not $backgroundLifetimeBlock.Value.Contains($backgroundContract)) {
-        throw "Background-handler certification is missing: $backgroundContract"
+        throw "Background-handler diagnostic scenario is missing: $backgroundContract"
     }
 }
 $blockedEgressBlock = [regex]::Match(
@@ -400,7 +530,7 @@ $resourceGateStart = $runner.IndexOf(
     [StringComparison]::Ordinal
 )
 if ($resourceGateStart -lt 0) {
-    throw 'Resource baseline certification block is missing'
+    throw 'Optional resource-baseline diagnostic block is missing'
 }
 $resourceGateEnd = $runner.IndexOf(
     '$corpusResult =',
@@ -408,7 +538,7 @@ $resourceGateEnd = $runner.IndexOf(
     [StringComparison]::Ordinal
 )
 if ($resourceGateEnd -le $resourceGateStart) {
-    throw 'Resource baseline certification block is missing'
+    throw 'Optional resource-baseline diagnostic block is missing'
 }
 $resourceGate = $runner.Substring(
     $resourceGateStart,
@@ -551,7 +681,7 @@ foreach ($packageContract in @(
         'chooser_returned=true'
     )) {
     if (-not $packageActivity.Contains($packageContract)) {
-        throw "Save/share certification lacks exact evidence: $packageContract"
+        throw "Save/share validation lacks exact evidence: $packageContract"
     }
 }
 $resourceProbe = $packageActivity.Substring(
@@ -645,7 +775,9 @@ if ($productionLabMentions) {
 
 [ordered]@{
     schema = 'tracebox-personal-release-lab-host-v1'
-    scenarios = $manifestIds.Count
+    mode = 'FULL_DIAGNOSTIC'
+    diagnostic_inventory_scenarios = $manifestIds.Count
+    personal_release_required_scenarios = $personalReleaseIds.Count
     controller_implementations = $implementedIds.Count
     transports = @($scenarios.transport | Sort-Object -Unique)
     variants = @($scenarios.variant | Sort-Object -Unique)

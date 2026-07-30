@@ -1,5 +1,20 @@
 {
   "schema": "tracebox-personal-release-scenarios-v1",
+  "personal_release_required": [
+    "INSTALL.READINESS",
+    "HANDLER.RESTART",
+    "FAULT.JVM_UNCAUGHT",
+    "FAULT.CPP_SEGV",
+    "ANR.CANDIDATE",
+    "EXIT.RESTART_RECONCILIATION",
+    "DELETE.ALL_RESTART",
+    "PACKAGE.DISCLOSURE",
+    "PACKAGE.EXACT_APPROVAL",
+    "PACKAGE.SAVE_SHARE",
+    "NETWORK.NO_INTERNET",
+    "NETWORK.HOST_CONTROL",
+    "NETWORK.BLOCKED_EGRESS"
+  ],
   "scenarios": [
     {"id":"INSTALL.READINESS","transport":"activity","variant":"either","action":"readiness","expected":"log"},
     {"id":"HANDLER.COLD_START","transport":"runner","variant":"either","action":"cold_start","expected":"processes"},
