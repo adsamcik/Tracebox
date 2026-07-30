@@ -44,3 +44,49 @@ Category: `handled_error`; retention: `ordinary`; package: `standard`; Direct Bo
 | 1 | kind | C1 | enum | 5 | none |
 | 2 | frame_count | C1 | u16 | 3 | none |
 
+## ManagedCrash (`5`)
+
+Category: `managed_crash`; retention: `structural_summary`; package: `standard`; Direct Boot: `False`.
+
+| Field ID | Field | Privacy | Type | Maximum encoded size | Transformation |
+|---:|---|---|---|---:|---|
+| 1 | primary_exception_code | C1 | fixed32 | 5 | none |
+| 2 | cause_count | C0 | u16 | 3 | none |
+| 3 | frame_count | C0 | u16 | 3 | none |
+| 4 | flags | C0 | u32 | 5 | none |
+
+## RustPanic (`6`)
+
+Category: `rust_panic`; retention: `structural_summary`; package: `standard`; Direct Boot: `False`.
+
+| Field ID | Field | Privacy | Type | Maximum encoded size | Transformation |
+|---:|---|---|---|---:|---|
+| 1 | payload_class | C0 | enum | 5 | none |
+| 2 | thread_role | C0 | enum | 5 | none |
+| 3 | location_code | C1 | fixed32 | 5 | none |
+| 4 | flags | C0 | u32 | 5 | none |
+
+## AnrCandidate (`7`)
+
+Category: `anr_candidate`; retention: `structural_summary`; package: `standard`; Direct Boot: `False`.
+
+| Field ID | Field | Privacy | Type | Maximum encoded size | Transformation |
+|---:|---|---|---|---:|---|
+| 1 | elapsed_millis | C0 | u32 | 5 | none |
+| 2 | sample_count | C0 | u16 | 3 | none |
+| 3 | frame_count | C0 | u16 | 3 | none |
+| 4 | nonfatal_result | C0 | enum | 5 | none |
+| 5 | flags | C0 | u32 | 5 | none |
+
+## OsExit (`8`)
+
+Category: `os_exit`; retention: `structural_summary`; package: `standard`; Direct Boot: `False`.
+
+| Field ID | Field | Privacy | Type | Maximum encoded size | Transformation |
+|---:|---|---|---|---:|---|
+| 1 | reason | C0 | i32 | 5 | none |
+| 2 | status | C0 | i32 | 5 | none |
+| 3 | importance | C0 | i32 | 5 | none |
+| 4 | link_confidence | C0 | enum | 5 | none |
+| 5 | artifact_state | C0 | enum | 5 | none |
+

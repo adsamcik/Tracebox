@@ -1,6 +1,6 @@
 package dev.tracebox.gradle;
 
-/** Inputs for future AGP variant identity capture tasks. */
+/** Inputs for the Gradle and AGP variant identity capture tasks. */
 public class TraceboxIdentityExtension {
     private String schemaFile = "schema/events.json";
     private String r8MappingFile;

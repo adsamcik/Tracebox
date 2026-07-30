@@ -45,6 +45,15 @@ public abstract class ReleaseConformanceTask extends DefaultTask {
     @PathSensitive(PathSensitivity.RELATIVE)
     public abstract RegularFileProperty getVerificationMetadata();
 
+    /** Full build identity emitted by the matching capture task. */
+    @InputFile
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public abstract RegularFileProperty getBuildIdentityFile();
+
+    /** Observed application ID from the public AGP application variant. */
+    @Input
+    public abstract Property<String> getApplicationId();
+
     /** Certified minimum SDK. */
     @Input
     public abstract Property<Integer> getExpectedMinSdk();
@@ -56,6 +65,10 @@ public abstract class ReleaseConformanceTask extends DefaultTask {
     /** Certified target SDK. */
     @Input
     public abstract Property<Integer> getExpectedTargetSdk();
+
+    /** Exact applying-project runtime configuration represented by the supplied lockfile. */
+    @Input
+    public abstract Property<String> getRuntimeConfigurationName();
 
     /** Variant label recorded in the deterministic conformance report. */
     @Input
@@ -91,15 +104,31 @@ public abstract class ReleaseConformanceTask extends DefaultTask {
         if (lockfiles.isEmpty()) {
             throw new GradleException("Tracebox release conformance requires committed Gradle lockfiles");
         }
+        if (lockfiles.size() != 1) {
+            throw new GradleException("Build identity binds exactly one applying-project Gradle lockfile, found "
+                    + lockfiles.size());
+        }
+        int lockedRuntimeCoordinates = 0;
+        boolean emptyLock = false;
         for (Path lockfile : lockfiles) {
             for (String line : Files.readAllLines(lockfile, StandardCharsets.UTF_8)) {
-                if (line.startsWith("#") || line.equals("empty=")) {
+                if (line.isBlank() || line.startsWith("#")) {
                     continue;
                 }
                 String[] parts = line.split("=", 2);
-                if (parts.length != 2 || !containsReleaseRuntimeClasspath(parts[1])) {
+                if (parts.length != 2) {
                     continue;
                 }
+                boolean belongsToRuntime = containsConfiguration(
+                        parts[1], getRuntimeConfigurationName().get());
+                if (parts[0].equals("empty")) {
+                    emptyLock |= belongsToRuntime;
+                    continue;
+                }
+                if (!belongsToRuntime) {
+                    continue;
+                }
+                lockedRuntimeCoordinates++;
                 String coordinate = parts[0].toLowerCase(java.util.Locale.ROOT);
                 for (String forbidden : FORBIDDEN_DEPENDENCY_TOKENS) {
                     if (coordinate.contains(forbidden)) {
@@ -109,20 +138,46 @@ public abstract class ReleaseConformanceTask extends DefaultTask {
                 }
             }
         }
+        if (lockedRuntimeCoordinates == 0 && !emptyLock) {
+            throw new GradleException("Applying-project lockfiles do not contain configuration "
+                    + getRuntimeConfigurationName().get());
+        }
         String verification = Files.readString(
                 getVerificationMetadata().get().getAsFile().toPath(), StandardCharsets.UTF_8);
         if (!verification.contains("<verification-metadata")) {
             throw new GradleException("Gradle verification metadata is malformed");
         }
+        String buildIdentity = Files.readString(
+                getBuildIdentityFile().get().getAsFile().toPath(), StandardCharsets.UTF_8);
+        requireExactJsonMember(
+                buildIdentity, "applicationId", "\"" + escape(getApplicationId().get()) + "\"");
+        requireExactJsonMember(buildIdentity, "minSdk", Integer.toString(getExpectedMinSdk().get()));
+        requireExactJsonMember(buildIdentity, "compileSdk", Integer.toString(getExpectedCompileSdk().get()));
+        requireExactJsonMember(buildIdentity, "targetSdk", Integer.toString(getExpectedTargetSdk().get()));
+        String lockSha256 = deterministicLockHash(lockfiles);
+        String identityLockSha256 = BuildIdentityCapture.hashProvenanceFile(lockfiles.get(0));
+        String verificationSha256 = BuildIdentityCapture.hashProvenanceFile(
+                getVerificationMetadata().get().getAsFile().toPath());
+        requireExactJsonMember(
+                buildIdentity, "dependencyLockSha256", "\"" + identityLockSha256 + "\"");
+        requireExactJsonMember(
+                buildIdentity, "dependencyVerificationSha256", "\"" + verificationSha256 + "\"");
+        String buildIdentitySha256 = BuildIdentityCapture.hashProvenanceFile(
+                getBuildIdentityFile().get().getAsFile().toPath());
 
         Path report = getReportFile().get().getAsFile().toPath();
         Files.createDirectories(report.getParent());
         Files.writeString(report, "{\n"
                 + "  \"variant\": \"" + escape(getVariantName().get()) + "\",\n"
+                + "  \"applicationId\": \"" + escape(getApplicationId().get()) + "\",\n"
                 + "  \"minSdk\": " + minSdk + ",\n"
                 + "  \"compileSdk\": " + getExpectedCompileSdk().get() + ",\n"
                 + "  \"targetSdk\": " + targetSdk + ",\n"
                 + "  \"dependencyLockfiles\": " + lockfiles.size() + ",\n"
+                + "  \"lockedRuntimeCoordinates\": " + lockedRuntimeCoordinates + ",\n"
+                + "  \"dependencyLockSha256\": \"" + lockSha256 + "\",\n"
+                + "  \"dependencyVerificationSha256\": \"" + verificationSha256 + "\",\n"
+                + "  \"buildIdentitySha256\": \"" + buildIdentitySha256 + "\",\n"
                 + "  \"networkPermissions\": false,\n"
                 + "  \"result\": \"PASS\"\n"
                 + "}\n", StandardCharsets.UTF_8);
@@ -137,13 +192,45 @@ public abstract class ReleaseConformanceTask extends DefaultTask {
         return Integer.parseInt(match.group(1));
     }
 
-    private static boolean containsReleaseRuntimeClasspath(String configurations) {
+    static boolean containsConfiguration(String configurations, String expected) {
         for (String configuration : configurations.split(",")) {
-            if (configuration.trim().endsWith("releaseRuntimeClasspath")) {
+            if (configuration.trim().equals(expected)) {
                 return true;
             }
         }
         return false;
+    }
+
+    static void requireExactJsonMember(String json, String member, String canonicalValue) {
+        Pattern memberPattern = Pattern.compile(
+                "(?m)^\\s*\"" + Pattern.quote(member) + "\"\\s*:");
+        Matcher members = memberPattern.matcher(json);
+        int memberCount = 0;
+        while (members.find()) {
+            memberCount++;
+        }
+        Pattern exactPattern = Pattern.compile(
+                "(?m)^\\s*\"" + Pattern.quote(member) + "\"\\s*:\\s*"
+                        + Pattern.quote(canonicalValue) + "\\s*,?\\s*$");
+        Matcher exact = exactPattern.matcher(json);
+        int exactCount = 0;
+        while (exact.find()) {
+            exactCount++;
+        }
+        if (memberCount != 1 || exactCount != 1) {
+            throw new GradleException("Build identity member '" + member
+                    + "' is missing, duplicated, or does not match the release inputs");
+        }
+    }
+
+    static String deterministicLockHash(List<Path> lockfiles) throws IOException {
+        StringBuilder hashes = new StringBuilder("tracebox-dependency-locks-v1\n");
+        for (Path lockfile : lockfiles.stream().sorted(Comparator.comparing(Path::toString)).toList()) {
+            String name = lockfile.getFileName().toString();
+            hashes.append(name.length()).append(':').append(name).append(':')
+                    .append(BuildIdentityCapture.hashProvenanceFile(lockfile)).append('\n');
+        }
+        return BuildIdentityCapture.sha256Hex(hashes.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private static String escape(String value) {

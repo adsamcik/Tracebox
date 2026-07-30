@@ -63,3 +63,63 @@ tb_status_v1 tb_record_generated_handlederror_v1(const tb_generated_handlederror
   return TB_STATUS_OK;
 }
 
+tb_status_v1 tb_record_generated_managedcrash_v1(const tb_generated_managedcrash_v1* value,
+                                              uint32_t recorder_ready) {
+  tb_status_v1 status = tb_validate_header_v1(
+      value == NULL ? NULL : &value->header,
+      (uint32_t)offsetof(tb_generated_managedcrash_v1, primary_exception_code),
+      (uint32_t)sizeof(tb_generated_managedcrash_v1));
+  if (status != TB_STATUS_OK) {
+    return status;
+  }
+  if (recorder_ready == 0u) {
+    return TB_STATUS_NOT_READY;
+  }
+  return TB_STATUS_OK;
+}
+
+tb_status_v1 tb_record_generated_rustpanic_v1(const tb_generated_rustpanic_v1* value,
+                                              uint32_t recorder_ready) {
+  tb_status_v1 status = tb_validate_header_v1(
+      value == NULL ? NULL : &value->header,
+      (uint32_t)offsetof(tb_generated_rustpanic_v1, payload_class),
+      (uint32_t)sizeof(tb_generated_rustpanic_v1));
+  if (status != TB_STATUS_OK) {
+    return status;
+  }
+  if (recorder_ready == 0u) {
+    return TB_STATUS_NOT_READY;
+  }
+  return TB_STATUS_OK;
+}
+
+tb_status_v1 tb_record_generated_anrcandidate_v1(const tb_generated_anrcandidate_v1* value,
+                                              uint32_t recorder_ready) {
+  tb_status_v1 status = tb_validate_header_v1(
+      value == NULL ? NULL : &value->header,
+      (uint32_t)offsetof(tb_generated_anrcandidate_v1, elapsed_millis),
+      (uint32_t)sizeof(tb_generated_anrcandidate_v1));
+  if (status != TB_STATUS_OK) {
+    return status;
+  }
+  if (recorder_ready == 0u) {
+    return TB_STATUS_NOT_READY;
+  }
+  return TB_STATUS_OK;
+}
+
+tb_status_v1 tb_record_generated_osexit_v1(const tb_generated_osexit_v1* value,
+                                              uint32_t recorder_ready) {
+  tb_status_v1 status = tb_validate_header_v1(
+      value == NULL ? NULL : &value->header,
+      (uint32_t)offsetof(tb_generated_osexit_v1, reason),
+      (uint32_t)sizeof(tb_generated_osexit_v1));
+  if (status != TB_STATUS_OK) {
+    return status;
+  }
+  if (recorder_ready == 0u) {
+    return TB_STATUS_NOT_READY;
+  }
+  return TB_STATUS_OK;
+}
+

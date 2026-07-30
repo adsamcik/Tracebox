@@ -3,7 +3,7 @@
 #![deny(missing_docs)]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Mutex;
+use std::sync::{Mutex, TryLockError};
 
 #[allow(missing_docs)]
 mod generated;
@@ -114,6 +114,19 @@ impl PanicRecordRing {
         self.len = 0;
         drained
     }
+
+    fn pop(&mut self) -> Option<PanicRecordV1> {
+        if self.len == 0 {
+            return None;
+        }
+        let value = self.records[self.head];
+        self.head = (self.head + 1) % PANIC_RECORD_RING_CAPACITY;
+        self.len -= 1;
+        if self.len == 0 {
+            self.head = 0;
+        }
+        Some(value)
+    }
 }
 
 static PANIC_RECORDS: Mutex<PanicRecordRing> = Mutex::new(PanicRecordRing::new());
@@ -122,9 +135,7 @@ fn valid_header(header: HeaderV1, expected_size: u32) -> Result<(), StatusV1> {
     if header.abi_version != 1 {
         return Err(StatusV1::UnsupportedVersion);
     }
-    if header.struct_size < HEADER_V1_SIZE
-        || header.struct_size > expected_size
-    {
+    if header.struct_size < HEADER_V1_SIZE || header.struct_size > expected_size {
         return Err(StatusV1::InvalidArgument);
     }
     Ok(())
@@ -160,7 +171,10 @@ pub extern "C" fn tb_tracebox_record_breadcrumb_v1(value: BreadcrumbV1) -> Statu
 pub extern "C" fn tb_tracebox_panic_containment_probe_v1(value: PanicProbeV1) -> StatusV1 {
     catch_unwind(AssertUnwindSafe(|| -> Result<StatusV1, StatusV1> {
         valid_header(value.header, PANIC_PROBE_V1_SIZE)?;
-        assert!(value.panic_requested == 0, "contained exported C ABI probe panic");
+        assert!(
+            value.panic_requested == 0,
+            "contained exported C ABI probe panic"
+        );
         Ok(StatusV1::Ok)
     }))
     .unwrap_or(Ok(StatusV1::Dropped))
@@ -178,7 +192,11 @@ pub extern "C" fn tb_tracebox_record_panic_v1(value: PanicRecordV1) -> StatusV1 
         if value.payload_kind > 2 || value.has_location > 1 {
             return Ok(StatusV1::InvalidArgument);
         }
-        let mut records = PANIC_RECORDS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut records = match PANIC_RECORDS.try_lock() {
+            Ok(records) => records,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(TryLockError::WouldBlock) => return Ok(StatusV1::Dropped),
+        };
         Ok(if records.push(value) {
             StatusV1::Ok
         } else {
@@ -196,8 +214,17 @@ pub extern "C" fn tb_tracebox_record_panic_v1(value: PanicRecordV1) -> StatusV1 
 pub fn drain_panic_records_v1() -> Vec<PanicRecordV1> {
     PANIC_RECORDS
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .drain()
+}
+
+/// Removes at most one bounded panic record for a non-allocating native consumer.
+#[must_use]
+pub fn take_panic_record_v1() -> Option<PanicRecordV1> {
+    PANIC_RECORDS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .pop()
 }
 
 #[cfg(test)]
@@ -260,5 +287,26 @@ mod tests {
             StatusV1::InvalidArgument,
         );
         assert_eq!(drain_panic_records_v1().len(), 1);
+    }
+
+    #[test]
+    fn structured_panic_bridge_drops_immediately_when_the_ring_is_reentered() {
+        let guard = PANIC_RECORDS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(
+            tb_tracebox_record_panic_v1(PanicRecordV1 {
+                header: HeaderV1 {
+                    struct_size: PANIC_RECORD_V1_SIZE,
+                    abi_version: 1,
+                },
+                payload_kind: 0,
+                has_location: 0,
+                line: 0,
+                column: 0,
+            }),
+            StatusV1::Dropped,
+        );
+        drop(guard);
     }
 }

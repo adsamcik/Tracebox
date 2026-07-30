@@ -3,8 +3,6 @@ package dev.tracebox.phase0
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import dev.tracebox.nativecapture.NativeRuntime
@@ -21,7 +19,12 @@ class HandlerService : Service() {
             stopSelf()
             return
         }
-        NativeRuntime.initializeEmergency(noBackupFilesDir.absolutePath, PROCESS_ROLE_HANDLER)
+        if (!LabNativeIdentity.initialize(this, PROCESS_ROLE_HANDLER)) {
+            startupBlocked = true
+            Log.e(TAG, "handler_start_blocked=identity_or_policy")
+            stopSelf()
+            return
+        }
         Thread(
             {
                 val result = NativeRuntime.startHandler(socketPath())
@@ -38,12 +41,9 @@ class HandlerService : Service() {
             return START_NOT_STICKY
         }
         when (intent?.action) {
-            ACTION_CRASH -> NativeRuntime.crashForTest(0)
-            ACTION_HANG -> NativeRuntime.hangForTest()
-            ACTION_TERMINATE ->
-                Handler(Looper.getMainLooper()).post {
-                    NativeRuntime.terminateHandlerForTest()
-                }
+            ACTION_CRASH -> LabNativeFaults.abortProcess()
+            ACTION_HANG -> LabNativeFaults.stopProcess()
+            ACTION_TERMINATE -> LabNativeFaults.terminateProcess()
         }
         return START_NOT_STICKY
     }

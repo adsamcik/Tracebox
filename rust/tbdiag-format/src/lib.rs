@@ -30,10 +30,18 @@ fn write_value(value: &CanonicalCborValue, output: &mut Vec<u8>) {
         CanonicalCborValue::Map(entries) => {
             let mut encoded_keys: Vec<_> = entries
                 .iter()
-                .map(|(key, value)| (encode_canonical_cbor(&CanonicalCborValue::Text(key.clone())), value))
+                .map(|(key, value)| {
+                    (
+                        encode_canonical_cbor(&CanonicalCborValue::Text(key.clone())),
+                        value,
+                    )
+                })
                 .collect();
             encoded_keys.sort_by(|left, right| {
-                left.0.len().cmp(&right.0.len()).then_with(|| left.0.cmp(&right.0))
+                left.0
+                    .len()
+                    .cmp(&right.0.len())
+                    .then_with(|| left.0.cmp(&right.0))
             });
             write_head(5, encoded_keys.len() as u64, output);
             for (key, value) in encoded_keys {
@@ -46,31 +54,33 @@ fn write_value(value: &CanonicalCborValue, output: &mut Vec<u8>) {
 
 fn write_head(major: u8, value: u64, output: &mut Vec<u8>) {
     match value {
-        0..=23 => output.push((major << 5) | value as u8),
-        24..=0xff => output.extend_from_slice(&[(major << 5) | 24, value as u8]),
-        0x100..=0xffff => output.extend_from_slice(&[
-            (major << 5) | 25,
-            (value >> 8) as u8,
-            value as u8,
+        0..=23 => output.push(
+            (major << 5) | u8::try_from(value).expect("CBOR immediate value is range checked"),
+        ),
+        24..=0xff => output.extend_from_slice(&[
+            (major << 5) | 24,
+            u8::try_from(value).expect("CBOR one-byte value is range checked"),
         ]),
-        0x1_0000..=0xffff_ffff => output.extend_from_slice(&[
-            (major << 5) | 26,
-            (value >> 24) as u8,
-            (value >> 16) as u8,
-            (value >> 8) as u8,
-            value as u8,
-        ]),
-        _ => output.extend_from_slice(&[
-            (major << 5) | 27,
-            (value >> 56) as u8,
-            (value >> 48) as u8,
-            (value >> 40) as u8,
-            (value >> 32) as u8,
-            (value >> 24) as u8,
-            (value >> 16) as u8,
-            (value >> 8) as u8,
-            value as u8,
-        ]),
+        0x100..=0xffff => {
+            output.push((major << 5) | 25);
+            output.extend_from_slice(
+                &u16::try_from(value)
+                    .expect("CBOR two-byte value is range checked")
+                    .to_be_bytes(),
+            );
+        }
+        0x1_0000..=0xffff_ffff => {
+            output.push((major << 5) | 26);
+            output.extend_from_slice(
+                &u32::try_from(value)
+                    .expect("CBOR four-byte value is range checked")
+                    .to_be_bytes(),
+            );
+        }
+        _ => {
+            output.push((major << 5) | 27);
+            output.extend_from_slice(&value.to_be_bytes());
+        }
     }
 }
 
@@ -85,7 +95,10 @@ mod tests {
     #[test]
     fn canonical_cbor_encoder_matches_actual_kotlin_encoder_output_for_shared_fixture() {
         let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent().and_then(|path| path.parent()).expect("workspace root").to_path_buf();
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
         let fixture_path = repository.join("tooling/fixtures/canonical-cbor-single-map.fixture");
         let fixture: BTreeMap<_, _> = fs::read_to_string(&fixture_path)
             .expect("shared fixture")
@@ -98,7 +111,11 @@ mod tests {
             CanonicalCborValue::Unsigned(fixture["unsigned"].parse().expect("unsigned fixture")),
         )]));
         let kotlin_output = repository.join("rust/tbdiag-format/target/kotlin-canonical-cbor.bin");
-        let gradlew = repository.join(if cfg!(windows) { "gradlew.bat" } else { "gradlew" });
+        let gradlew = repository.join(if cfg!(windows) {
+            "gradlew.bat"
+        } else {
+            "gradlew"
+        });
         let status = Command::new(gradlew)
             .current_dir(&repository)
             .arg(":android:tracebox-export:testDebugUnitTest")
@@ -111,6 +128,9 @@ mod tests {
             .status()
             .expect("launch Kotlin fixture encoder");
         assert!(status.success(), "Kotlin fixture encoder failed: {status}");
-        assert_eq!(rust_output, fs::read(kotlin_output).expect("Kotlin encoder output"));
+        assert_eq!(
+            rust_output,
+            fs::read(kotlin_output).expect("Kotlin encoder output")
+        );
     }
 }

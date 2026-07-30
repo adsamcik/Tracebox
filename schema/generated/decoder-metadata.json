@@ -167,8 +167,192 @@
       "name": "HandledError",
       "package_visibility": "standard",
       "retention": "ordinary"
+    },
+    {
+      "category": "managed_crash",
+      "direct_boot_eligible": false,
+      "fields": [
+        {
+          "id": 1,
+          "max_encoded_size": 5,
+          "name": "primary_exception_code",
+          "privacy": "C1",
+          "semantic_type": "fixed32",
+          "transform": "none"
+        },
+        {
+          "id": 2,
+          "max_encoded_size": 3,
+          "name": "cause_count",
+          "privacy": "C0",
+          "semantic_type": "u16",
+          "transform": "none"
+        },
+        {
+          "id": 3,
+          "max_encoded_size": 3,
+          "name": "frame_count",
+          "privacy": "C0",
+          "semantic_type": "u16",
+          "transform": "none"
+        },
+        {
+          "id": 4,
+          "max_encoded_size": 5,
+          "name": "flags",
+          "privacy": "C0",
+          "semantic_type": "u32",
+          "transform": "none"
+        }
+      ],
+      "id": 5,
+      "name": "ManagedCrash",
+      "package_visibility": "standard",
+      "retention": "structural_summary"
+    },
+    {
+      "category": "rust_panic",
+      "direct_boot_eligible": false,
+      "fields": [
+        {
+          "id": 1,
+          "max_encoded_size": 5,
+          "name": "payload_class",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        },
+        {
+          "id": 2,
+          "max_encoded_size": 5,
+          "name": "thread_role",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        },
+        {
+          "id": 3,
+          "max_encoded_size": 5,
+          "name": "location_code",
+          "privacy": "C1",
+          "semantic_type": "fixed32",
+          "transform": "none"
+        },
+        {
+          "id": 4,
+          "max_encoded_size": 5,
+          "name": "flags",
+          "privacy": "C0",
+          "semantic_type": "u32",
+          "transform": "none"
+        }
+      ],
+      "id": 6,
+      "name": "RustPanic",
+      "package_visibility": "standard",
+      "retention": "structural_summary"
+    },
+    {
+      "category": "anr_candidate",
+      "direct_boot_eligible": false,
+      "fields": [
+        {
+          "id": 1,
+          "max_encoded_size": 5,
+          "name": "elapsed_millis",
+          "privacy": "C0",
+          "semantic_type": "u32",
+          "transform": "none"
+        },
+        {
+          "id": 2,
+          "max_encoded_size": 3,
+          "name": "sample_count",
+          "privacy": "C0",
+          "semantic_type": "u16",
+          "transform": "none"
+        },
+        {
+          "id": 3,
+          "max_encoded_size": 3,
+          "name": "frame_count",
+          "privacy": "C0",
+          "semantic_type": "u16",
+          "transform": "none"
+        },
+        {
+          "id": 4,
+          "max_encoded_size": 5,
+          "name": "nonfatal_result",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        },
+        {
+          "id": 5,
+          "max_encoded_size": 5,
+          "name": "flags",
+          "privacy": "C0",
+          "semantic_type": "u32",
+          "transform": "none"
+        }
+      ],
+      "id": 7,
+      "name": "AnrCandidate",
+      "package_visibility": "standard",
+      "retention": "structural_summary"
+    },
+    {
+      "category": "os_exit",
+      "direct_boot_eligible": false,
+      "fields": [
+        {
+          "id": 1,
+          "max_encoded_size": 5,
+          "name": "reason",
+          "privacy": "C0",
+          "semantic_type": "i32",
+          "transform": "none"
+        },
+        {
+          "id": 2,
+          "max_encoded_size": 5,
+          "name": "status",
+          "privacy": "C0",
+          "semantic_type": "i32",
+          "transform": "none"
+        },
+        {
+          "id": 3,
+          "max_encoded_size": 5,
+          "name": "importance",
+          "privacy": "C0",
+          "semantic_type": "i32",
+          "transform": "none"
+        },
+        {
+          "id": 4,
+          "max_encoded_size": 5,
+          "name": "link_confidence",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        },
+        {
+          "id": 5,
+          "max_encoded_size": 5,
+          "name": "artifact_state",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        }
+      ],
+      "id": 8,
+      "name": "OsExit",
+      "package_visibility": "standard",
+      "retention": "structural_summary"
     }
   ],
-  "fingerprint": "6cab7df4c1845824d3db406e5c4702727585556758764a05d43014c66dcfa92c",
+  "fingerprint": "1ed8573b32578a1165aaa1a3d0b4f139549b5041bdba9aaa4329feb1c8c371e3",
   "schema_version": 1
 }

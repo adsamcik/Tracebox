@@ -9,6 +9,10 @@ The verified checkout created by `tools/crashpad/Acquire-Crashpad.ps1` preserves
 | linux-syscall-support | BSD-3-Clause | `checkout/crashpad/third_party/lss/lss/linux_syscall_support.h` header notice |
 | zlib | Zlib | `checkout/crashpad/third_party/zlib/zlib/LICENSE` |
 | googletest | BSD-3-Clause | `checkout/crashpad/third_party/googletest/googletest/LICENSE` |
-| Chromium buildtools | BSD-3-Clause | component file notices under `checkout/buildtools` |
+| Chromium buildtools | BSD-3-Clause | `checkout/buildtools/LICENSE` |
 
-Binary distributions must reproduce applicable notices from the exact verified checkout.
+Binary distributions reproduce these exact applicable texts in the public Android
+resource `dev.tracebox.R.raw.tracebox_third_party_notices`. The deterministic
+`tools/verify/Verify-CrashpadThirdPartyNotices.ps1` check binds every normalized
+section to the pinned verified checkout and verifies the release AAR entry and
+resource symbol.

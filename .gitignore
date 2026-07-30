@@ -5,10 +5,13 @@
 .externalNativeBuild/
 build/
 **/build/
+native/build-personal-host*/
 local.properties
 *.iml
 
 target/
+__pycache__/
+*.pyc
 .bootstrap/
 third_party/crashpad/checkout/
 android/tracebox-native/src/main/jniLibs/

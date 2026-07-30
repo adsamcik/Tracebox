@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.gradle.testkit.runner.GradleRunner;
 
@@ -17,23 +18,55 @@ public final class BuildIdentityTest {
     /** Applies the plugin in a fixture project and verifies schema/build provenance was captured. */
     public static void main(String[] args) throws Exception {
         Path root = Path.of("..", "..").toAbsolutePath().normalize();
-        Path mapping = root.resolve("test-apps/phase0-fixture/build/outputs/mapping/release/mapping.txt");
+        Path mapping =
+                root.resolve(
+                        "test-apps/phase0-fixture/build/outputs/mapping/noInternetRelease/mapping.txt");
         Path nativeLibraries = root.resolve("android/tracebox-native/src/main/jniLibs");
         if (!Files.isRegularFile(mapping) || !Files.isDirectory(nativeLibraries)) {
             throw new AssertionError("functional test requires the real Phase 0 release mapping and native libraries");
         }
-        BuildIdentity identity = BuildIdentityCapture.capture(":app", "release", "version=7;gradle=9.6.1",
-                "schema".getBytes(StandardCharsets.UTF_8), mapping, List.of(nativeLibraries));
+        List<Path> patchInputs;
+        try (Stream<Path> files = Files.list(root.resolve("third_party/crashpad/patches"))) {
+            patchInputs = files.filter(Files::isRegularFile).sorted().toList();
+        }
+        BuildIdentity identity = BuildIdentityCapture.capture(
+                ":app",
+                "dev.tracebox.phase0",
+                1,
+                "0.1",
+                "release",
+                23,
+                37,
+                37,
+                "version=7;gradle=9.6.1",
+                "schema".getBytes(StandardCharsets.UTF_8),
+                mapping,
+                List.of(nativeLibraries),
+                root.resolve("third_party/crashpad/source-lock.json"),
+                patchInputs,
+                root.resolve("Cargo.lock"),
+                root.resolve("gradle/verification-metadata.xml"),
+                root.resolve("test-apps/phase0-fixture/gradle.lockfile"));
         if (identity.buildId().length() != 64 || identity.r8MappingId() == null
                 || identity.r8MappingSha256() == null
+                || identity.crashpadSourceSha256() == null
+                || identity.crashpadPatchSetSha256() == null
+                || identity.rustLockSha256() == null
+                || identity.dependencyVerificationSha256() == null
+                || identity.dependencyLockSha256() == null
                 || identity.elfBuildIds().stream().noneMatch(elf -> elf.buildId() != null)
                 || identity.elfBuildIds().stream().noneMatch(elf -> "sha256".equals(elf.source()))) {
             throw new AssertionError("real R8 mapping or ELF artifact identity was not captured");
         }
         String symbolCatalog = BuildIdentityCapture.symbolCatalog(identity);
-        if (!symbolCatalog.startsWith("# tracebox-symbol-catalog-v1\n")
+        if (!symbolCatalog.startsWith("# tracebox-symbol-catalog-v2\nbuild\t" + identity.buildId())
                 || identity.elfBuildIds().stream().anyMatch(
-                        elf -> !symbolCatalog.contains("native\t" + elf.path() + "\t" + elf.buildId()))
+                        elf -> !symbolCatalog.contains("native\t"
+                                + BuildIdentityCapture.catalogModuleName(elf.path()) + "\t" + elf.buildId()))
+                || symbolCatalog.lines()
+                        .filter(line -> line.startsWith("native\t"))
+                        .map(line -> line.split("\t", 3)[1])
+                        .anyMatch(module -> module.contains("/") || module.contains("\\"))
                 || identity.elfBuildIds().stream().noneMatch(
                         elf -> elf.symbols().stream().anyMatch(symbol -> symbol.offset() > 0))
                 || identity.r8Mappings().isEmpty()
@@ -64,9 +97,61 @@ public final class BuildIdentityTest {
                 || !catalog.contains(identity.r8MappingSha256())
                 || !catalog.contains("\"elfBuildIds\": [")
                 || !catalog.contains("\"symbolCatalogSha256\"")
-                || !emittedSymbols.startsWith("# tracebox-symbol-catalog-v1\n")) {
+                || !catalog.contains("\"applicationId\"")
+                || !catalog.contains("\"dependencyVerificationSha256\"")
+                || !emittedSymbols.startsWith("# tracebox-symbol-catalog-v2\n")) {
             throw new AssertionError("plugin did not capture applying-project R8/ELF provenance");
         }
+        verifyAndroidVariantSchemaConfiguration();
+    }
+
+    private static void verifyAndroidVariantSchemaConfiguration() throws Exception {
+        Path fixture = Path.of("build", "android-variant-schema-functional-test");
+        Files.createDirectories(fixture.resolve("identity"));
+        Files.writeString(
+                fixture.resolve("settings.gradle"),
+                "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\n"
+                        + "rootProject.name = 'android-variant-schema-fixture'\n");
+        Files.writeString(
+                fixture.resolve("identity/custom-events.json"),
+                "{\"schema_version\":2,\"events\":[]}\n");
+        Files.writeString(
+                fixture.resolve("build.gradle"),
+                "plugins {\n"
+                        + "  id 'com.android.application'\n"
+                        + "  id 'dev.tracebox.identity'\n"
+                        + "}\n"
+                        + "android {\n"
+                        + "  namespace = 'dev.tracebox.schemafixture'\n"
+                        + "  compileSdk = 37\n"
+                        + "  defaultConfig {\n"
+                        + "    minSdk = 23\n"
+                        + "    targetSdk = 37\n"
+                        + "    versionCode = 1\n"
+                        + "    versionName = '1.0'\n"
+                        + "  }\n"
+                        + "}\n"
+                        + "traceboxIdentity { schemaFile = 'identity/custom-events.json' }\n"
+                        + "tasks.register('assertTraceboxVariantSchemas') {\n"
+                        + "  doLast {\n"
+                        + "    def expected = rootProject.file('identity/custom-events.json').canonicalFile\n"
+                        + "    def captures = tasks.findAll {\n"
+                        + "      it.name.startsWith('captureTraceboxBuildIdentity') &&\n"
+                        + "          it.name != 'captureTraceboxBuildIdentity'\n"
+                        + "    }\n"
+                        + "    assert !captures.empty : 'no Android variant identity tasks were registered'\n"
+                        + "    captures.each { capture ->\n"
+                        + "      assert capture.schemaFile.get().asFile.canonicalFile == expected :\n"
+                        + "          \"${capture.name} ignored traceboxIdentity.schemaFile\"\n"
+                        + "    }\n"
+                        + "  }\n"
+                        + "}\n");
+
+        GradleRunner.create()
+                .withProjectDir(fixture.toFile())
+                .withArguments("assertTraceboxVariantSchemas", "--offline")
+                .withPluginClasspath()
+                .build();
     }
 
     private static String gradlePath(Path path) {

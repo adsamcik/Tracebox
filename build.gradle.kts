@@ -49,7 +49,8 @@ tasks.register("phase1Check") {
     description = "Runs the Phase 1 Kotlin API and build identity contract tests."
     dependsOn(
         ":android:tracebox-api:testDebugUnitTest",
-        ":test-apps:phase0-fixture:captureTraceboxBuildIdentityRelease",
+        ":test-apps:phase0-fixture:captureTraceboxBuildIdentityNoInternetRelease",
+        ":test-apps:phase0-fixture:captureTraceboxBuildIdentityHostNetworkRelease",
     )
 }
 

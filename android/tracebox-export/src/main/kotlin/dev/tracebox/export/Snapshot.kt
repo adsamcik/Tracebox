@@ -11,6 +11,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.LinkedHashMap
+import java.util.PriorityQueue
 
 /** A persisted identity may be used for planning, but is never serialized into a package. */
 class InternalIdentity private constructor(private val value: ByteArray) : Comparable<InternalIdentity> {
@@ -102,6 +104,148 @@ data class StandardSnapshotRequest(
     }
 }
 
+/**
+ * Keeps only the deterministic most-recent Standard records while a snapshot is planned.
+ *
+ * The heap owns at most [SnapshotPreparer.MAX_STANDARD_RECORD_ENTRIES] records. Since every
+ * [OrdinarySourceRecord] is itself bounded, both planning memory and the eventual materialized
+ * record bytes have a fixed upper bound before ZIP construction begins.
+ */
+internal class BoundedRecentStandardRecordSelection {
+    private data class Candidate(
+        val processIdentity: InternalIdentity,
+        val segmentIdentity: InternalIdentity,
+        val processRole: Int,
+        val record: OrdinarySourceRecord,
+    )
+
+    private data class SegmentKey(
+        val processIdentity: InternalIdentity,
+        val segmentIdentity: InternalIdentity,
+        val processRole: Int,
+    )
+
+    private val newest = PriorityQueue<Candidate>(SnapshotPreparer.MAX_STANDARD_RECORD_ENTRIES, RECENCY)
+
+    fun offer(
+        processIdentity: InternalIdentity,
+        segmentIdentity: InternalIdentity,
+        processRole: Int,
+        record: OrdinarySourceRecord,
+    ) {
+        require(processRole >= 0)
+        val candidate = Candidate(processIdentity, segmentIdentity, processRole, record)
+        if (newest.size < SnapshotPreparer.MAX_STANDARD_RECORD_ENTRIES) {
+            newest.add(candidate)
+            return
+        }
+        val oldestSelected = checkNotNull(newest.peek())
+        if (RECENCY.compare(candidate, oldestSelected) > 0) {
+            newest.remove()
+            newest.add(candidate)
+        }
+    }
+
+    fun toSegments(): List<SegmentSource> {
+        val canonical = newest.toList().sortedWith(CANONICAL)
+        check(
+            canonical.sumOf {
+                MATERIALIZED_RECORD_HEADER_BYTES + it.record.encodedPayload.size.toLong()
+            } <= SnapshotPreparer.MAX_STANDARD_SELECTED_MATERIALIZED_BYTES,
+        )
+        val grouped = LinkedHashMap<SegmentKey, MutableList<OrdinarySourceRecord>>()
+        canonical.forEach { candidate ->
+            val key = SegmentKey(
+                candidate.processIdentity,
+                candidate.segmentIdentity,
+                candidate.processRole,
+            )
+            grouped.getOrPut(key, ::mutableListOf).add(candidate.record)
+        }
+        return grouped.map { (key, records) ->
+            SegmentSource(
+                processIdentity = key.processIdentity,
+                segmentIdentity = key.segmentIdentity,
+                processRole = key.processRole,
+                records = records.toList(),
+            )
+        }
+    }
+
+    private companion object {
+        const val MATERIALIZED_RECORD_HEADER_BYTES =
+            Int.SIZE_BYTES * 6L + Long.SIZE_BYTES
+
+        val RECENCY = Comparator<Candidate> { left, right ->
+            compareValues(left.record.occurredAtMillis, right.record.occurredAtMillis)
+                .takeUnless { it == 0 }
+                ?: compareValues(left.record.sequence, right.record.sequence)
+                    .takeUnless { it == 0 }
+                ?: left.processIdentity.compareTo(right.processIdentity)
+                    .takeUnless { it == 0 }
+                ?: left.segmentIdentity.compareTo(right.segmentIdentity)
+                    .takeUnless { it == 0 }
+                ?: compareValues(left.processRole, right.processRole)
+                    .takeUnless { it == 0 }
+                ?: compareValues(left.record.eventId.stableId, right.record.eventId.stableId)
+                    .takeUnless { it == 0 }
+                ?: compareByteArrays(left.record.encodedPayload, right.record.encodedPayload)
+                    .takeUnless { it == 0 }
+                ?: compareNullableIdentities(
+                    left.record.artifactIdentity,
+                    right.record.artifactIdentity,
+                ).takeUnless { it == 0 }
+                ?: compareValues(left.record.privacyClass.ordinal, right.record.privacyClass.ordinal)
+                    .takeUnless { it == 0 }
+                ?: compareValues(left.record.valid, right.record.valid)
+        }
+
+        val CANONICAL = Comparator<Candidate> { left, right ->
+            left.processIdentity.compareTo(right.processIdentity)
+                .takeUnless { it == 0 }
+                ?: left.segmentIdentity.compareTo(right.segmentIdentity)
+                    .takeUnless { it == 0 }
+                ?: compareValues(left.processRole, right.processRole)
+                    .takeUnless { it == 0 }
+                ?: compareValues(left.record.sequence, right.record.sequence)
+                    .takeUnless { it == 0 }
+                ?: compareValues(left.record.occurredAtMillis, right.record.occurredAtMillis)
+                    .takeUnless { it == 0 }
+                ?: compareValues(left.record.eventId.stableId, right.record.eventId.stableId)
+                    .takeUnless { it == 0 }
+                ?: compareByteArrays(left.record.encodedPayload, right.record.encodedPayload)
+                    .takeUnless { it == 0 }
+                ?: compareNullableIdentities(
+                    left.record.artifactIdentity,
+                    right.record.artifactIdentity,
+                ).takeUnless { it == 0 }
+                ?: compareValues(left.record.privacyClass.ordinal, right.record.privacyClass.ordinal)
+                    .takeUnless { it == 0 }
+                ?: compareValues(left.record.valid, right.record.valid)
+        }
+
+        fun compareNullableIdentities(
+            left: InternalIdentity?,
+            right: InternalIdentity?,
+        ): Int = when {
+            left === right -> 0
+            left == null -> -1
+            right == null -> 1
+            else -> left.compareTo(right)
+        }
+
+        fun compareByteArrays(left: ByteArray, right: ByteArray): Int {
+            val shared = minOf(left.size, right.size)
+            repeat(shared) { index ->
+                val comparison =
+                    (left[index].toInt() and 0xff).compareTo(right[index].toInt() and 0xff)
+                if (comparison != 0) return comparison
+            }
+            return left.size.compareTo(right.size)
+        }
+    }
+}
+
 sealed class SnapshotFailure(message: String) : IllegalStateException(message) {
     data class CorruptInput(val detail: String) : SnapshotFailure(detail)
     data class SchemaTransform(val event: GeneratedEventId, val transform: String) :
@@ -175,13 +319,22 @@ class PreparedSnapshot internal constructor(
  */
 class SnapshotPreparer(private val accounting: UidAccounting, private val stagingKey: java.nio.file.Path) {
     fun prepare(request: StandardSnapshotRequest): PreparedSnapshot {
-        val selected = request.segments
-            .sortedWith(compareBy<SegmentSource>({ it.processIdentity }, { it.segmentIdentity }))
-            .map { segment ->
-                val cutoff = request.sequenceCutoffs[segment.segmentIdentity]
-                    ?: throw SnapshotFailure.CorruptInput("missing frozen cutoff")
-                segment to segment.records.filter { it.sequence <= cutoff }.sortedBy(OrdinarySourceRecord::sequence)
+        val recent = BoundedRecentStandardRecordSelection()
+        request.segments.forEach { segment ->
+            val cutoff = request.sequenceCutoffs[segment.segmentIdentity]
+                ?: throw SnapshotFailure.CorruptInput("missing frozen cutoff")
+            segment.records.forEach { record ->
+                if (record.sequence <= cutoff) {
+                    recent.offer(
+                        segment.processIdentity,
+                        segment.segmentIdentity,
+                        segment.processRole,
+                        record,
+                    )
+                }
             }
+        }
+        val selected = recent.toSegments().map { segment -> segment to segment.records }
 
         val processIds = selected.map { it.first.processIdentity }.distinct().sorted()
             .withIndex().associate { (index, identity) -> identity to index + 1 }
@@ -295,5 +448,19 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
                 released = true
             }
         }
+    }
+
+    companion object {
+        /** One of DeterministicZip's entries is always the manifest. */
+        const val MAX_STANDARD_RECORD_ENTRIES = DeterministicZip.MAX_ENTRIES - 1
+
+        /**
+         * Exact bound for all materialized record bodies retained by Standard planning.
+         * The manifest and ZIP metadata are separately covered by DeterministicZip's bounds.
+         */
+        const val MAX_STANDARD_SELECTED_MATERIALIZED_BYTES =
+            MAX_STANDARD_RECORD_ENTRIES *
+                (Int.SIZE_BYTES * 6L + Long.SIZE_BYTES +
+                    OrdinarySourceRecord.MAX_ORDINARY_RECORD_BYTES)
     }
 }

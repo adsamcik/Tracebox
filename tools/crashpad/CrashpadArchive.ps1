@@ -8,7 +8,9 @@ function Test-CrashpadArchiveEntryName {
         [string] $Destination
     )
 
-    if ([string]::IsNullOrWhiteSpace($Name) -or $Name.Contains('\') -or
+    if ([string]::IsNullOrWhiteSpace($Name) -or
+        $Name.IndexOfAny([char[]](0..31 + 127)) -ge 0 -or
+        $Name.Contains('\') -or
         $Name.StartsWith('/') -or $Name -match '^[A-Za-z]:' -or
         $Name.Contains('//')) {
         throw "Unsafe archive path: $Name"
@@ -33,53 +35,117 @@ function Test-CrashpadArchiveEntryName {
     return $candidate
 }
 
-function Read-CrashpadTar {
+function Invoke-CrashpadTar {
     param(
         [Parameter(Mandatory)]
-        [IO.Stream] $ArchiveStream,
-        [Parameter(Mandatory)]
-        [string] $Destination,
-        [Parameter(Mandatory)]
-        [bool] $Extract
+        [string[]] $Arguments
     )
 
-    $gzip = [IO.Compression.GZipStream]::new(
-        $ArchiveStream,
-        [IO.Compression.CompressionMode]::Decompress,
-        $true)
-    $reader = [System.Formats.Tar.TarReader]::new($gzip, $true)
+    $command = Get-Command tar.exe -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $command) {
+        $command = Get-Command tar -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+    }
+    if (-not $command) {
+        throw 'A tar executable is required to inspect authenticated Crashpad archives'
+    }
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $command.Source
+    $info.Arguments = (
+        $Arguments |
+            ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }
+    ) -join ' '
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $info
+    try {
+        if (-not $process.Start()) {
+            throw "Unable to start tar executable: $($command.Source)"
+        }
+        $standardOutput = $process.StandardOutput.ReadToEndAsync()
+        $standardError = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $output = $standardOutput.Result
+        $errorOutput = $standardError.Result
+        if ($process.ExitCode -ne 0) {
+            throw "tar failed with exit code $($process.ExitCode): $errorOutput"
+        }
+        return $output
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Get-CrashpadTarProfile {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Archive,
+        [Parameter(Mandatory)]
+        [string] $Destination
+    )
+
+    $names = @(
+        (Invoke-CrashpadTar @('-tzf', $Archive)) -split "`r?`n" |
+            Where-Object { $_.Length -ne 0 }
+    )
+    $verbose = @(
+        (Invoke-CrashpadTar @('-tvzf', $Archive)) -split "`r?`n" |
+            Where-Object { $_.Length -ne 0 }
+    )
+    if ($names.Count -eq 0 -or $names.Count -ne $verbose.Count) {
+        throw 'Archive listing is empty or inconsistent'
+    }
+    if ($names.Count -gt 500000) {
+        throw "Archive entry count exceeds validation bound: $($names.Count)"
+    }
     $paths = [Collections.Generic.HashSet[string]]::new(
         [StringComparer]::OrdinalIgnoreCase)
-    $entryCount = 0
-    try {
-        while ($entry = $reader.GetNextEntry()) {
-            $entryCount++
-            if ($entry.EntryType -notin @(
-                    [System.Formats.Tar.TarEntryType]::RegularFile,
-                    [System.Formats.Tar.TarEntryType]::V7RegularFile,
-                    [System.Formats.Tar.TarEntryType]::Directory)) {
-                throw "Unsafe archive entry type $($entry.EntryType): $($entry.Name)"
-            }
-            $target = Test-CrashpadArchiveEntryName $entry.Name $Destination
-            if (-not $paths.Add($target)) {
-                throw "Duplicate archive path: $($entry.Name)"
-            }
-            if (-not $Extract) {
-                continue
-            }
-            if ($entry.EntryType -eq [System.Formats.Tar.TarEntryType]::Directory) {
-                New-Item -ItemType Directory -Force $target | Out-Null
-                continue
-            }
-            $parent = Split-Path $target -Parent
-            New-Item -ItemType Directory -Force $parent | Out-Null
-            $entry.ExtractToFile($target, $false)
+    for ($index = 0; $index -lt $names.Count; $index++) {
+        $name = $names[$index]
+        $type = $verbose[$index][0]
+        if ($type -notin @('-', 'd')) {
+            throw "Unsafe archive entry type '$type': $name"
         }
-    } finally {
-        $reader.Dispose()
-        $gzip.Dispose()
+        $target = Test-CrashpadArchiveEntryName $name $Destination
+        if (-not $paths.Add($target)) {
+            throw "Duplicate archive path: $name"
+        }
     }
-    return $entryCount
+    return [pscustomobject]@{
+        Count = $names.Count
+        Paths = @($paths)
+    }
+}
+
+function Expand-CrashpadTar {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Archive,
+        [Parameter(Mandatory)]
+        [string] $Destination
+    )
+
+    Invoke-CrashpadTar @(
+        '-xzf',
+        $Archive,
+        '-C',
+        $Destination,
+        '--no-same-owner',
+        '--no-same-permissions'
+    ) | Out-Null
+    $reparsePoints = @(
+        Get-ChildItem -LiteralPath $Destination -Recurse -Force |
+            Where-Object {
+                ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+            }
+    )
+    if ($reparsePoints.Count -ne 0) {
+        throw "Archive extraction created a reparse point: $($reparsePoints[0].FullName)"
+    }
 }
 
 function Expand-AuthenticatedTarGzip {
@@ -110,8 +176,9 @@ function Expand-AuthenticatedTarGzip {
         }
         $sha256 = [Security.Cryptography.SHA256]::Create()
         try {
-            $actualSha256 = [Convert]::ToHexString(
-                $sha256.ComputeHash($stream)).ToLowerInvariant()
+            $actualSha256 = (
+                [BitConverter]::ToString($sha256.ComputeHash($stream)) -replace '-', ''
+            ).ToLowerInvariant()
         } finally {
             $sha256.Dispose()
         }
@@ -119,21 +186,18 @@ function Expand-AuthenticatedTarGzip {
             throw "Archive SHA-256 mismatch: $Archive"
         }
 
-        $stream.Position = 0
-        $entryCount = Read-CrashpadTar $stream $Destination $false
-        if ($entryCount -eq 0) {
-            throw "Archive has no entries: $Archive"
-        }
+        $profile = Get-CrashpadTarProfile $Archive $Destination
 
         if (Test-Path $Destination) {
             Remove-Item $Destination -Recurse -Force
         }
         New-Item -ItemType Directory -Force $Destination | Out-Null
         try {
-            $stream.Position = 0
-            $extractedCount = Read-CrashpadTar $stream $Destination $true
-            if ($extractedCount -ne $entryCount) {
-                throw "Archive entry count changed during extraction: $Archive"
+            Expand-CrashpadTar $Archive $Destination
+            foreach ($path in $profile.Paths) {
+                if (-not (Test-Path -LiteralPath $path)) {
+                    throw "Validated archive entry was not extracted: $path"
+                }
             }
         } catch {
             Remove-Item $Destination -Recurse -Force -ErrorAction SilentlyContinue
@@ -143,7 +207,7 @@ function Expand-AuthenticatedTarGzip {
         return [ordered]@{
             archive_size = $stream.Length
             archive_sha256 = $actualSha256
-            entry_count = $entryCount
+            entry_count = $profile.Count
         }
     } finally {
         $stream.Dispose()

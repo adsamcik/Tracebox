@@ -27,8 +27,14 @@ function Get-TestTreeHash {
         }
     }
     $bytes = [Text.Encoding]::UTF8.GetBytes(($entries -join ''))
-    return [Convert]::ToHexString(
-        [Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        return (
+            [BitConverter]::ToString($algorithm.ComputeHash($bytes)) -replace '-', ''
+        ).ToLowerInvariant()
+    } finally {
+        $algorithm.Dispose()
+    }
 }
 
 & $acquire | Out-Null

@@ -13,6 +13,10 @@ typedef enum {
   TB_EVENT_EMERGENCYRECORD = 2,
   TB_EVENT_BREADCRUMB = 3,
   TB_EVENT_HANDLEDERROR = 4,
+  TB_EVENT_MANAGEDCRASH = 5,
+  TB_EVENT_RUSTPANIC = 6,
+  TB_EVENT_ANRCANDIDATE = 7,
+  TB_EVENT_OSEXIT = 8,
 } tb_event_id_v1;
 
 typedef struct {
@@ -50,6 +54,44 @@ typedef struct {
   uint16_t frame_count; /* C1, max encoded 3 */
 } tb_generated_handlederror_v1;
 tb_status_v1 tb_record_generated_handlederror_v1(const tb_generated_handlederror_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t primary_exception_code; /* C1, max encoded 5 */
+  uint16_t cause_count; /* C0, max encoded 3 */
+  uint16_t frame_count; /* C0, max encoded 3 */
+  uint32_t flags; /* C0, max encoded 5 */
+} tb_generated_managedcrash_v1;
+tb_status_v1 tb_record_generated_managedcrash_v1(const tb_generated_managedcrash_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t payload_class; /* C0, max encoded 5 */
+  uint32_t thread_role; /* C0, max encoded 5 */
+  uint32_t location_code; /* C1, max encoded 5 */
+  uint32_t flags; /* C0, max encoded 5 */
+} tb_generated_rustpanic_v1;
+tb_status_v1 tb_record_generated_rustpanic_v1(const tb_generated_rustpanic_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t elapsed_millis; /* C0, max encoded 5 */
+  uint16_t sample_count; /* C0, max encoded 3 */
+  uint16_t frame_count; /* C0, max encoded 3 */
+  uint32_t nonfatal_result; /* C0, max encoded 5 */
+  uint32_t flags; /* C0, max encoded 5 */
+} tb_generated_anrcandidate_v1;
+tb_status_v1 tb_record_generated_anrcandidate_v1(const tb_generated_anrcandidate_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  int32_t reason; /* C0, max encoded 5 */
+  int32_t status; /* C0, max encoded 5 */
+  int32_t importance; /* C0, max encoded 5 */
+  uint32_t link_confidence; /* C0, max encoded 5 */
+  uint32_t artifact_state; /* C0, max encoded 5 */
+} tb_generated_osexit_v1;
+tb_status_v1 tb_record_generated_osexit_v1(const tb_generated_osexit_v1* value, uint32_t recorder_ready);
 
 #ifdef __cplusplus
 }

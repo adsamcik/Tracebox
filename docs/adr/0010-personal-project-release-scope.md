@@ -134,14 +134,23 @@ replace Tracebox's own unit and lab tests. Integration begins after
 The Tracker integration must:
 
 - remain compatible with Tracker's API-26 baseline;
+- consume the immutable Tracebox candidate from Tracker's normal application
+  variant, with no diagnostics flavor or rollback flavor;
 - use generated structural event types rather than Tracker's free-form logs;
-- start disabled unless the user explicitly enables a profile;
-- coordinate or exactly chain Tracker's existing JVM crash handler;
+- start with `STANDARD_DIAGNOSTICS` on first install, persist explicit user
+  profile choices (including `DISABLED`), and keep package export
+  user-initiated;
+- make Tracebox the sole active owner of JVM/native/Rust crash capture and stop
+  installing or writing through Tracker's legacy crash handler;
+- replace Tracker's active logging writers with a fixed, bounded
+  Tracker-to-Tracebox event mapping; arbitrary log strings, exception messages,
+  and throwable payloads are not forwarded;
 - avoid duplicate ownership of `ApplicationExitInfo` reconciliation;
 - connect Tracker's collected-data deletion and diagnostics settings to
   Tracebox deletion and package workflows; and
-- retain a feature flag or build variant that permits rollback during practical
-  evaluation.
+- retain existing legacy crash/log data only as a migration surface for
+  bounded read, redacted export, and deletion; the legacy stores are never
+  active writers and free-form legacy values are never imported into Tracebox.
 
 Tracker evaluation on the required emulator is a downstream practical smoke
 after the standalone Tracebox release gates pass. It is not a prerequisite for
@@ -156,7 +165,11 @@ The following remain outside foundation and do not block a personal release:
 - metrics and traces;
 - desktop UI;
 - API 37.1-specific adapters; and
-- advanced profiling.
+- advanced profiling; and
+- selective per-record or per-summary deletion. The personal release exposes
+  only crash-recoverable whole-store deletion (plus expiry of package staging);
+  selective deletion may be added later without weakening the mandatory
+  whole-store privacy control.
 
 ## Consequences
 

@@ -6,6 +6,7 @@ import java.io.Closeable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.util.concurrent.atomic.AtomicReference
@@ -129,17 +130,24 @@ fun interface CommittedPolicyProvider {
 class ControlPage(private val path: Path) : CommittedPolicyProvider {
     override fun committed(): PolicySnapshot {
         try {
-            FileChannel.open(path, StandardOpenOption.READ).use { channel ->
+            FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { channel ->
+                if (channel.size() != SIZE.toLong()) throw PolicyPageException.Corrupt
                 val buffer = ByteBuffer.allocate(SIZE).order(ByteOrder.LITTLE_ENDIAN)
-                if (channel.read(buffer) != SIZE) throw PolicyPageException.Corrupt
+                while (buffer.hasRemaining()) {
+                    if (channel.read(buffer) < 0) throw PolicyPageException.Corrupt
+                }
                 buffer.flip()
                 if (buffer.int != MAGIC || buffer.int != VERSION) throw PolicyPageException.Corrupt
                 val epoch = buffer.long
                 val mask = buffer.long
-                val disabled = buffer.int != 0
+                val disabled = when (buffer.int) {
+                    0 -> false
+                    1 -> true
+                    else -> throw PolicyPageException.Corrupt
+                }
                 val expected = buffer.int
                 val actual = crc(buffer.array(), 0, SIZE - Int.SIZE_BYTES)
-                if (expected != actual) throw PolicyPageException.Corrupt
+                if (epoch < 0 || expected != actual) throw PolicyPageException.Corrupt
                 return PolicySnapshot(epoch, mask, disabled)
             }
         } catch (_: java.io.IOException) {
@@ -149,14 +157,21 @@ class ControlPage(private val path: Path) : CommittedPolicyProvider {
 
     /** Persists and forces a committed page. Handler ownership is enforced by module topology in Phase 3. */
     fun commit(snapshot: PolicySnapshot) {
+        require(snapshot.epoch >= 0)
         val buffer = ByteBuffer.allocate(SIZE).order(ByteOrder.LITTLE_ENDIAN)
         buffer.putInt(MAGIC).putInt(VERSION).putLong(snapshot.epoch).putLong(snapshot.denyMask)
         buffer.putInt(if (snapshot.disabled) 1 else 0)
         buffer.putInt(crc(buffer.array(), 0, SIZE - Int.SIZE_BYTES))
         buffer.flip()
-        FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING).use {
-            it.write(buffer)
-            it.force(true)
+        FileChannel.open(
+            path,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.WRITE,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            LinkOption.NOFOLLOW_LINKS,
+        ).use { channel ->
+            while (buffer.hasRemaining()) channel.write(buffer)
+            channel.force(true)
         }
     }
 

@@ -3,6 +3,9 @@ package dev.tracebox.storage
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -47,5 +50,54 @@ class UidWideQuotaCoordinatorTest {
         assertEquals(64L, restarted.used(UidBucket.SUMMARY_SPOOL))
         assertTrue(restarted.release(raw))
         assertTrue(restarted.reserve(root.resolve("replacement.tbraw"), UidBucket.RAW_ARTIFACTS, 16))
+    }
+
+    @Test fun forced_pending_ledger_is_recovered_conservatively_after_rename_crash_window() {
+        val root = root()
+        val coordinator = UidWideQuotaCoordinator(root, quota(), files())
+        val first = root.resolve("first.tbseg")
+        val second = root.resolve("second.tbseg")
+        assertTrue(coordinator.reserve(first, UidBucket.ROLE_SEGMENTS, 20))
+        val priorLedger = Files.readAllBytes(root.resolve("tracebox-uid-quota-v1"))
+        assertTrue(coordinator.reserve(second, UidBucket.ROLE_SEGMENTS, 30))
+        val pendingLedger = Files.readAllBytes(root.resolve("tracebox-uid-quota-v1"))
+
+        Files.write(root.resolve("tracebox-uid-quota-v1"), priorLedger)
+        Files.write(root.resolve("tracebox-uid-quota-v1.new"), pendingLedger)
+
+        val restarted = UidWideQuotaCoordinator(root, quota(), files())
+        assertEquals(50L, restarted.used(UidBucket.ROLE_SEGMENTS))
+        assertFalse(Files.exists(root.resolve("tracebox-uid-quota-v1.new")))
+        assertTrue(restarted.owns(first, UidBucket.ROLE_SEGMENTS, 20))
+        assertTrue(restarted.owns(second, UidBucket.ROLE_SEGMENTS, 30))
+    }
+
+    @Test fun coordinator_instances_serialize_concurrent_access_to_one_process_ledger() {
+        val root = root()
+        val coordinators = listOf(
+            UidWideQuotaCoordinator(root, quota(), files()),
+            UidWideQuotaCoordinator(root, quota(), files()),
+        )
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(8)
+        try {
+            val reservations = (0 until 16).map { index ->
+                executor.submit<Boolean> {
+                    check(start.await(5, TimeUnit.SECONDS))
+                    coordinators[index % coordinators.size].reserve(
+                        root.resolve("concurrent-$index.tbseg"),
+                        UidBucket.ROLE_SEGMENTS,
+                        1,
+                    )
+                }
+            }
+            start.countDown()
+            assertTrue(reservations.all { it.get(5, TimeUnit.SECONDS) })
+        } finally {
+            start.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
+        }
+        assertEquals(16L, coordinators.first().used(UidBucket.ROLE_SEGMENTS))
     }
 }

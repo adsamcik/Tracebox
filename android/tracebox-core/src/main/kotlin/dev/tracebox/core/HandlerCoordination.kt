@@ -5,8 +5,10 @@ import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
 import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.util.Base64
 
@@ -113,7 +115,7 @@ class CrashDispatchStateMachine(private val policy: CrashCoexistencePolicy) {
 
 private data class Participant(
     var entry: ParticipantCensusEntry,
-    val barrier: () -> BarrierAck,
+    val barrier: (PolicySnapshot) -> BarrierAck,
     var lease: InstanceLease? = null,
 )
 
@@ -128,8 +130,10 @@ class GlobalPolicyCoordinator(
 ) {
     private val lock = Any()
     private val censusPath = root.resolve("participant-census-v1")
+    private val censusTemporaryPath = root.resolve("participant-census-v1.new")
     private val leasesPath = root.resolve("leases")
     private val participants = linkedMapOf<String, Participant>()
+    private var transitionTarget: PolicySnapshot? = null
 
     init {
         require(bootSession.isNotEmpty())
@@ -143,7 +147,19 @@ class GlobalPolicyCoordinator(
         processRole: Int,
         processInstanceId: ByteArray,
         barrier: () -> BarrierAck,
+    ): Closeable = registerTargetAware(participantId, processRole, processInstanceId) { _ -> barrier() }
+
+    /**
+     * Target-aware registration. The supplied barrier must apply exactly the snapshot it receives
+     * before acknowledging; it must not infer a target from a separately mutable coordinator.
+     */
+    fun registerTargetAware(
+        participantId: String,
+        processRole: Int,
+        processInstanceId: ByteArray,
+        barrier: (PolicySnapshot) -> BarrierAck,
     ): Closeable = synchronized(lock) {
+        check(transitionTarget == null) { "participant registration attempted from inside a policy transition" }
         require(processInstanceId.size == 32)
         require(participantId.isNotBlank() && !participantId.contains('|'))
         val leasePath = leasesPath.resolve("${Base64.getUrlEncoder().withoutPadding().encodeToString(processInstanceId)}.lease")
@@ -157,14 +173,27 @@ class GlobalPolicyCoordinator(
             controlPage.committed().epoch,
             ParticipantState.LIVE,
         )
-        participants.remove(participantId)?.lease?.close()
-        participants[participantId] = Participant(entry, barrier, lease)
-        persistCensus()
+        val previous = participants.put(participantId, Participant(entry, barrier, lease))
+        try {
+            persistCensus()
+        } catch (failure: IOException) {
+            participants.remove(participantId)
+            if (previous != null) participants[participantId] = previous
+            lease.close()
+            throw failure
+        }
+        previous?.lease?.close()
         Closeable {
             synchronized(lock) {
-                participants.remove(participantId)?.let {
-                    it.lease?.close()
-                    persistCensus()
+                val removed = participants.remove(participantId)
+                if (removed != null) {
+                    try {
+                        persistCensus()
+                    } catch (failure: IOException) {
+                        participants[participantId] = removed
+                        throw failure
+                    }
+                    removed.lease?.close()
                 }
             }
 
@@ -199,6 +228,21 @@ class GlobalPolicyCoordinator(
      * A partial result never claims package-wide policy success and leaves the prior page active.
      */
     fun updateProfile(target: PolicySnapshot, handlerBarrier: () -> BarrierAck): ProfileUpdateResult = synchronized(lock) {
+        updateProfileLocked(target) { handlerBarrier() }
+    }
+
+    /** Target-aware global barrier used by transports that carry the complete immutable snapshot. */
+    fun updateProfileTargetAware(
+        target: PolicySnapshot,
+        handlerBarrier: (PolicySnapshot) -> BarrierAck,
+    ): ProfileUpdateResult = synchronized(lock) {
+        updateProfileLocked(target, handlerBarrier)
+    }
+
+    private fun updateProfileLocked(
+        target: PolicySnapshot,
+        handlerBarrier: (PolicySnapshot) -> BarrierAck,
+    ): ProfileUpdateResult {
         val current = try {
             controlPage.committed()
         } catch (_: PolicyPageException) {
@@ -206,25 +250,41 @@ class GlobalPolicyCoordinator(
         }
         if (target.epoch <= current.epoch) return ProfileUpdateResult.Failed(CoordinatorFailure.INVALID_EPOCH)
 
-        val missing = linkedSetOf<String>()
-        participants.values.forEach { participant ->
-            if (participant.entry.state != ParticipantState.LIVE || participant.barrier() != BarrierAck.Acknowledged) {
-                missing += participant.entry.participantId
+        transitionTarget = target
+        try {
+            val missing = linkedSetOf<String>()
+            participants.values.forEach { participant ->
+                if (participant.entry.state != ParticipantState.LIVE ||
+                    acknowledge(participant.barrier, target) != BarrierAck.Acknowledged
+                ) {
+                    missing += participant.entry.participantId
+                }
             }
-        }
-        if (handlerBarrier() != BarrierAck.Acknowledged) missing += "handler"
-        if (missing.isNotEmpty()) return ProfileUpdateResult.Partial(current.epoch, missing)
+            if (acknowledge(handlerBarrier, target) != BarrierAck.Acknowledged) missing += "handler"
+            if (missing.isNotEmpty()) return ProfileUpdateResult.Partial(current.epoch, missing)
 
-        return try {
-            controlPage.commit(target)
-            participants.values.forEach {
-                it.entry = it.entry.copy(lastAcknowledgedEpoch = target.epoch)
+            return try {
+                controlPage.commit(target)
+                participants.values.forEach {
+                    it.entry = it.entry.copy(lastAcknowledgedEpoch = target.epoch)
+                }
+                persistCensus()
+                ProfileUpdateResult.Success(target.epoch)
+            } catch (_: IOException) {
+                ProfileUpdateResult.Failed(CoordinatorFailure.IO)
             }
-            persistCensus()
-            ProfileUpdateResult.Success(target.epoch)
-        } catch (_: IOException) {
-            ProfileUpdateResult.Failed(CoordinatorFailure.IO)
+        } finally {
+            transitionTarget = null
         }
+    }
+
+    private fun acknowledge(
+        barrier: (PolicySnapshot) -> BarrierAck,
+        target: PolicySnapshot,
+    ): BarrierAck = try {
+        barrier(target)
+    } catch (_: Throwable) {
+        BarrierAck.Rejected
     }
 
     private fun loadCensus() {
@@ -249,7 +309,7 @@ class GlobalPolicyCoordinator(
                     fields[5].toLong(),
                     ParticipantState.UNVERIFIED,
                 )
-                participants[entry.participantId] = Participant(entry, { BarrierAck.Missing })
+                participants[entry.participantId] = Participant(entry, { _ -> BarrierAck.Missing })
             } catch (_: IllegalArgumentException) {
                 // A malformed census entry is not allowed to regain durability; ignore it.
             }
@@ -271,8 +331,25 @@ class GlobalPolicyCoordinator(
             ).joinToString("|")
         }
         Files.createDirectories(censusPath.parent)
-        Files.writeString(censusPath, lines, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
-        FileChannel.open(censusPath, StandardOpenOption.WRITE).use { it.force(true) }
+        Files.writeString(
+            censusTemporaryPath,
+            lines,
+            StandardCharsets.UTF_8,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            StandardOpenOption.WRITE,
+        )
+        FileChannel.open(censusTemporaryPath, StandardOpenOption.WRITE).use { it.force(true) }
+        try {
+            Files.move(
+                censusTemporaryPath,
+                censusPath,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(censusTemporaryPath, censusPath, StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 
     private fun encode(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
@@ -336,10 +413,16 @@ data class JvmCapturePolicy(
     val includeMessage: Boolean = false,
     val maxCauses: Int = 8,
     val maxFramesPerCause: Int = 64,
+    val maxClassNameUtf8Bytes: Int = 256,
+    val maxMethodNameUtf8Bytes: Int = 128,
+    val maxMessageUtf8Bytes: Int = 256,
 ) {
     init {
         require(maxCauses in 1..16)
         require(maxFramesPerCause in 1..128)
+        require(maxClassNameUtf8Bytes in 1..1024)
+        require(maxMethodNameUtf8Bytes in 1..512)
+        require(maxMessageUtf8Bytes in 1..1024)
     }
 }
 
@@ -356,7 +439,7 @@ class TraceboxUncaughtExceptionHandler(
             handling.set(true)
             try {
                 record(capture(throwable))
-            } catch (_: RuntimeException) {
+            } catch (_: Throwable) {
                 // Failure capture must not obstruct the application's installed termination path.
             } finally {
                 handling.set(false)
@@ -372,12 +455,31 @@ class TraceboxUncaughtExceptionHandler(
         while (current != null && causes.size < policy.maxCauses) {
             val cycle = seen.put(current, Unit) != null
             val frames = current.stackTrace.take(policy.maxFramesPerCause).map {
-                JvmCrashFrame(it.className, it.methodName, it.lineNumber)
+                JvmCrashFrame(
+                    truncateUtf8(it.className, policy.maxClassNameUtf8Bytes),
+                    truncateUtf8(it.methodName, policy.maxMethodNameUtf8Bytes),
+                    it.lineNumber,
+                )
             }
-            causes += JvmCrashCause(current.javaClass.name, if (policy.includeMessage) current.message else null, frames, cycle)
+            causes += JvmCrashCause(
+                truncateUtf8(current.javaClass.name, policy.maxClassNameUtf8Bytes),
+                if (policy.includeMessage) current.message?.let { truncateUtf8(it, policy.maxMessageUtf8Bytes) } else null,
+                frames,
+                cycle,
+            )
             if (cycle) break
             current = current.cause
         }
         return JvmCrashRecord(causes)
+    }
+
+    private fun truncateUtf8(value: String, maximumBytes: Int): String {
+        val encoded = value.toByteArray(StandardCharsets.UTF_8)
+        if (encoded.size <= maximumBytes) return value
+        var length = maximumBytes
+        while (length > 0 && (encoded[length].toInt() and 0xc0) == 0x80) {
+            length--
+        }
+        return String(encoded, 0, length, StandardCharsets.UTF_8)
     }
 }

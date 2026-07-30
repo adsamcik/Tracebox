@@ -117,6 +117,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracebox-android-bridge"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tracebox",
+ "tracebox-identity",
+ "tracebox-phase0",
+ "tracebox-sys",
+]
+
+[[package]]
+name = "tracebox-fixture-panic-probe"
+version = "0.1.0"
+dependencies = [
+ "tracebox",
+ "tracebox-sys",
+]
+
+[[package]]
 name = "tracebox-identity"
 version = "0.1.0"
 dependencies = [

@@ -66,7 +66,7 @@ ADRs 0002 and 0003 are normative. Every Crashpad source archive is authenticated
 
 ## Policy and deletion
 
-ADR-0004 and architecture sections 8.5 and 11.5 are normative. Tightening is restrictive before success is reported. Disabled and selective deletion never report success while accessible in-scope Tracebox-owned data remains.
+ADR-0004, ADR-0010, and architecture sections 8.5 and 11.5 are normative. Tightening is restrictive before success is reported. Disabled whole-store deletion never reports success while accessible in-scope Tracebox-owned diagnostic data remains. Per-record/summary selective deletion is optional post-foundation work and is not exposed by the personal-release API.
 
 ## Package and build identity
 

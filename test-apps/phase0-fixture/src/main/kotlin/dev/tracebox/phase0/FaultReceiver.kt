@@ -5,46 +5,26 @@ import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
 import android.util.Log
-import dev.tracebox.nativecapture.NativeRuntime
 
 class FaultReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        intent.getStringExtra(SCENARIO_EXTRA)?.let { stableId ->
+            Log.i(LAB_TAG, "scenario_start id=$stableId action=${intent.getStringExtra(ACTION_EXTRA)}")
+        }
         when (intent.getStringExtra(ACTION_EXTRA)) {
             "early_abort" -> {
-                NativeRuntime.initializeEmergency(
-                    context.noBackupFilesDir.absolutePath,
-                    PROCESS_ROLE_MAIN,
-                )
-                NativeRuntime.crashForTest(0)
+                LabNativeIdentity.initialize(context, PROCESS_ROLE_MAIN)
+                LabNativeFaults.abortProcess()
             }
             "early_stack" -> {
-                NativeRuntime.initializeEmergency(
-                    context.noBackupFilesDir.absolutePath,
-                    PROCESS_ROLE_MAIN,
-                )
-                NativeRuntime.stackOverflowForTest()
+                LabNativeIdentity.initialize(context, PROCESS_ROLE_MAIN)
+                LabNativeFaults.overflowStack()
             }
             "early_recursive" -> {
-                NativeRuntime.initializeEmergency(
-                    context.noBackupFilesDir.absolutePath,
-                    PROCESS_ROLE_MAIN,
-                )
-                NativeRuntime.recursiveSignalForTest()
+                LabNativeIdentity.initialize(context, PROCESS_ROLE_MAIN)
+                LabNativeFaults.recursiveSignal()
             }
-            "early_chain" -> {
-                val prepared =
-                    NativeRuntime.prepareSignalChainForTest(
-                        context.noBackupFilesDir.absolutePath,
-                    )
-                val initialized =
-                    NativeRuntime.initializeEmergency(
-                        context.noBackupFilesDir.absolutePath,
-                        PROCESS_ROLE_MAIN,
-                    )
-                Log.i(TAG, "early_chain_prepared=$prepared initialized=$initialized")
-                NativeRuntime.crashForTest(0)
-            }
-            "fatal" -> NativeRuntime.crashForTest(0)
+            "fatal" -> LabNativeFaults.abortProcess()
             "stall" -> {
                 SystemClock.sleep(6_000)
                 Log.i(TAG, "receiver_stall_completed=true")
@@ -65,7 +45,9 @@ class FaultReceiver : BroadcastReceiver() {
 
     private companion object {
         const val ACTION_EXTRA = "tracebox.action"
+        const val SCENARIO_EXTRA = "tracebox.scenario_id"
         const val PROCESS_ROLE_MAIN = 1
         const val TAG = "TraceboxPhase0"
+        const val LAB_TAG = "TraceboxLab"
     }
 }

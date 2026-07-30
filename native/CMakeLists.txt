@@ -45,3 +45,76 @@ add_test(
     COMMAND tracebox_emergency_initialization_test
         "${CMAKE_CURRENT_BINARY_DIR}/tracebox-emergency-initialization-slot.bin"
 )
+
+add_executable(tracebox_policy_transition_test
+    tests/tracebox_policy_transition_test.cc
+)
+target_include_directories(tracebox_policy_transition_test PRIVATE include)
+target_compile_features(tracebox_policy_transition_test PRIVATE cxx_std_17)
+add_test(
+    NAME tracebox_policy_transition_test
+    COMMAND tracebox_policy_transition_test
+)
+
+add_executable(tracebox_handler_socket_cleanup_test
+    tests/tracebox_handler_socket_cleanup_test.cc
+)
+target_include_directories(tracebox_handler_socket_cleanup_test PRIVATE include)
+target_compile_features(tracebox_handler_socket_cleanup_test PRIVATE cxx_std_17)
+add_test(
+    NAME tracebox_handler_socket_cleanup_test
+    COMMAND tracebox_handler_socket_cleanup_test
+)
+
+add_executable(tracebox_client_registration_test
+    tests/tracebox_client_registration_test.cc
+)
+target_include_directories(tracebox_client_registration_test PRIVATE include)
+target_compile_features(tracebox_client_registration_test PRIVATE cxx_std_17)
+add_test(
+    NAME tracebox_client_registration_test
+    COMMAND tracebox_client_registration_test
+)
+
+add_executable(tracebox_handler_lifecycle_drain_test
+    tests/tracebox_handler_lifecycle_drain_test.cc
+)
+target_include_directories(tracebox_handler_lifecycle_drain_test PRIVATE include)
+target_link_libraries(tracebox_handler_lifecycle_drain_test PRIVATE Threads::Threads)
+target_compile_features(tracebox_handler_lifecycle_drain_test PRIVATE cxx_std_17)
+add_test(
+    NAME tracebox_handler_lifecycle_drain_test
+    COMMAND tracebox_handler_lifecycle_drain_test
+)
+
+add_executable(tracebox_client_lifecycle_journal_test
+    tests/tracebox_client_lifecycle_journal_test.cc
+)
+target_include_directories(tracebox_client_lifecycle_journal_test PRIVATE include)
+target_compile_features(tracebox_client_lifecycle_journal_test PRIVATE cxx_std_17)
+add_test(
+    NAME tracebox_client_lifecycle_journal_test
+    COMMAND tracebox_client_lifecycle_journal_test
+)
+
+add_executable(tracebox_signal_stack_thread_test
+    tests/tracebox_signal_stack_thread_test.cc
+)
+target_include_directories(tracebox_signal_stack_thread_test PRIVATE include)
+target_link_libraries(tracebox_signal_stack_thread_test PRIVATE Threads::Threads)
+target_compile_features(tracebox_signal_stack_thread_test PRIVATE cxx_std_17)
+add_test(
+    NAME tracebox_signal_stack_thread_test
+    COMMAND tracebox_signal_stack_thread_test
+)
+
+add_executable(tracebox_signal_handler_installation_test
+    tests/tracebox_signal_handler_installation_test.cc
+)
+target_include_directories(tracebox_signal_handler_installation_test PRIVATE include)
+target_link_libraries(tracebox_signal_handler_installation_test PRIVATE Threads::Threads)
+target_compile_features(tracebox_signal_handler_installation_test PRIVATE cxx_std_17)
+add_test(
+    NAME tracebox_signal_handler_installation_test
+    COMMAND tracebox_signal_handler_installation_test
+)

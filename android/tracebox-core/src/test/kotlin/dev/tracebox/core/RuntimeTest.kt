@@ -1,10 +1,15 @@
 package dev.tracebox.core
 
+import dev.tracebox.api.Crc32c
 import dev.tracebox.api.Readiness
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -51,6 +56,27 @@ class RuntimeTest {
         }
     }
 
+    @Test fun control_page_rejects_a_valid_prefix_with_trailing_bytes() {
+        val path = Files.createTempDirectory("tracebox-control-size").resolve("control")
+        val page = ControlPage(path)
+        page.commit(PolicySnapshot(9, 3))
+        Files.write(path, byteArrayOf(0), StandardOpenOption.APPEND)
+        assertFailsWith<PolicyPageException.Corrupt> { page.committed() }
+    }
+
+    @Test fun control_page_rejects_crc_valid_negative_epoch_and_non_boolean_disabled_value() {
+        val root = Files.createTempDirectory("tracebox-control-fields")
+        val negativePath = root.resolve("negative")
+        ControlPage(negativePath).commit(PolicySnapshot(9, 3))
+        rewriteControlField(negativePath, offset = 8) { it.putLong(-1L) }
+        assertFailsWith<PolicyPageException.Corrupt> { ControlPage(negativePath).committed() }
+
+        val disabledPath = root.resolve("disabled")
+        ControlPage(disabledPath).commit(PolicySnapshot(9, 3))
+        rewriteControlField(disabledPath, offset = 24) { it.putInt(2) }
+        assertFailsWith<PolicyPageException.Corrupt> { ControlPage(disabledPath).committed() }
+    }
+
     @Test fun barrier_retags_permitted_records_across_a_real_epoch_transition() {
         val health = HealthCounters()
         val queue = BoundedPolicyQueue(3, health)
@@ -67,5 +93,18 @@ class RuntimeTest {
         assertEquals(setOf(RecordPriority.BREADCRUMB, RecordPriority.CRASH_ANR), setOf(first.priority, second.priority))
         assertEquals(2, first.acceptedEpoch)
         assertEquals(2, second.acceptedEpoch)
+    }
+
+    private fun rewriteControlField(
+        path: java.nio.file.Path,
+        offset: Int,
+        write: (ByteBuffer) -> Unit,
+    ) {
+        val bytes = Files.readAllBytes(path)
+        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        buffer.position(offset)
+        write(buffer)
+        buffer.putInt(28, Crc32c.value(bytes, 0, 28))
+        Files.write(path, bytes)
     }
 }

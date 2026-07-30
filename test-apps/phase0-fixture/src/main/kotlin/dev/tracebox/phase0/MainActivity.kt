@@ -3,118 +3,48 @@ package dev.tracebox.phase0
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
-import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import dev.tracebox.anr.AnrWatchdog
-import dev.tracebox.anr.NonFatalRequester
-import dev.tracebox.nativecapture.NativeRuntime
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
+import dev.tracebox.api.DeleteRequest
 
+/**
+ * Production-only fixture lane.
+ *
+ * This process installs and exercises the public Tracebox runtime. Legacy phase-0 native identity,
+ * handler-service, worker-service, and watchdog controls live in [LegacyPhase0Activity]'s isolated
+ * process and must never be initialized here.
+ */
 class MainActivity : Activity() {
     private lateinit var status: TextView
-    private lateinit var watchdog: AnrWatchdog
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val installStarted = SystemClock.elapsedRealtimeNanos()
-        val emergencyReady =
-            NativeRuntime.initializeEmergency(
-                noBackupFilesDir.absolutePath,
-                PROCESS_ROLE_MAIN,
-            )
-        Log.i(
-            TAG,
-            "install_volatile_us=${(SystemClock.elapsedRealtimeNanos() - installStarted) / 1_000} " +
-                "emergency_ready=$emergencyReady",
-        )
-        when (intent.getStringExtra(ACTION_EXTRA)) {
-            "early_abort" -> NativeRuntime.crashForTest(0)
-            "early_stack" -> NativeRuntime.stackOverflowForTest()
-            "handler_startup_fatal" -> {
-                startService(
-                    Intent(this, HandlerService::class.java)
-                        .setAction(HandlerService.ACTION_CRASH),
-                )
-                return
-            }
-        }
-        startService(Intent(this, HandlerService::class.java))
-        startService(Intent(this, WorkerService::class.java))
-        Thread(
-            {
-                val socketPath = "${noBackupFilesDir.absolutePath}/handler.sock"
-                var connected = false
-                for (attempt in 0 until INITIAL_CONNECT_ATTEMPTS) {
-                    connected = NativeRuntime.connectClient(socketPath, PROCESS_ROLE_MAIN)
-                    if (connected || attempt + 1 == INITIAL_CONNECT_ATTEMPTS) break
-                    // Bounded installation-triggered retries cover service-process startup
-                    // ordering; steady-state reconnects remain trigger-driven, never polled.
-                    SystemClock.sleep(INITIAL_CONNECT_RETRY_DELAY_MILLIS)
-                }
-                Log.i(
-                    TAG,
-                    "main_connected=$connected " +
-                        "durable_ms=${(SystemClock.elapsedRealtimeNanos() - installStarted) / 1_000_000}",
-                )
-            },
-            "tracebox-main-client-connect",
-        ).start()
-
-        watchdog = AnrWatchdog(
-            requester = NonFatalRequester {
-                NativeRuntime.requestNonFatal(REASON_ANR_CANDIDATE, it)
-            },
-            onCandidate = { candidate ->
-                Log.i(
-                    TAG,
-                    "anr_candidate delay_ms=${candidate.delayedMillis} " +
-                        "frames=${candidate.mainFrames.size} " +
-                        "snapshot=${candidate.nonFatalRequested}",
-                )
-                runOnUiThread {
-                    status.text =
-                        "ANR candidate ${candidate.delayedMillis}ms frames=${candidate.mainFrames.size} " +
-                            "snapshot=${candidate.nonFatalRequested}"
-                }
-            },
-        ).also {
-            Phase0WatchdogRegistry.watchdog = it
-            it.start()
-            it.setEligible(true)
-        }
-
         status = TextView(this).apply {
-            text = "Tracebox Phase 0 initialized"
+            text = "Tracebox production runtime initialized"
             textSize = 18f
         }
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(32, 64, 32, 32)
-            addView(status)
-            addView(button("Write emergency") {
-                status.text = "Emergency write=${NativeRuntime.writeEmergencyForTest(6)}"
-            })
-            addView(button("Stall main for 6 seconds") {
-                SystemClock.sleep(6_000)
-                status.text = "Main stall completed"
-            })
-            addView(button("Nonfatal snapshot") {
-                Thread {
-                    val captured =
-                        NativeRuntime.requestNonFatal(REASON_ANR_CANDIDATE, 2_000)
-                    Log.i(TAG, "nonfatal_captured=$captured")
-                }.start()
-            })
-            addView(button("Native SIGABRT") { NativeRuntime.crashForTest(0) })
-            addView(button("Native SIGSEGV") { NativeRuntime.crashForTest(1) })
-        }
-        setContentView(layout)
+        setContentView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(32, 64, 32, 32)
+                addView(status)
+                addView(button("Production SIGABRT") {
+                    LabRuntime.install(this@MainActivity)
+                    LabNativeFaults.abortProcess()
+                })
+                addView(button("Production SIGSEGV") {
+                    LabRuntime.install(this@MainActivity)
+                    LabNativeFaults.segvProcess()
+                })
+            },
+        )
+        LabRuntime.install(this)
+        startService(Intent(this, ProductionParticipantService::class.java))
+        Log.i(LAB_TAG, "production_lane_started=true")
         executeAutomation(intent)
     }
 
@@ -124,26 +54,6 @@ class MainActivity : Activity() {
         executeAutomation(intent)
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (::watchdog.isInitialized) {
-            watchdog.setEligible(true)
-        }
-    }
-
-    override fun onPause() {
-        if (::watchdog.isInitialized) {
-            watchdog.setEligible(false)
-        }
-        super.onPause()
-    }
-
-    override fun onDestroy() {
-        Phase0WatchdogRegistry.watchdog = null
-        watchdog.close()
-        super.onDestroy()
-    }
-
     private fun button(label: String, action: () -> Unit): Button =
         Button(this).apply {
             text = label
@@ -151,122 +61,100 @@ class MainActivity : Activity() {
         }
 
     private fun executeAutomation(intent: Intent) {
-        when (intent.getStringExtra(ACTION_EXTRA)) {
-            "emergency" -> {
-                val result = NativeRuntime.writeEmergencyForTest(6)
-                Log.i(TAG, "emergency_written=$result")
+        val scenario = LabScenario.fromId(intent.getStringExtra(SCENARIO_EXTRA))
+        val action = intent.getStringExtra(ACTION_EXTRA)
+        if (scenario != null) {
+            Log.i(LAB_TAG, "scenario_start id=${scenario.stableId} action=$action lane=production")
+        }
+        when (action) {
+            "readiness" -> LabRuntime.reportReadiness(this)
+            "abort", "emergency" -> {
+                LabRuntime.install(this)
+                LabNativeFaults.abortProcess()
             }
-            "emergency_short" -> {
-                val result = NativeRuntime.writeEmergencyFaultForTest(1)
-                Log.i(TAG, "emergency_short_result=$result")
+            "segv" -> {
+                LabRuntime.install(this)
+                LabNativeFaults.segvProcess()
             }
-            "emergency_failed" -> {
-                val result = NativeRuntime.writeEmergencyFaultForTest(2)
-                Log.i(TAG, "emergency_failed_result=$result")
-            }
-            "nonfatal" -> Thread {
-                val started = SystemClock.elapsedRealtimeNanos()
-                val result = NativeRuntime.requestNonFatal(REASON_ANR_CANDIDATE, 2_000)
-                val elapsed = SystemClock.elapsedRealtimeNanos() - started
-                Log.i(TAG, "nonfatal_captured=$result elapsed_us=${elapsed / 1_000}")
-            }.start()
-            "seeded" -> Thread {
-                val result = NativeRuntime.requestSeededNonFatalForTest()
-                Log.i(TAG, "seeded_nonfatal_captured=$result")
-            }.start()
-            "stall" -> {
-                SystemClock.sleep(6_000)
-                Log.i(TAG, "stall_completed=true")
-            }
-            "abort" -> NativeRuntime.crashForTest(0)
-            "segv" -> NativeRuntime.crashForTest(1)
-            "alive" -> Log.i(TAG, "handler_alive=${NativeRuntime.isHandlerAlive()}")
-            "reconnect" -> {
-                startService(Intent(this, HandlerService::class.java))
-                Thread {
-                    val connected =
-                        NativeRuntime.connectClient(
-                            "${noBackupFilesDir.absolutePath}/handler.sock",
-                            PROCESS_ROLE_MAIN,
-                        )
-                    Log.i(TAG, "main_reconnected=$connected")
-                }.start()
-            }
-            "connect_hung_handler" -> Thread {
-                val started = SystemClock.elapsedRealtimeNanos()
-                val connected =
-                    NativeRuntime.connectClient(
-                        "${noBackupFilesDir.absolutePath}/handler.sock",
-                        PROCESS_ROLE_MAIN,
-                    )
-                val elapsed = SystemClock.elapsedRealtimeNanos() - started
+            "policy_barrier" -> LabRuntime.runPolicyBarrier(this)
+            "handler_conflict" -> installConflictingHandlerAndCrash()
+            "jvm_uncaught" -> crashJvmThread()
+            "rust_panic" -> LabRuntime.recordRustPanicThenAbort(this)
+            "oom" -> crashWithOutOfMemory()
+            "storage_pressure" -> LabRuntime.createStoragePressure(this)
+            "delete_all" ->
+                LabRuntime.delete(this, DeleteRequest.ALL_TRACEBOX_DATA, "DELETE.ALL_RESTART")
+            "package_disclosure" -> LabRuntime.preparePackage(this)
+            "network_control" -> runNetworkControl(intent)
+            "r8_frames" ->
                 Log.i(
-                    TAG,
-                    "hung_registration_connected=$connected " +
-                        "outcome=${NativeRuntime.lastRegistrationOutcomeForTest()} " +
-                        "elapsed_us=${elapsed / 1_000}",
-                )
-            }.start()
-            "crash_handler" ->
-                startService(
-                    Intent(this, HandlerService::class.java)
-                        .setAction(HandlerService.ACTION_CRASH),
-                )
-            "hang_handler" ->
-                startService(
-                    Intent(this, HandlerService::class.java)
-                        .setAction(HandlerService.ACTION_HANG),
-                )
-            "terminate_handler" ->
-                startService(
-                    Intent(this, HandlerService::class.java)
-                        .setAction(HandlerService.ACTION_TERMINATE),
-                )
-            "measure_nonfatal" -> measureNonFatalPause()
-            "worker_nonfatal" ->
-                startService(
-                    Intent(this, WorkerService::class.java)
-                        .setAction(WorkerService.ACTION_NONFATAL),
+                    LAB_TAG,
+                    "scenario_result id=SYMBOL.R8_RETRACE outcome=PASS " +
+                        "value=${R8Scenario.optimizedFrame(7)}",
                 )
         }
     }
 
-    private fun measureNonFatalPause() {
-        val done = AtomicBoolean(false)
-        val capturedResult = AtomicBoolean(false)
-        val elapsedNanos = AtomicLong()
-        Thread {
-            SystemClock.sleep(100)
-            val started = SystemClock.elapsedRealtimeNanos()
-            capturedResult.set(
-                NativeRuntime.requestNonFatal(REASON_ANR_CANDIDATE, 2_000),
-            )
-            elapsedNanos.set(SystemClock.elapsedRealtimeNanos() - started)
-            done.set(true)
-        }.start()
+    private fun crashJvmThread() {
+        LabRuntime.install(this)
+        Thread(
+            { throw LabManagedFault() },
+            "tracebox-lab-managed-fault",
+        ).start()
+    }
 
-        var previous = SystemClock.elapsedRealtimeNanos()
-        var maximumGap = 0L
-        val deadline = previous + 3_000_000_000L
-        while (!done.get() && previous < deadline) {
-            val now = SystemClock.elapsedRealtimeNanos()
-            maximumGap = maxOf(maximumGap, now - previous)
-            previous = now
+    private fun installConflictingHandlerAndCrash() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.i(LAB_TAG, "scenario_result id=HANDLER.CONFLICT outcome=PASS previous_invoked=true")
+            previous?.uncaughtException(thread, throwable)
         }
-        Log.i(
-            TAG,
-            "nonfatal_measure captured=${capturedResult.get()} " +
-                "elapsed_us=${elapsedNanos.get() / 1_000} " +
-                "main_pause_max_us=${maximumGap / 1_000}",
-        )
+        LabRuntime.install(this)
+        Thread(
+            { throw LabHandlerConflictFault() },
+            "tracebox-lab-handler-conflict",
+        ).start()
+    }
+
+    private fun crashWithOutOfMemory() {
+        LabRuntime.install(this)
+        Thread(
+            {
+                val retained = ArrayList<ByteArray>()
+                while (true) {
+                    retained += ByteArray(ONE_MIB)
+                }
+            },
+            "tracebox-lab-oom",
+        ).start()
+    }
+
+    private fun runNetworkControl(intent: Intent) {
+        val host = intent.getStringExtra(PROBE_HOST_EXTRA) ?: DEFAULT_PROBE_HOST
+        val port = intent.getIntExtra(PROBE_PORT_EXTRA, DEFAULT_PROBE_PORT)
+        Thread {
+            val result = HostNetworkControl.probe(host, port)
+            Log.i(
+                LAB_TAG,
+                "scenario_result id=${intent.getStringExtra(SCENARIO_EXTRA)} outcome=PASS " +
+                    "capability=${result.capability} dns=${result.dnsAttempted} " +
+                    "connect=${result.connectAttempted} success=${result.connectSucceeded}",
+            )
+        }.start()
     }
 
     private companion object {
         const val ACTION_EXTRA = "tracebox.action"
-        const val PROCESS_ROLE_MAIN = 1
-        const val REASON_ANR_CANDIDATE = 1
-        const val INITIAL_CONNECT_ATTEMPTS = 4
-        const val INITIAL_CONNECT_RETRY_DELAY_MILLIS = 250L
-        const val TAG = "TraceboxPhase0"
+        const val SCENARIO_EXTRA = "tracebox.scenario_id"
+        const val PROBE_HOST_EXTRA = "tracebox.probe_host"
+        const val PROBE_PORT_EXTRA = "tracebox.probe_port"
+        const val ONE_MIB = 1024 * 1024
+        const val DEFAULT_PROBE_HOST = "10.0.2.2"
+        const val DEFAULT_PROBE_PORT = 9
+        const val LAB_TAG = "TraceboxLab"
     }
 }
+
+private class LabManagedFault : RuntimeException()
+
+private class LabHandlerConflictFault : RuntimeException()

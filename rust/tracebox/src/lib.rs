@@ -43,29 +43,31 @@ pub enum PanicPayloadKind {
     String,
 }
 
-/// Bounded source-location fields emitted by the panic hook.
-#[derive(Clone, Debug, PartialEq, Eq)]
+const PANIC_FILE_HASH_INPUT_LIMIT: usize = 160;
+
+/// Fixed source-location fields emitted by the panic hook.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PanicLocation {
-    /// Truncated source path.
-    pub file: String,
+    /// FNV-1a hash of at most the first 160 source-path bytes.
+    pub file_hash: u32,
     /// Source line.
     pub line: u32,
     /// Source column.
     pub column: u32,
 }
 
-/// Structured panic record that contains no formatted panic text or backtrace.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Structured, allocation-free panic record that contains no formatted text or backtrace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PanicRecord {
     /// Bounded payload classification.
     pub payload: PanicPayloadKind,
-    /// Bounded source location where the runtime supplied one.
+    /// Fixed source location where the runtime supplied one.
     pub location: Option<PanicLocation>,
 }
 
 /// Sink invoked synchronously by the installed panic hook.
 pub trait PanicRecordSink: Send + Sync + 'static {
-    /// Accepts one bounded record before an unwind or abort proceeds.
+    /// Accepts one bounded scalar record before an unwind or abort proceeds.
     fn record(&self, record: PanicRecord);
 }
 
@@ -75,12 +77,18 @@ pub struct NativePanicRecordSink;
 impl PanicRecordSink for NativePanicRecordSink {
     fn record(&self, record: PanicRecord) {
         let (payload_kind, has_location, line, column) = match record.location {
-            Some(location) => (payload_kind(record.payload), 1, location.line, location.column),
+            Some(location) => (
+                payload_kind(record.payload),
+                1,
+                location.line,
+                location.column,
+            ),
             None => (payload_kind(record.payload), 0, 0, 0),
         };
         let _ = tracebox_sys::tb_tracebox_record_panic_v1(PanicRecordV1 {
             header: HeaderV1 {
-                struct_size: std::mem::size_of::<PanicRecordV1>() as u32,
+                struct_size: u32::try_from(std::mem::size_of::<PanicRecordV1>())
+                    .unwrap_or(u32::MAX),
                 abi_version: 1,
             },
             payload_kind,
@@ -105,7 +113,9 @@ fn payload_kind(payload: PanicPayloadKind) -> u32 {
 /// unbounded diagnostic string. Installing a later application hook replaces this hook per Rust's
 /// process-global panic-hook contract.
 pub fn install_bounded_panic_hook(sink: Arc<dyn PanicRecordSink>) {
-    std::panic::set_hook(Box::new(move |info| sink.record(bounded_panic_record(info))));
+    std::panic::set_hook(Box::new(move |info| {
+        sink.record(bounded_panic_record(info));
+    }));
 }
 
 fn bounded_panic_record(info: &PanicHookInfo<'_>) -> PanicRecord {
@@ -117,11 +127,20 @@ fn bounded_panic_record(info: &PanicHookInfo<'_>) -> PanicRecord {
         PanicPayloadKind::Opaque
     };
     let location = info.location().map(|value| PanicLocation {
-        file: value.file().chars().take(160).collect(),
+        file_hash: bounded_file_hash(value.file().as_bytes()),
         line: value.line(),
         column: value.column(),
     });
     PanicRecord { payload, location }
+}
+
+fn bounded_file_hash(bytes: &[u8]) -> u32 {
+    bytes
+        .iter()
+        .take(PANIC_FILE_HASH_INPUT_LIMIT)
+        .fold(0x811c_9dc5_u32, |hash, value| {
+            (hash ^ u32::from(*value)).wrapping_mul(0x0100_0193)
+        })
 }
 
 /// A safe recorder boundary. Implementors may bridge to C or JNI.
@@ -135,14 +154,11 @@ pub trait NativeBreadcrumbRecorder {
 /// In `panic = "abort"` builds, Rust aborts through the common native crash path
 /// before it can unwind. In unwind-enabled builds this function returns
 /// [`StatusV1::Dropped`] instead of allowing a panic to cross the boundary.
-pub fn record_breadcrumb(
-    recorder: &dyn NativeBreadcrumbRecorder,
-    value: BreadcrumbV1,
-) -> StatusV1 {
+pub fn record_breadcrumb(recorder: &dyn NativeBreadcrumbRecorder, value: BreadcrumbV1) -> StatusV1 {
     #[cfg(panic = "unwind")]
     {
-        return catch_unwind(AssertUnwindSafe(|| recorder.record_breadcrumb(value)))
-            .unwrap_or(StatusV1::Dropped);
+        catch_unwind(AssertUnwindSafe(|| recorder.record_breadcrumb(value)))
+            .unwrap_or(StatusV1::Dropped)
     }
     #[cfg(panic = "abort")]
     {
@@ -174,7 +190,10 @@ mod tests {
             code: 1,
             monotonic_time_ns: 0,
         };
-        assert_eq!(record_breadcrumb(&PanickingRecorder, value), StatusV1::Dropped);
+        assert_eq!(
+            record_breadcrumb(&PanickingRecorder, value),
+            StatusV1::Dropped
+        );
     }
 
     #[test]
@@ -191,7 +210,7 @@ mod tests {
         NativePanicRecordSink.record(PanicRecord {
             payload: PanicPayloadKind::StaticString,
             location: Some(PanicLocation {
-                file: "not-sent-over-abi".to_owned(),
+                file_hash: 0x1234_5678,
                 line: 7,
                 column: 3,
             }),
@@ -200,7 +219,8 @@ mod tests {
             tracebox_sys::drain_panic_records_v1(),
             vec![PanicRecordV1 {
                 header: HeaderV1 {
-                    struct_size: std::mem::size_of::<PanicRecordV1>() as u32,
+                    struct_size: u32::try_from(std::mem::size_of::<PanicRecordV1>())
+                        .expect("PanicRecordV1 ABI size fits u32"),
                     abi_version: 1,
                 },
                 payload_kind: 1,
@@ -208,6 +228,15 @@ mod tests {
                 line: 7,
                 column: 3,
             }],
+        );
+    }
+
+    #[test]
+    fn panic_file_hash_has_a_hard_input_bound() {
+        let bytes = [b'a'; PANIC_FILE_HASH_INPUT_LIMIT + 1];
+        assert_eq!(
+            bounded_file_hash(&bytes),
+            bounded_file_hash(&bytes[..PANIC_FILE_HASH_INPUT_LIMIT]),
         );
     }
 }

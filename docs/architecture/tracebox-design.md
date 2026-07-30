@@ -730,17 +730,24 @@ For `Disabled`:
 6. Delete active/sealed segments, structural-summary spools, raw artifacts, emergency reserves, indexes, snapshots, share staging, and rebuildable metadata.
 7. Persist completion only after no remaining library-owned path is readable through Tracebox.
 
-Selective deletion:
+The personal foundation exposes whole-store `ALL_TRACEBOX_DATA` deletion and
+bounded expired-package-staging cleanup. It does not expose a per-record,
+time-range, or summary-ID selector. Consequently, summary tombstones and mixed
+segment/spool compaction for selective deletion are optional post-foundation
+work, not a `PERSONAL_RELEASE_READY` requirement.
 
-- deletes whole segments when all records are in scope;
-- may sacrifice an entire mixed segment to provide prompt deletion;
-- may use bounded rewrite/compaction only when the caller explicitly prioritizes preservation of unaffected records;
-- writes an authoritative summary-ID tombstone before deleting a selected structural summary;
-- applies the same tombstone to both handler-spool and imported ordinary copies;
-- compacts mixed summary-spool segments by writing and sealing a new live-record segment, atomically switching the spool manifest, and only then deleting the old segment;
-- invalidates every snapshot containing an affected record.
+If selective diagnostic-record deletion is added later, it must use whole
+segments when possible, invalidate every affected snapshot, and use an
+authoritative summary-ID tombstone across handler-spool and imported copies
+before reporting success. Preservation of unaffected records would require a
+bounded journaled rewrite/compaction transaction.
 
-Tombstoned summary bytes continue to count against the hard spool quota until compaction removes them. Package planning and reconciliation exclude tombstoned IDs immediately. Deletion failure remains `pending_failure`, is visible in `DeleteReport`, and resumes on bounded startup, maintenance, and explicit retry triggers. Disabled never reports completion while any library-owned data remains accessible; selective deletion never reports completion while any in-scope summary ID or other in-scope data remains accessible from either authoritative or imported stores. Unlinking cannot guarantee secure flash erasure, and OS-owned `ApplicationExitInfo` history remains unaffected.
+Deletion failure remains `pending_failure`, is visible in `DeleteReport`, and
+resumes on bounded startup, maintenance, and explicit retry triggers.
+`ALL_TRACEBOX_DATA` never reports completion while any in-scope
+library-owned diagnostic data remains accessible. Unlinking cannot guarantee
+secure flash erasure, and OS-owned `ApplicationExitInfo` history remains
+unaffected.
 
 ## 12. Crash capture
 
@@ -802,7 +809,11 @@ The emergency writer uses:
 
 The emergency record is an allowlisted C0/C1 structural format, not a `RawArtifact`. It contains no stack bytes or general-purpose register file. Architecture-specific control values are restricted to the minimum needed for later normalization, such as the faulting instruction address and link/return address when valid.
 
-Alternate signal stacks are registered per thread. Tracebox registers its own native threads and exposes an explicit native/Rust thread-attachment API. Stack-overflow fallback is guaranteed only for registered threads; it is best effort for other host-created threads. Crashpad remains the primary stack-overflow capture mechanism.
+Alternate signal stacks are registered per thread, independently from the process-wide signal actions. Every Tracebox-owned pthread completes a registration handshake before its entry point runs, and JNI entry attaches its calling thread. The thread-local registration restores any pre-existing alternate stack and releases its mapping exactly once at explicit detach or thread exit.
+
+Host-created native or Rust threads inherently require cooperation: call `tb_register_current_thread_signal_stack_v1()` from `tracebox/signal_stack.h` at thread entry, or `NativeRuntime.registerCurrentThreadForCapture()` from a JVM-owned thread. Registration is idempotent and automatic thread-exit cleanup is the normal path. A long-lived thread that survives Tracebox shutdown may explicitly call `tb_unregister_current_thread_signal_stack_v1()` or `NativeRuntime.unregisterCurrentThreadForCapture()`. These attachment functions allocate and are never signal-handler APIs.
+
+Stack-overflow fallback is guaranteed only for registered threads; it is best effort for other host-created threads. Crashpad remains the primary stack-overflow capture mechanism.
 
 It does not:
 

@@ -3,7 +3,20 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $root
 
-$java = (& java -version 2>&1 | Select-Object -First 1) -join ''
+$savedErrorActionPreference = $ErrorActionPreference
+try {
+    # Windows PowerShell 5 surfaces native stderr as ErrorRecord objects and would
+    # terminate here under Stop even when the process exits successfully. Java
+    # intentionally writes its version banner to stderr, so capture it under
+    # Continue and validate the native exit status explicitly.
+    $ErrorActionPreference = 'Continue'
+    $javaOutput = @(& java -version 2>&1)
+    $javaExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+if ($javaExitCode -ne 0) { throw "java -version failed with exit code $javaExitCode" }
+$java = ($javaOutput | Select-Object -First 1).ToString()
 $rust = (& rustc --version) -join ''
 $cargo = (& cargo --version) -join ''
 $cmake = (& "$env:ANDROID_HOME\cmake\4.1.2\bin\cmake.exe" --version | Select-Object -First 1) -join ''

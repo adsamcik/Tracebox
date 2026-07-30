@@ -7,8 +7,10 @@ import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.FileTime
-import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Callable
 import java.util.concurrent.Executor
+import java.util.concurrent.Future
+import java.util.concurrent.FutureTask
 import java.util.UUID
 
 fun interface ExportClock { fun nowMillis(): Long }
@@ -170,10 +172,20 @@ class SafPackageSaver {
         destination: () -> OutputStream,
         isCancelled: () -> Boolean,
         onProgress: (Long) -> Unit,
-    ): CompletableFuture<SaveResult> = CompletableFuture.supplyAsync(
-        { copyFinalized(approved, destination, isCancelled, onProgress) },
-        executor,
-    )
+    ): Future<SaveResult> = executeFuture(executor) {
+        copyFinalized(approved, destination, isCancelled, onProgress)
+    }
 
     companion object { private const val CHUNK_SIZE = 8 * 1024 }
+}
+
+/**
+ * Future and FutureTask are available throughout Tracebox's API 23 range. FutureTask preserves the
+ * executor scheduling, cancellation, result, and exceptional-completion behavior without exposing
+ * an API 24 CompletableFuture in the library API.
+ */
+internal fun <T> executeFuture(executor: Executor, operation: () -> T): Future<T> {
+    val task = FutureTask(Callable { operation() })
+    executor.execute(task)
+    return task
 }

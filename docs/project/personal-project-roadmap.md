@@ -2,32 +2,37 @@
 
 ## Outcome
 
-Complete every production implementation, host-test seam, fixture, and code
-review before using Android runtime validation. At the candidate-freeze point,
+Every production implementation, host-test seam, consolidated fixture, and
+host gate is complete. The unified 14-gate host-readiness run is `PASS` in
+`evidence/phase5/personal-release-host-readiness.json`. At candidate freeze,
 the only unfinished Tracebox work is running the scripted validation suite on
-the one required API 36 `x86_64`, 4 KiB emulator.
+the one required API 36 `x86_64`, 4 KiB emulator and recording the final
+review decision.
 
-Tracker integration is downstream work. It begins only after Tracebox reaches
-`PERSONAL_RELEASE_READY`.
+Tracker host-side integration may be prepared from this
+`IMPLEMENTATION_COMPLETE` candidate. Tracker pins the final immutable artifact
+after Tracebox reaches `PERSONAL_RELEASE_READY`.
 
 ## Inventory split
 
-The persistent ledger currently contains 24 `IN_PROGRESS` work packages:
+The persistent ledger has no unfinished production or host-tool
+implementation. Its remaining `IN_PROGRESS` rows are validation decisions:
 
-- five Phase 0 packages (`F0.3`-`F0.7`) whose remaining work is runtime
-  validation and measurement;
-- seventeen packages with unfinished production or host-tool implementation
-  (`C1.6`, `R2.5`, `R2.7`, `R2.8`, `X3.1`-`X3.10`, and
-  `T5.2`-`T5.4`);
-- `T5.5`, which is the one-emulator resource baseline; and
-- `T5.6`, which is the final personal-release decision.
+- five Phase 0 packages (`F0.3`-`F0.7`) require only the consolidated emulator
+  observations;
+- `T5.4` requires only the emulator blocked-egress observation;
+- `T5.5` is the one-emulator resource baseline; and
+- `T5.6` is the final personal-release decision.
 
-The consolidated lab requirement (`PR-019`) is also unimplemented. It is
-required infrastructure, not a substitute for production code.
+The consolidated lab has 39 stable scenarios across the no-internet and
+host-network variants. Its registry, manifest, build graph, host controls,
+malicious corpora, and production-artifact separation pass on the host; only
+executing its runtime scenarios remains.
 
-## Host implementation sequence
+## Completed host implementation sequence
 
-No Android device or emulator execution is required to complete H1-H5.
+H1-H5 are complete without relying on an Android endpoint. Their unified proof
+is `evidence/phase5/personal-release-host-readiness.json`.
 
 | Stage | Work packages | Implementation to finish | Required host proof |
 |---|---|---|---|
@@ -90,8 +95,8 @@ The frozen candidate has one required validation window:
    scenarios;
 3. live ANR candidate, responsive-main-looper, timeout/cancellation, lifecycle
    suppression, and restart/`ApplicationExitInfo` reconciliation;
-4. Direct Boot, storage pressure, selective deletion, disable/delete/restart,
-   and no-accessible-data results;
+4. Direct Boot, storage pressure, expired-package-staging cleanup,
+   disable/delete/restart, and no-accessible-data results;
 5. Standard package disclosure, exact approval, save/share, R8 retrace, and ELF
    symbolication smoke;
 6. blocked-egress/DNS observation with a working control probe for the
@@ -109,11 +114,13 @@ scope or claim mismatch.
 
 ## Tracker-Android after Tracebox release
 
-Use one immutable `PERSONAL_RELEASE_READY` artifact in
+Prepare the host-side integration after `IMPLEMENTATION_COMPLETE`, then pin one
+immutable `PERSONAL_RELEASE_READY` artifact in
 `G:\Github\Tracker-Android`. Implement the dependency/API migration, generated
-Tracker event mapping, explicit opt-in, JVM-handler ownership migration,
-separate exit-history responsibilities, combined deletion status, package
-workflow, notices, and rollback variant described in
+Tracker event mapping, Standard Diagnostics as the first-install default with
+persisted user controls, sole JVM/native/Rust crash ownership, replacement of
+active legacy logging writers, separate exit-history responsibilities,
+combined deletion status, package workflow, and notices described in
 `docs/integration/tracker-android.md`.
 
 Finish Tracker host unit tests and its code review before runtime evaluation.

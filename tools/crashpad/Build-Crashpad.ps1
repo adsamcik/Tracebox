@@ -1,5 +1,18 @@
 $ErrorActionPreference = 'Stop'
 
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    $modernPowerShell = Get-Command pwsh.exe -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $modernPowerShell) {
+        throw 'The Crashpad build requires PowerShell 7 or newer'
+    }
+    & $modernPowerShell.Source -NoProfile -File $PSCommandPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "PowerShell 7 Crashpad build failed with exit code $LASTEXITCODE"
+    }
+    return
+}
+
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $checkout = Join-Path $root 'third_party\crashpad\checkout\crashpad'
 $overlay = Join-Path $checkout 'tracebox_overlay'
@@ -44,9 +57,12 @@ if (Test-Path $overlay) {
 }
 Copy-Item (Join-Path $root 'native\crashpad\overlay') $overlay -Recurse
 New-Item -ItemType Directory -Force (Join-Path $overlay 'emergency'),
+    (Join-Path $overlay 'signal'),
     (Join-Path $overlay 'include\tracebox') | Out-Null
 Copy-Item (Join-Path $root 'native\emergency\tracebox_emergency.c') `
     (Join-Path $overlay 'emergency\tracebox_emergency.c')
+Copy-Item (Join-Path $root 'native\signal\tracebox_signal_stack.cc') `
+    (Join-Path $overlay 'signal\tracebox_signal_stack.cc')
 Copy-Item (Join-Path $root 'native\include\tracebox\abi.h') `
     (Join-Path $overlay 'include\tracebox\abi.h')
 Copy-Item (Join-Path $root 'native\include\tracebox\generated_events.h') `
@@ -55,6 +71,20 @@ Copy-Item (Join-Path $root 'native\include\tracebox\emergency.h') `
     (Join-Path $overlay 'include\tracebox\emergency.h')
 Copy-Item (Join-Path $root 'native\include\tracebox\emergency_initialization.h') `
     (Join-Path $overlay 'include\tracebox\emergency_initialization.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\client_registration.h') `
+    (Join-Path $overlay 'include\tracebox\client_registration.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\client_lifecycle_journal.h') `
+    (Join-Path $overlay 'include\tracebox\client_lifecycle_journal.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\handler_lifecycle_drain.h') `
+    (Join-Path $overlay 'include\tracebox\handler_lifecycle_drain.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\handler_socket_cleanup.h') `
+    (Join-Path $overlay 'include\tracebox\handler_socket_cleanup.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\policy_transition.h') `
+    (Join-Path $overlay 'include\tracebox\policy_transition.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\rust_bridge.h') `
+    (Join-Path $overlay 'include\tracebox\rust_bridge.h')
+Copy-Item (Join-Path $root 'native\include\tracebox\signal_stack.h') `
+    (Join-Path $overlay 'include\tracebox\signal_stack.h')
 
 $env:PATH = 'C:\Program Files\Git\usr\bin;' + $env:PATH
 $targets = @(
@@ -64,6 +94,31 @@ $targets = @(
 $results = @()
 Set-Location $checkout
 foreach ($target in $targets) {
+    $rustTarget = if ($target.cpu -eq 'x64') {
+        'x86_64-linux-android'
+    } else {
+        'aarch64-linux-android'
+    }
+    $linkerName = if ($target.cpu -eq 'x64') {
+        'x86_64-linux-android23-clang.cmd'
+    } else {
+        'aarch64-linux-android23-clang.cmd'
+    }
+    $linkerVariable = if ($target.cpu -eq 'x64') {
+        'CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER'
+    } else {
+        'CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER'
+    }
+    $linker = Join-Path $ndk "toolchains\llvm\prebuilt\windows-x86_64\bin\$linkerName"
+    Set-Item -Path "Env:$linkerVariable" -Value $linker
+    & cargo build -p tracebox-android-bridge --release --target $rustTarget --locked --offline `
+        --manifest-path (Join-Path $root 'Cargo.toml')
+    if ($LASTEXITCODE -ne 0) { throw "Rust Android bridge build failed: $($target.abi)" }
+    $rustDirectory = Join-Path $overlay "rust\$($target.abi)"
+    New-Item -ItemType Directory -Force $rustDirectory | Out-Null
+    Copy-Item (Join-Path $root "target\$rustTarget\release\libtracebox_android_bridge.a") `
+        (Join-Path $rustDirectory 'libtracebox_android_bridge.a') -Force
+
     $out = Join-Path $checkout "out\tracebox-$($target.cpu)"
     $args = 'target_os="android" ' +
         "target_cpu=`"$($target.cpu)`" " +
@@ -87,6 +142,25 @@ foreach ($target in $targets) {
     $programHeaders = (& $readelf -lW $library) -join "`n"
     if ($programHeaders -notmatch '0x4000') {
         throw "Missing 16 KiB ELF alignment: $($target.abi)"
+    }
+    $dynamicSymbols = (& $readelf --dyn-syms --wide $library) -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to inspect final dynamic symbols: $($target.abi)"
+    }
+    if ($dynamicSymbols -match '(?m)\bUND\b.*\b(getaddrinfo|freeaddrinfo)\b') {
+        throw "Final capture library imports a DNS resolver: $($target.abi)"
+    }
+    if ($dynamicSymbols -match '(?m)\bGLOBAL\b.*(?:std3net|std\.\.net)') {
+        throw "Final capture library exports dormant Rust std::net code: $($target.abi)"
+    }
+    foreach ($requiredSymbol in @(
+            'Java_dev_tracebox_nativecapture_NativeRuntime_nativeInitializeEmergency',
+            'tb_register_current_thread_signal_stack_v1',
+            'tb_unregister_current_thread_signal_stack_v1',
+            'tb_current_thread_signal_stack_registered_v1')) {
+        if ($dynamicSymbols -notmatch [regex]::Escape($requiredSymbol)) {
+            throw "Final capture library is missing '$requiredSymbol': $($target.abi)"
+        }
     }
     $nativeStrings = (& $strings $library) -join "`n"
     foreach ($forbidden in @('--url=', 'no-upload-gzip', 'Breakpad server',

@@ -10,13 +10,16 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.zip.CRC32C
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class FailureCaptureStoreTest {
@@ -53,6 +56,36 @@ class FailureCaptureStoreTest {
         Files.write(root.resolve("orphan.tbraw"), byteArrayOf(7))
         store.deleteUnverifiableOrphans()
         assertFalse(Files.exists(root.resolve("orphan.tbraw")))
+    }
+
+    @Test fun raw_artifact_kind_is_durable_and_consumer_queries_are_separated() {
+        val root = Files.createTempDirectory("tracebox-typed-raw")
+        val store = RawArtifactStore(root, rawQuotaBytes = 128)
+        val id = ByteArray(32) { (it + 1).toByte() }
+
+        assertTrue(
+            store.preCapture(
+                id,
+                ByteArray(32) { 8 },
+                originRole = 3,
+                acceptedEpoch = 4,
+                kind = RawArtifactKind.OS_EXIT_ANR_TRACE,
+            ),
+        )
+        assertTrue(store.commitRaw(id, byteArrayOf(1, 2, 3)))
+        assertEquals(RawArtifactKind.OS_EXIT_ANR_TRACE, store.journal(id)?.kind)
+        assertTrue(store.containsRaw(id, RawArtifactKind.OS_EXIT_ANR_TRACE))
+        assertFalse(store.containsRaw(id, RawArtifactKind.CRASHPAD_MINIDUMP))
+        assertEquals(
+            1,
+            store.committedArtifacts(1, RawArtifactKind.OS_EXIT_ANR_TRACE).artifacts.size,
+        )
+        assertTrue(
+            store.committedArtifacts(1, RawArtifactKind.CRASHPAD_MINIDUMP).artifacts.isEmpty(),
+        )
+        assertEquals(null, store.committedRawPath(id, RawArtifactKind.CRASHPAD_MINIDUMP))
+        assertFalse(store.deleteOwned(id, RawArtifactKind.CRASHPAD_MINIDUMP))
+        assertTrue(store.containsRaw(id, RawArtifactKind.OS_EXIT_ANR_TRACE))
     }
 
     @Test fun handler_raw_lifecycle_charges_uid_wide_raw_and_metadata_ownership() {
@@ -202,6 +235,24 @@ class FailureCaptureStoreTest {
         assertTrue(spool.isRetired(id))
     }
 
+    @Test fun summary_import_acknowledgements_reject_path_traversal_before_any_file_access() {
+        val root = directory()
+        val targetPath = root.resolve("target.tbseg")
+        val harness = writer(targetPath)
+        val importer = TargetSegmentSummaryImporter(root.resolve("acks"), targetPath, harness.writer)
+        val summaryId = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 })
+
+        assertNull(importer.acknowledgement("../outside"))
+        assertFailsWith<IllegalArgumentException> {
+            importer.import(
+                "../outside",
+                summaryId,
+                GeneratedRecordCodec.encode(GeneratedStructuralSummary(1u, 2u, 3u, 4u, 5u)),
+            )
+        }
+        assertFalse(Files.exists(root.resolve("outside.tbimportack")))
+    }
+
     @Test fun startup_ingests_valid_emergency_slot_as_generated_record_and_resets_it() {
         val root = directory()
         val harness = writer(root.resolve("emergency.tbseg"))
@@ -251,13 +302,13 @@ class FailureCaptureStoreTest {
         assertEquals(1, previousCalls.get())
         assertIs<GeneratedRecordAppendResult.Appended>(adapter.latestResult())
         val frame = SegmentWriter.recover(root.resolve("jvm.tbseg"), repair = false).frames.single()
-        assertEquals(4, frame.recordType)
-        assertEquals(6, frame.payload.size)
+        assertEquals(5, frame.recordType)
+        assertEquals(12, frame.payload.size)
     }
 
     @Test fun uncaught_thread_exception_reports_typed_drop_when_policy_denies_handled_errors() {
         val root = directory()
-        val harness = writer(root.resolve("jvm-denied.tbseg"), denyMask = 8)
+        val harness = writer(root.resolve("jvm-denied.tbseg"), denyMask = 16)
         val adapter = GeneratedRecordSegmentAdapter(harness.writer, WriterPolicyGate(harness.page).also {
             assertEquals(GateResult.Reloaded, it.reload())
         })

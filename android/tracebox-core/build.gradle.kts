@@ -14,7 +14,7 @@ android {
 
 dependencies {
     api(project(":android:tracebox-api"))
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation(kotlin("test-junit"))
 }
 

@@ -1,5 +1,6 @@
 package dev.tracebox.gradle;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -15,11 +16,22 @@ import java.util.stream.Stream;
 /** Immutable identity captured from an applying Gradle project and its authoritative schema. */
 public record BuildIdentity(
         String projectPath,
+        String applicationId,
+        int versionCode,
+        String versionName,
         String variant,
+        int minSdk,
+        int compileSdk,
+        int targetSdk,
         String buildId,
         String schemaFingerprint,
         String r8MappingId,
         String r8MappingSha256,
+        String crashpadSourceSha256,
+        String crashpadPatchSetSha256,
+        String rustLockSha256,
+        String dependencyVerificationSha256,
+        String dependencyLockSha256,
         List<ElfBuildId> elfBuildIds,
         List<R8MappingEntry> r8Mappings) {}
 
@@ -34,32 +46,134 @@ record R8MappingEntry(String obfuscated, String original) {}
 
 /** Captures schema/build provenance without adding network or Phase 5 symbol collection behavior. */
 final class BuildIdentityCapture {
+    private static final long MAX_SCHEMA_BYTES = 16L * 1024L * 1024L;
+    private static final long MAX_PROVENANCE_FILE_BYTES = 64L * 1024L * 1024L;
+    private static final long MAX_ELF_BYTES = 256L * 1024L * 1024L;
+
     private BuildIdentityCapture() {}
 
     static BuildIdentity capture(String projectPath, String variant, String provenance, byte[] schemaBytes,
             Path r8MappingFile, List<Path> nativeLibraryInputs) throws java.io.IOException {
+        return capture(
+                projectPath,
+                projectPath,
+                0,
+                provenance,
+                variant,
+                0,
+                0,
+                0,
+                provenance,
+                schemaBytes,
+                r8MappingFile,
+                nativeLibraryInputs,
+                null,
+                List.of(),
+                null,
+                null,
+                null);
+    }
+
+    static BuildIdentity capture(
+            String projectPath,
+            String applicationId,
+            int versionCode,
+            String versionName,
+            String variant,
+            int minSdk,
+            int compileSdk,
+            int targetSdk,
+            String provenance,
+            byte[] schemaBytes,
+            Path r8MappingFile,
+            List<Path> nativeLibraryInputs,
+            Path crashpadSourceLock,
+            List<Path> crashpadPatchInputs,
+            Path rustLock,
+            Path dependencyVerification,
+            Path dependencyLock) throws java.io.IOException {
         if (projectPath.isBlank() || variant.isBlank() || provenance.isBlank()) {
             throw new IllegalArgumentException("captured build provenance must be non-empty");
         }
+        if (applicationId.isBlank() || versionName.isBlank()) {
+            throw new IllegalArgumentException("application identity must be non-empty");
+        }
+        if (versionCode < 0 || minSdk < 0 || compileSdk < 0 || targetSdk < 0) {
+            throw new IllegalArgumentException("application and SDK versions must be non-negative");
+        }
+        if (schemaBytes.length > MAX_SCHEMA_BYTES) {
+            throw new java.io.IOException("Schema exceeds the 16 MiB identity bound");
+        }
         String schemaFingerprint = hex(sha256(schemaBytes));
-        String buildId = hex(sha256((projectPath + "\n" + variant + "\n" + provenance + "\n"
-                + schemaFingerprint).getBytes(StandardCharsets.UTF_8)));
-        String mappingHash = r8MappingFile != null && Files.isRegularFile(r8MappingFile)
-                ? hex(sha256(Files.readAllBytes(r8MappingFile)))
-                : null;
+        String mappingHash = hashOptionalFile(r8MappingFile);
         String mappingId = mappingHash == null ? null : "sha256:" + mappingHash;
-        return new BuildIdentity(projectPath, variant, buildId, schemaFingerprint, mappingId, mappingHash,
-                captureElfBuildIds(nativeLibraryInputs), captureR8Mappings(r8MappingFile));
+        List<ElfBuildId> elfBuildIds = captureElfBuildIds(nativeLibraryInputs);
+        String crashpadSourceSha256 = hashOptionalFile(crashpadSourceLock);
+        String crashpadPatchSetSha256 = hashNamedFiles(crashpadPatchInputs);
+        String rustLockSha256 = hashOptionalFile(rustLock);
+        String dependencyVerificationSha256 = hashOptionalFile(dependencyVerification);
+        String dependencyLockSha256 = hashOptionalFile(dependencyLock);
+        String buildId = fullBuildId(
+                projectPath,
+                applicationId,
+                versionCode,
+                versionName,
+                variant,
+                minSdk,
+                compileSdk,
+                targetSdk,
+                provenance,
+                schemaFingerprint,
+                mappingId,
+                mappingHash,
+                crashpadSourceSha256,
+                crashpadPatchSetSha256,
+                rustLockSha256,
+                dependencyVerificationSha256,
+                dependencyLockSha256,
+                elfBuildIds);
+        return new BuildIdentity(
+                projectPath,
+                applicationId,
+                versionCode,
+                versionName,
+                variant,
+                minSdk,
+                compileSdk,
+                targetSdk,
+                buildId,
+                schemaFingerprint,
+                mappingId,
+                mappingHash,
+                crashpadSourceSha256,
+                crashpadPatchSetSha256,
+                rustLockSha256,
+                dependencyVerificationSha256,
+                dependencyLockSha256,
+                elfBuildIds,
+                captureR8Mappings(r8MappingFile));
     }
 
     static String toJson(BuildIdentity identity) {
         return "{\n"
                 + "  \"projectPath\": \"" + escape(identity.projectPath()) + "\",\n"
+                + "  \"applicationId\": \"" + escape(identity.applicationId()) + "\",\n"
+                + "  \"versionCode\": " + identity.versionCode() + ",\n"
+                + "  \"versionName\": \"" + escape(identity.versionName()) + "\",\n"
                 + "  \"variant\": \"" + escape(identity.variant()) + "\",\n"
+                + "  \"minSdk\": " + identity.minSdk() + ",\n"
+                + "  \"compileSdk\": " + identity.compileSdk() + ",\n"
+                + "  \"targetSdk\": " + identity.targetSdk() + ",\n"
                 + "  \"buildId\": \"" + identity.buildId() + "\",\n"
                 + "  \"schemaFingerprint\": \"" + identity.schemaFingerprint() + "\",\n"
                 + "  \"r8MappingId\": " + nullableJson(identity.r8MappingId()) + ",\n"
                 + "  \"r8MappingSha256\": " + nullableJson(identity.r8MappingSha256()) + ",\n"
+                + "  \"crashpadSourceSha256\": " + nullableJson(identity.crashpadSourceSha256()) + ",\n"
+                + "  \"crashpadPatchSetSha256\": " + nullableJson(identity.crashpadPatchSetSha256()) + ",\n"
+                + "  \"rustLockSha256\": " + nullableJson(identity.rustLockSha256()) + ",\n"
+                + "  \"dependencyVerificationSha256\": "
+                + nullableJson(identity.dependencyVerificationSha256()) + ",\n"
+                + "  \"dependencyLockSha256\": " + nullableJson(identity.dependencyLockSha256()) + ",\n"
                 + "  \"elfBuildIds\": [" + elfBuildIdsJson(identity.elfBuildIds()) + "],\n"
                 + "  \"symbolCatalogSha256\": \"" + hex(sha256(symbolCatalog(identity)
                         .getBytes(StandardCharsets.UTF_8))) + "\"\n"
@@ -74,19 +188,31 @@ final class BuildIdentityCapture {
      * stripped library exports no symbols; such a row can never resolve an arbitrary offset.
      */
     static String symbolCatalog(BuildIdentity identity) {
-        StringBuilder catalog = new StringBuilder("# tracebox-symbol-catalog-v1\n");
+        StringBuilder catalog = new StringBuilder("# tracebox-symbol-catalog-v2\n");
+        catalog.append("build\t").append(identity.buildId()).append('\t')
+                .append(identity.schemaFingerprint()).append('\t')
+                .append(escapeTsv(identity.applicationId())).append('\t')
+                .append(identity.versionCode()).append('\t')
+                .append(escapeTsv(identity.versionName())).append('\t')
+                .append(escapeTsv(identity.variant())).append('\t')
+                .append(catalogValue(identity.crashpadSourceSha256())).append('\t')
+                .append(catalogValue(identity.crashpadPatchSetSha256())).append('\t')
+                .append(catalogValue(identity.rustLockSha256())).append('\t')
+                .append(catalogValue(identity.dependencyVerificationSha256())).append('\t')
+                .append(catalogValue(identity.dependencyLockSha256())).append('\n');
         catalog.append("# kind\tmodule\tidentity\tabi\toffset\tsymbol\n");
         for (ElfBuildId elf : identity.elfBuildIds()) {
             if (elf.buildId() == null) {
                 continue;
             }
+            String module = catalogModuleName(elf.path());
             if (elf.symbols().isEmpty()) {
-                catalog.append("native\t").append(escapeTsv(elf.path())).append('\t')
+                catalog.append("native\t").append(escapeTsv(module)).append('\t')
                         .append(escapeTsv(elf.buildId())).append('\t').append(elf.abi())
                         .append("\t0\tidentity-only\n");
             } else {
                 for (ElfSymbol symbol : elf.symbols()) {
-                    catalog.append("native\t").append(escapeTsv(elf.path())).append('\t')
+                    catalog.append("native\t").append(escapeTsv(module)).append('\t')
                             .append(escapeTsv(elf.buildId())).append('\t').append(elf.abi()).append('\t')
                             .append(symbol.offset()).append('\t').append(escapeTsv(symbol.name())).append('\n');
                 }
@@ -188,16 +314,21 @@ final class BuildIdentityCapture {
     }
 
     private static ElfBuildId captureElfBuildId(String path, Path file) throws java.io.IOException {
+        long fileSize = Files.size(file);
+        if (fileSize > MAX_ELF_BYTES) {
+            throw new java.io.IOException("Native ELF exceeds the 256 MiB identity bound: " + file);
+        }
+        byte[] fileBytes = Files.readAllBytes(file);
         ElfMetadata metadata;
         try {
-            metadata = inspectElf(Files.readAllBytes(file));
+            metadata = inspectElf(fileBytes);
         } catch (IllegalArgumentException error) {
             throw new java.io.IOException("Malformed native ELF input: " + file, error);
         }
         String buildId = metadata.gnuBuildId();
         String source = "gnu";
         if (buildId == null) {
-            buildId = "sha256:" + hex(sha256(Files.readAllBytes(file)));
+            buildId = "sha256:" + hex(sha256(fileBytes));
             source = "sha256";
         }
         return new ElfBuildId(path, buildId, source, metadata.abi(), metadata.symbols());
@@ -637,12 +768,131 @@ final class BuildIdentityCapture {
         return json.toString();
     }
 
+    private static String fullBuildId(
+            String projectPath,
+            String applicationId,
+            int versionCode,
+            String versionName,
+            String variant,
+            int minSdk,
+            int compileSdk,
+            int targetSdk,
+            String provenance,
+            String schemaFingerprint,
+            String r8MappingId,
+            String r8MappingSha256,
+            String crashpadSourceSha256,
+            String crashpadPatchSetSha256,
+            String rustLockSha256,
+            String dependencyVerificationSha256,
+            String dependencyLockSha256,
+            List<ElfBuildId> elfBuildIds) {
+        StringBuilder canonical = new StringBuilder("tracebox-build-identity-v2\n");
+        appendIdentityField(canonical, "projectPath", projectPath);
+        appendIdentityField(canonical, "applicationId", applicationId);
+        appendIdentityField(canonical, "versionCode", Integer.toString(versionCode));
+        appendIdentityField(canonical, "versionName", versionName);
+        appendIdentityField(canonical, "variant", variant);
+        appendIdentityField(canonical, "minSdk", Integer.toString(minSdk));
+        appendIdentityField(canonical, "compileSdk", Integer.toString(compileSdk));
+        appendIdentityField(canonical, "targetSdk", Integer.toString(targetSdk));
+        appendIdentityField(canonical, "provenance", provenance);
+        appendIdentityField(canonical, "schemaFingerprint", schemaFingerprint);
+        appendIdentityField(canonical, "r8MappingId", r8MappingId);
+        appendIdentityField(canonical, "r8MappingSha256", r8MappingSha256);
+        appendIdentityField(canonical, "crashpadSourceSha256", crashpadSourceSha256);
+        appendIdentityField(canonical, "crashpadPatchSetSha256", crashpadPatchSetSha256);
+        appendIdentityField(canonical, "rustLockSha256", rustLockSha256);
+        appendIdentityField(canonical, "dependencyVerificationSha256", dependencyVerificationSha256);
+        appendIdentityField(canonical, "dependencyLockSha256", dependencyLockSha256);
+        for (ElfBuildId elf : elfBuildIds) {
+            appendIdentityField(
+                    canonical,
+                    "elf",
+                    elf.path() + "\t" + elf.abi() + "\t" + elf.source() + "\t" + elf.buildId());
+        }
+        return hex(sha256(canonical.toString().getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static void appendIdentityField(StringBuilder target, String name, String value) {
+        String present = value == null ? "-" : value;
+        target.append(name).append(':').append(present.length()).append(':').append(present).append('\n');
+    }
+
+    private static String hashOptionalFile(Path file) throws java.io.IOException {
+        if (file == null || !Files.isRegularFile(file)) {
+            return null;
+        }
+        return hashBoundedFile(file, MAX_PROVENANCE_FILE_BYTES);
+    }
+
+    static String hashProvenanceFile(Path file) throws java.io.IOException {
+        if (!Files.isRegularFile(file)) {
+            throw new java.io.IOException("Required identity input is missing: " + file);
+        }
+        return hashBoundedFile(file, MAX_PROVENANCE_FILE_BYTES);
+    }
+
+    static String sha256Hex(byte[] bytes) {
+        return hex(sha256(bytes));
+    }
+
+    private static String hashNamedFiles(List<Path> inputs) throws java.io.IOException {
+        List<Path> files = inputs.stream()
+                .filter(Files::isRegularFile)
+                .sorted(Comparator.comparing(path -> normalizePath(path.getFileName())))
+                .toList();
+        if (files.isEmpty()) {
+            return null;
+        }
+        StringBuilder canonical = new StringBuilder("tracebox-patch-set-v1\n");
+        for (Path file : files) {
+            appendIdentityField(canonical, normalizePath(file.getFileName()),
+                    hashBoundedFile(file, MAX_PROVENANCE_FILE_BYTES));
+        }
+        return hex(sha256(canonical.toString().getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static String hashBoundedFile(Path file, long maximumBytes) throws java.io.IOException {
+        long size = Files.size(file);
+        if (size > maximumBytes) {
+            throw new java.io.IOException("Identity input exceeds " + maximumBytes + " bytes: " + file);
+        }
+        MessageDigest digest = newSha256();
+        byte[] buffer = new byte[16 * 1024];
+        long total = 0;
+        try (InputStream input = Files.newInputStream(file)) {
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                total += read;
+                if (total > maximumBytes) {
+                    throw new java.io.IOException("Identity input grew beyond its bound while hashing: " + file);
+                }
+                digest.update(buffer, 0, read);
+            }
+        }
+        return hex(digest.digest());
+    }
+
     private static String nullableJson(String value) {
         return value == null ? "null" : "\"" + escape(value) + "\"";
     }
 
+    private static String catalogValue(String value) {
+        return value == null ? "-" : escapeTsv(value);
+    }
+
     private static String normalizePath(Path path) {
         return path.toString().replace('\\', '/');
+    }
+
+    static String catalogModuleName(String path) {
+        int separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        String module = path.substring(separator + 1);
+        if (module.isEmpty()) {
+            throw new IllegalArgumentException("ELF catalog path has no module basename: " + path);
+        }
+        return module;
     }
 
     private static String escapeTsv(String value) {
@@ -654,8 +904,12 @@ final class BuildIdentityCapture {
     }
 
     private static byte[] sha256(byte[] bytes) {
+        return newSha256().digest(bytes);
+    }
+
+    private static MessageDigest newSha256() {
         try {
-            return MessageDigest.getInstance("SHA-256").digest(bytes);
+            return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException("SHA-256 is required by the Java runtime", error);
         }

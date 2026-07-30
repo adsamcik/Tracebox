@@ -14,17 +14,24 @@ import dev.tracebox.export.StandardSnapshotRequest
 import dev.tracebox.storage.UidAccounting
 import dev.tracebox.storage.UidBucket
 import dev.tracebox.storage.UidQuota
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.CRC32
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -59,15 +66,36 @@ class ExportWorkflowTest {
         assertEquals(emptyList(), disclosure.facts.rawC2Artifacts)
     }
 
+    @Test fun disclosure_rejects_compressed_entries_before_decompression() {
+        val archive = zip(mapOf("manifest.cbor" to byteArrayOf(0)), stored = false)
+
+        assertIs<DisclosureDecodeResult.Invalid>(DisclosureDecoder.decode(archive))
+    }
+
+    @Test fun disclosure_rejects_more_entries_than_the_production_writer_allows() {
+        val entries = (0..DeterministicZip.MAX_ENTRIES).associate { "entry-$it" to byteArrayOf() }
+
+        assertIs<DisclosureDecodeResult.Invalid>(DisclosureDecoder.decode(zip(entries)))
+    }
+
+    @Test fun disclosure_rejects_excessively_nested_manifest_cbor() {
+        val nestedManifest = ByteArray(33) { 0x81.toByte() } + byteArrayOf(0)
+
+        assertIs<DisclosureDecodeResult.Invalid>(
+            DisclosureDecoder.decode(zip(mapOf("manifest.cbor" to nestedManifest))),
+        )
+    }
+
     @Test fun disclosure_registry_releases_terminal_flow_and_preserves_recreation_flow() {
         val materialized = assertIs<PackagePipelineResult.Ready>(pipeline(request())).packageBytes
-        val terminalHandle = DisclosurePackageRegistry.put(materialized)
-        DisclosurePackageRegistry.remove(terminalHandle)
-        assertNull(DisclosurePackageRegistry.find(terminalHandle))
+        val registry = DisclosurePackageRegistryStore { 1L }
+        val terminalHandle = registry.put(materialized)
+        registry.remove(terminalHandle)
+        assertNull(registry.find(terminalHandle))
 
-        val recreationHandle = DisclosurePackageRegistry.put(materialized)
-        assertTrue(DisclosurePackageRegistry.find(recreationHandle) != null)
-        DisclosurePackageRegistry.remove(recreationHandle)
+        val recreationHandle = registry.put(materialized)
+        assertTrue(registry.find(recreationHandle) != null)
+        registry.remove(recreationHandle)
     }
 
     @Test fun failed_pipeline_receipt_has_no_shareable_fields() {
@@ -182,6 +210,40 @@ class ExportWorkflowTest {
         assertEquals(0L, stagingAccounting.used(UidBucket.SNAPSHOTS))
     }
 
+    @Test fun api_23_compatible_async_submission_uses_the_supplied_executor() {
+        val scheduled = ArrayDeque<Runnable>()
+        val future = executeFuture(
+            executor = { command -> scheduled.addLast(command) },
+            operation = { 42 },
+        )
+
+        assertFalse(future.isDone)
+        assertEquals(1, scheduled.size)
+        scheduled.removeFirst().run()
+        assertEquals(42, future.get(5, TimeUnit.SECONDS))
+    }
+
+    @Test fun api_23_compatible_async_submission_completes_failures_exceptionally() {
+        val future = executeFuture(
+            executor = { command -> command.run() },
+            operation = { throw IllegalStateException("injected copy failure") },
+        )
+
+        val failure = assertFailsWith<ExecutionException> {
+            future.get(5, TimeUnit.SECONDS)
+        }
+        assertIs<IllegalStateException>(failure.cause)
+    }
+
+    @Test fun api_23_compatible_async_submission_preserves_executor_rejection() {
+        assertFailsWith<RejectedExecutionException> {
+            executeFuture<Int>(
+                executor = { throw RejectedExecutionException("injected rejection") },
+                operation = { 42 },
+            )
+        }
+    }
+
     @Test fun staging_registration_and_expiry_cleanup_release_each_concurrent_lease_once() {
         val workers = Executors.newFixedThreadPool(2)
         try {
@@ -241,6 +303,25 @@ class ExportWorkflowTest {
         assertIs<ExportReceipt.Approved.SaveCancelled>(cancelled)
         // SaveFailed and SaveCancelled constructors have no ShareHandoffState parameter; only
         // SaveSucceededPendingOrCompleteHandoff accepts (save: SaveResult.Complete, handoff).
+    }
+
+    private fun zip(entries: Map<String, ByteArray>, stored: Boolean = true): ByteArray {
+        val output = ByteArrayOutputStream()
+        ZipOutputStream(output).use { stream ->
+            entries.forEach { (path, bytes) ->
+                val entry = ZipEntry(path)
+                if (stored) {
+                    entry.method = ZipEntry.STORED
+                    entry.size = bytes.size.toLong()
+                    entry.compressedSize = bytes.size.toLong()
+                    entry.crc = CRC32().also { it.update(bytes) }.value
+                }
+                stream.putNextEntry(entry)
+                stream.write(bytes)
+                stream.closeEntry()
+            }
+        }
+        return output.toByteArray()
     }
 
 }

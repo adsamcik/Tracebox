@@ -1,0 +1,85 @@
+﻿{
+    "schema":  "tracebox-personal-release-host-readiness-v2",
+    "scope":  "All host-runnable implementation, unit, native, parser, lint, fixture, release-conformance, and static no-network gates for the personal release. No Android endpoint is contacted.",
+    "started_utc":  "2026-07-30T18:52:40.1583074Z",
+    "ended_utc":  "2026-07-30T18:57:04.9236424Z",
+    "provenance":  {
+                       "base_commit":  "ff3e015f4ef6a1a471e3c1f61f03e6f5e8092d5e",
+                       "working_tree_patch_sha256":  "538c5d1a91d231851901b9bed3a247f806f0f10d66032973427f4b8d4804d87e"
+                   },
+    "checks":  [
+                   {
+                       "name":  "foundation_contracts",
+                       "result":  "PASS",
+                       "duration_ms":  128
+                   },
+                   {
+                       "name":  "pinned_toolchains_and_locks",
+                       "result":  "PASS",
+                       "duration_ms":  3486
+                   },
+                   {
+                       "name":  "generated_artifact_drift",
+                       "result":  "PASS",
+                       "duration_ms":  83
+                   },
+                   {
+                       "name":  "personal_release_lab_topology",
+                       "result":  "PASS",
+                       "duration_ms":  5096
+                   },
+                   {
+                       "name":  "malicious_corpora",
+                       "result":  "PASS",
+                       "duration_ms":  1578
+                   },
+                   {
+                       "name":  "schema_compiler_and_goldens",
+                       "result":  "PASS",
+                       "duration_ms":  1636
+                   },
+                   {
+                       "name":  "gradle_plugin_contracts",
+                       "result":  "PASS",
+                       "duration_ms":  45064
+                   },
+                   {
+                       "name":  "rust_format",
+                       "result":  "PASS",
+                       "duration_ms":  297
+                   },
+                   {
+                       "name":  "rust_strict_clippy",
+                       "result":  "PASS",
+                       "duration_ms":  638
+                   },
+                   {
+                       "name":  "rust_workspace_tests",
+                       "result":  "PASS",
+                       "duration_ms":  38588
+                   },
+                   {
+                       "name":  "native_host_build_and_ctest",
+                       "result":  "PASS",
+                       "duration_ms":  7610
+                   },
+                   {
+                       "name":  "android_jvm_fixture_and_release_conformance",
+                       "result":  "PASS",
+                       "duration_ms":  101421
+                   },
+                   {
+                       "name":  "android_release_lint",
+                       "result":  "PASS",
+                       "duration_ms":  29430
+                   },
+                   {
+                       "name":  "release_artifacts_and_static_no_network",
+                       "result":  "PASS",
+                       "duration_ms":  29648
+                   }
+               ],
+    "blocked_egress":  "OPTIONAL_NOT_RUN; ANDROID_UID_EGRESS_REMAINS_IN_EMULATOR_GATE",
+    "emulator_validation":  "SEPARATE_INVOKE_PERSONAL_RELEASE_EMULATOR",
+    "result":  "PASS"
+}

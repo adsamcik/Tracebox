@@ -19,6 +19,8 @@ android {
 
 dependencies {
     implementation(project(":android:tracebox-core"))
+    implementation(project(":android:tracebox-storage"))
+    testImplementation(kotlin("test-junit"))
 }
 
 extra["traceboxPublicationName"] = "Tracebox native capture"

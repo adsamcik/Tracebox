@@ -1,6 +1,10 @@
 {
+  "AnrCandidate": "anr_candidate: includes only C0 elapsed_millis, C0 sample_count, C0 frame_count, C0 nonfatal_result, C0 flags",
   "Breadcrumb": "breadcrumb: includes only C1 code, C1 monotonic_time_ns",
   "EmergencyRecord": "emergency: includes only C0 slot_sequence, C0 policy_epoch, C0 signal_number, C0 signal_code, C0 process_role, C0 thread_role, C0 flags",
   "HandledError": "handled_error: includes only C1 kind, C1 frame_count",
+  "ManagedCrash": "managed_crash: includes only C1 primary_exception_code, C0 cause_count, C0 frame_count, C0 flags",
+  "OsExit": "os_exit: includes only C0 reason, C0 status, C0 importance, C0 link_confidence, C0 artifact_state",
+  "RustPanic": "rust_panic: includes only C0 payload_class, C0 thread_role, C1 location_code, C0 flags",
   "StructuralSummary": "crash_summary: includes only C0 stream_count, C0 thread_count, C0 module_count, C0 exception_code, C0 processor_architecture"
 }

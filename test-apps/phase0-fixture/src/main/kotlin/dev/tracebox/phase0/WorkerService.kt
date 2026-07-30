@@ -9,12 +9,14 @@ import dev.tracebox.nativecapture.NativeRuntime
 class WorkerService : Service() {
     override fun onCreate() {
         super.onCreate()
-        NativeRuntime.initializeEmergency(noBackupFilesDir.absolutePath, PROCESS_ROLE_WORKER)
+        val initialized = LabNativeIdentity.initialize(this, PROCESS_ROLE_WORKER)
         val connected =
-            NativeRuntime.connectClient(
-                "${noBackupFilesDir.absolutePath}/handler.sock",
-                PROCESS_ROLE_WORKER,
-            )
+            initialized &&
+                LabNativeIdentity.connect(
+                    this,
+                    "${noBackupFilesDir.absolutePath}/handler.sock",
+                    PROCESS_ROLE_WORKER,
+                )
         Log.i(TAG, "worker_connected=$connected")
     }
 

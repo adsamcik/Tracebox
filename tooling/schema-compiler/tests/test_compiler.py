@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -71,6 +72,43 @@ class SchemaCompilerTests(unittest.TestCase):
         schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
         schema["events"][1]["id"] = schema["events"][0]["id"]
         self.assertNotEqual(0, self.compile(schema).returncode)
+
+    def test_direct_boot_fingerprint_ignores_unrelated_events_but_tracks_its_projection(self):
+        schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
+        baseline = self.compile(schema)
+        self.assertEqual(0, baseline.returncode, baseline.stderr)
+        generated = self.out / (
+            "android/tracebox-directboot/src/main/kotlin/dev/tracebox/directboot/"
+            "GeneratedDirectBootSchema.kt"
+        )
+        baseline_fingerprint = self.direct_boot_fingerprint(generated.read_text(encoding="utf-8"))
+
+        schema["events"][0]["fields"][0]["name"] = "unrelated_code"
+        unrelated = self.compile(schema)
+        self.assertEqual(0, unrelated.returncode, unrelated.stderr)
+        self.assertEqual(
+            baseline_fingerprint,
+            self.direct_boot_fingerprint(generated.read_text(encoding="utf-8")),
+        )
+
+        schema["events"][1]["fields"][0]["name"] = "direct_boot_slot"
+        direct_boot_changed = self.compile(schema)
+        self.assertEqual(0, direct_boot_changed.returncode, direct_boot_changed.stderr)
+        self.assertNotEqual(
+            baseline_fingerprint,
+            self.direct_boot_fingerprint(generated.read_text(encoding="utf-8")),
+        )
+
+    @staticmethod
+    def direct_boot_fingerprint(generated):
+        match = re.search(
+            r"object GeneratedDirectBootSchemaFingerprint \{\s+"
+            r'const val HEX: String = "([0-9a-f]{64})"',
+            generated,
+        )
+        if match is None:
+            raise AssertionError("generated Direct Boot fingerprint is missing")
+        return match.group(1)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ import dev.tracebox.storage.UidBucket
 import dev.tracebox.storage.UidQuota
 import java.nio.file.Path
 import java.nio.file.Files
+import java.nio.file.attribute.FileTime
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -164,11 +165,14 @@ class PackagePipelineTest {
         spool.stageStructuralSummary(ByteArray(32) { 4 }, 1, ByteArray(32) { 5 }, summary)
         spool.replayToTarget(TargetSegmentSummaryImporter(root.resolve("acknowledgements"), segment, writer))
 
-        val request = RecoveredSnapshotRequestAdapter().build(9, 7, 1, listOf(segment))
+        val durableTimeMillis = 1_700_000_000_123L
+        Files.setLastModifiedTime(segment, FileTime.fromMillis(durableTimeMillis))
+        val request = RecoveredSnapshotRequestAdapter().build(9, 1, listOf(segment))
         val source = request.segments.single()
         assertEquals(2, source.records.size)
         assertEquals(GeneratedEventId.BREADCRUMB, source.records[0].eventId)
         assertEquals(GeneratedEventId.STRUCTURALSUMMARY, source.records[1].eventId)
+        assertEquals(listOf(durableTimeMillis, durableTimeMillis), source.records.map { it.occurredAtMillis })
 
         val prepared = SnapshotPreparer(accounting(), root.resolve("staging")).prepare(request)
         assertEquals(2, prepared.entries.size)
@@ -177,6 +181,192 @@ class PackagePipelineTest {
         assertEquals(listOf(1, 1), prepared.entries.map { it.segmentLocalId })
         assertContentEquals(GeneratedRecordCodec.encode(breadcrumb), prepared.entries[0].bytes().copyOfRange(32, 44))
         assertContentEquals(GeneratedRecordCodec.encode(summary), prepared.entries[1].bytes().copyOfRange(32, 50))
+    }
+
+    @Test fun recovered_storage_adapter_includes_every_uid_process_role_and_counts_processes() {
+        val root = Path.of("build", "phase4-processes", UUID.randomUUID().toString())
+        Files.createDirectories(root)
+        val page = ControlPage(root.resolve("control"))
+        page.commit(PolicySnapshot(11, 0))
+        val gate = WriterPolicyGate(page)
+        assertEquals(GateResult.Reloaded, gate.reload())
+        val quota = RoleQuotaLedger(
+            RoleQuotaPolicy(mapOf(7 to 1_000_000, 9 to 1_000_000)),
+            root,
+        )
+        val firstPath = root.resolve("first.tbseg")
+        val secondPath = root.resolve("second.tbseg")
+        val firstWriter = SegmentWriter.create(
+            firstPath,
+            SegmentHeader(
+                PersistedSegmentIdentity(ByteArray(32) { 2 }, ByteArray(32) { 1 }),
+                ByteArray(32) { 3 },
+                11,
+                0,
+                7,
+            ),
+            gate,
+            quota,
+        )
+        val secondWriter = SegmentWriter.create(
+            secondPath,
+            SegmentHeader(
+                PersistedSegmentIdentity(ByteArray(32) { 6 }, ByteArray(32) { 5 }),
+                ByteArray(32) { 3 },
+                11,
+                0,
+                9,
+            ),
+            gate,
+            quota,
+        )
+        val firstRecord = GeneratedBreadcrumb(71u, 1u)
+        val secondRecord = GeneratedHandledError(91u, 2u)
+        firstWriter.append(
+            firstRecord.eventId.stableId,
+            PolicyTaggedRecord(
+                0L,
+                11,
+                RecordPriority.BREADCRUMB,
+                GeneratedRecordCodec.encode(firstRecord),
+            ),
+        )
+        secondWriter.append(
+            secondRecord.eventId.stableId,
+            PolicyTaggedRecord(
+                0L,
+                11,
+                RecordPriority.ORDINARY_EVENT,
+                GeneratedRecordCodec.encode(secondRecord),
+            ),
+        )
+        val firstTime = 1_700_000_000_100L
+        val secondTime = 1_700_000_000_200L
+        Files.setLastModifiedTime(firstPath, FileTime.fromMillis(firstTime))
+        Files.setLastModifiedTime(secondPath, FileTime.fromMillis(secondTime))
+
+        val request =
+            RecoveredSnapshotRequestAdapter().build(11, Long.MAX_VALUE, listOf(secondPath, firstPath))
+
+        assertEquals(setOf(7, 9), request.segments.map { it.processRole }.toSet())
+        assertEquals(2, request.segments.map { it.processIdentity }.toSet().size)
+        assertEquals(setOf(firstTime, secondTime), request.segments.flatMap { it.records }.map { it.occurredAtMillis }.toSet())
+        val prepared = SnapshotPreparer(accounting(), root.resolve("staging")).prepare(request)
+        assertEquals(2, prepared.entries.map { it.processLocalId }.toSet().size)
+        assertEquals(firstTime..secondTime, prepared.sourceRangeMillis)
+    }
+
+    @Test fun standard_planning_selects_a_bounded_deterministic_recent_subset() {
+        val process = identity(21)
+        val segment = identity(22)
+        val records = (0L until 200L).map { sequence ->
+            OrdinarySourceRecord(
+                sequence = sequence,
+                generated = breadcrumb(sequence.toUInt(), sequence.toULong()),
+                occurredAtMillis = 10_000L + sequence,
+                privacyClass = PackagePrivacyClass.C1,
+            )
+        }
+        val forward = StandardSnapshotRequest(
+            policyEpoch = 12,
+            sequenceCutoffs = mapOf(segment to Long.MAX_VALUE),
+            segments = listOf(SegmentSource(process, segment, 7, records)),
+        )
+        val reverse = forward.copy(
+            segments = listOf(SegmentSource(process, segment, 7, records.reversed())),
+        )
+
+        val first = SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString()))
+            .prepare(forward)
+        val second = SnapshotPreparer(accounting(), Path.of("build", "phase4", UUID.randomUUID().toString()))
+            .prepare(reverse)
+
+        assertEquals(SnapshotPreparer.MAX_STANDARD_RECORD_ENTRIES, first.entries.size)
+        assertTrue(first.entries.size + 1 <= DeterministicZip.MAX_ENTRIES)
+        assertTrue(first.totalBytes() <= SnapshotPreparer.MAX_STANDARD_SELECTED_MATERIALIZED_BYTES)
+        val firstSelectedPayloads = first.entries.map { entry ->
+            entry.bytes().copyOfRange(32, entry.bytes().size)
+        }
+        val expectedPayloads = records
+            .takeLast(SnapshotPreparer.MAX_STANDARD_RECORD_ENTRIES)
+            .map { GeneratedRecordCodec.encode(it.generated) }
+        firstSelectedPayloads.zip(expectedPayloads).forEach { (actual, expected) ->
+            assertContentEquals(expected, actual)
+        }
+        assertContentEquals(
+            DeterministicZip().materialize(first).exactBytes(),
+            DeterministicZip().materialize(second).exactBytes(),
+        )
+    }
+
+    @Test fun adversarial_ties_have_a_total_order_across_every_input_permutation() {
+        val process = identity(31)
+        val segment = identity(32)
+        val tied = listOf(
+            SegmentSource(
+                process,
+                segment,
+                9,
+                listOf(
+                    OrdinarySourceRecord(
+                        4,
+                        breadcrumb(7u, 8u),
+                        1_000,
+                        PackagePrivacyClass.C1,
+                        artifactIdentity = identity(41),
+                    ),
+                ),
+            ),
+            SegmentSource(
+                process,
+                segment,
+                7,
+                listOf(
+                    OrdinarySourceRecord(
+                        4,
+                        breadcrumb(7u, 8u),
+                        1_000,
+                        PackagePrivacyClass.C0,
+                        artifactIdentity = identity(42),
+                    ),
+                ),
+            ),
+            SegmentSource(
+                process,
+                segment,
+                8,
+                listOf(
+                    OrdinarySourceRecord(
+                        4,
+                        breadcrumb(7u, 8u),
+                        1_000,
+                        PackagePrivacyClass.C2,
+                        valid = false,
+                    ),
+                ),
+            ),
+        )
+        val permutations = listOf(
+            tied,
+            tied.reversed(),
+            listOf(tied[1], tied[2], tied[0]),
+            listOf(tied[2], tied[0], tied[1]),
+        )
+        val packages = permutations.map { segments ->
+            val snapshot = SnapshotPreparer(
+                accounting(),
+                Path.of("build", "phase4", UUID.randomUUID().toString()),
+            ).prepare(
+                StandardSnapshotRequest(
+                    policyEpoch = 13,
+                    sequenceCutoffs = mapOf(segment to 4L),
+                    segments = segments,
+                ),
+            )
+            DeterministicZip().materialize(snapshot).exactBytes()
+        }
+
+        packages.drop(1).forEach { assertContentEquals(packages.first(), it) }
     }
 
     @Test fun schema_visibility_is_enforced() {

@@ -26,7 +26,14 @@ interface Diagnostics {
 /** A closed set of profiles; Prohibited data can never be selected. */
 enum class DiagnosticsProfile { DISABLED, MINIMAL_CRASH, STANDARD_DIAGNOSTICS, ENHANCED_DIAGNOSTIC_SESSION }
 
-/** Result of a policy update. */
+/**
+ * Result of a policy update.
+ *
+ * [FAILED] is reserved for a change that did not cross a proven local durability boundary.
+ * [LOCAL_ONLY_RESTRICTED] means a restrictive tuple is durable locally but package-wide runtime
+ * convergence was incomplete. [PARTIAL] covers a durable permissive/ambiguous change or an
+ * auxiliary failure. Only [SUCCESS] proves durable local and registered-participant convergence.
+ */
 enum class PolicyUpdateResult { SUCCESS, LOCAL_ONLY_RESTRICTED, PARTIAL, FAILED }
 
 /** A bounded deletion request. */

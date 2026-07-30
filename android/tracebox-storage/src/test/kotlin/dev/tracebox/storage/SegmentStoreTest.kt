@@ -82,6 +82,33 @@ class SegmentStoreTest {
         assertTrue(SegmentWriter.recover(path).frames.isEmpty())
     }
 
+    @Test fun only_critical_capture_may_force_a_bounded_frame_from_main_thread() {
+        val path = directory().resolve("critical-main.tbseg")
+        val segment = writer(path, header(22)).writer
+        val ordinaryFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val criticalResult = java.util.concurrent.atomic.AtomicReference<SegmentAppendResult?>()
+        Thread({
+            ordinaryFailure.set(
+                runCatching {
+                    segment.append(3, record(byteArrayOf(1), priority = RecordPriority.BREADCRUMB))
+                }.exceptionOrNull(),
+            )
+            criticalResult.set(
+                segment.appendCritical(
+                    5,
+                    record(byteArrayOf(2), priority = RecordPriority.CRASH_ANR),
+                ),
+            )
+        }, "main").also {
+            it.start()
+            it.join()
+        }
+
+        assertIs<IllegalStateException>(ordinaryFailure.get())
+        assertIs<SegmentAppendResult.Appended>(criticalResult.get())
+        assertEquals(1, SegmentWriter.recover(path).frames.size)
+    }
+
     @Test fun unsealed_frame_with_physical_size_of_current_seal_is_recovered_as_frame() {
         val path = directory().resolve("fifty-two-byte-frame.tbseg")
         writer(path, header(3)).writer.use {

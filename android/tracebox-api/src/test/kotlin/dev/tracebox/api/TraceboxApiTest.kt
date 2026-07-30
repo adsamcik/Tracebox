@@ -21,6 +21,14 @@ class TraceboxApiTest {
         assertEquals(1, diagnostics.recordCount)
     }
 
+    @Test
+    fun policy_update_result_preserves_the_published_v1_ordinals() {
+        assertEquals(0, PolicyUpdateResult.SUCCESS.ordinal)
+        assertEquals(1, PolicyUpdateResult.LOCAL_ONLY_RESTRICTED.ordinal)
+        assertEquals(2, PolicyUpdateResult.PARTIAL.ordinal)
+        assertEquals(3, PolicyUpdateResult.FAILED.ordinal)
+    }
+
     private class FakeDiagnostics(private val enabled: Boolean) : Diagnostics {
         var recordCount = 0
         override fun eventEnabled(eventId: GeneratedEventId) = enabled

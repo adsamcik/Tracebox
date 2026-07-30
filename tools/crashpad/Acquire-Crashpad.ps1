@@ -2,6 +2,29 @@ param([switch] $Force)
 
 $ErrorActionPreference = 'Stop'
 
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    $modernPowerShell = Get-Command pwsh.exe -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $modernPowerShell) {
+        throw 'Crashpad source verification requires PowerShell 7 or newer'
+    }
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        $PSCommandPath
+    )
+    if ($Force) {
+        $arguments += '-Force'
+    }
+    & $modernPowerShell.Source @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "PowerShell 7 Crashpad acquisition failed with exit code $LASTEXITCODE"
+    }
+    return
+}
+
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $PSScriptRoot 'CrashpadArchive.ps1')
 $lockPath = Join-Path $root 'third_party\crashpad\source-lock.json'
@@ -10,6 +33,20 @@ $downloads = Join-Path $root '.bootstrap\crashpad-acquire'
 $lock = Get-Content $lockPath -Raw | ConvertFrom-Json
 $sourceLockHash =
     (Get-FileHash $lockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+function Get-Sha256Hex {
+    param([byte[]] $Bytes)
+
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        return (
+            [BitConverter]::ToString($algorithm.ComputeHash($Bytes)) -replace '-', ''
+        ).ToLowerInvariant()
+    } finally {
+        $algorithm.Dispose()
+    }
+}
+
 $seriesPath = Join-Path $root 'third_party\crashpad\patches\series'
 $series = Get-Content $seriesPath |
     Where-Object { $_ -and -not $_.TrimStart().StartsWith('#') }
@@ -17,9 +54,8 @@ $patchMaterial = foreach ($relativePatch in $series) {
     $patch = Join-Path $root "third_party\crashpad\patches\$relativePatch"
     "$relativePatch`n$((Get-FileHash $patch -Algorithm SHA256).Hash.ToLowerInvariant())`n"
 }
-$patchSetHash = [Convert]::ToHexString(
-    [Security.Cryptography.SHA256]::HashData(
-        [Text.Encoding]::UTF8.GetBytes(($patchMaterial -join '')))).ToLowerInvariant()
+$patchSetHash =
+    Get-Sha256Hex ([Text.Encoding]::UTF8.GetBytes(($patchMaterial -join '')))
 
 function Get-TreeHash {
     param(
@@ -44,8 +80,7 @@ function Get-TreeHash {
         "$relative`n$hash`n"
     }
     $bytes = [Text.Encoding]::UTF8.GetBytes(($entries -join ''))
-    return [Convert]::ToHexString(
-        [Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    return Get-Sha256Hex $bytes
 }
 
 New-Item -ItemType Directory -Force $checkout, $downloads | Out-Null
@@ -100,7 +135,9 @@ foreach ($component in $lock.components) {
         $component.archive_sha256 | Out-Null
     $actualTreeHash = Get-TreeHash $destination
     if ($actualTreeHash -ne $component.tree_sha256) {
-        throw "Source tree verification failed: $($component.name)"
+        throw (
+            "Source tree verification failed: $($component.name); " +
+            "expected=$($component.tree_sha256); actual=$actualTreeHash")
     }
 }
 

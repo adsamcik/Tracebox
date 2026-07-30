@@ -9,8 +9,10 @@ development environment its checkout is:
 G:\Github\Tracker-Android
 ```
 
-This document defines a small, reversible downstream integration. It is not a
-new Tracebox validation matrix and it does not broaden Tracebox's data
+This document defines the downstream integration in Tracker's normal
+application. Tracebox replaces Tracker's active crash and logging system; it is
+not carried as a diagnostics flavor or paired with a rollback flavor. This is
+not a new Tracebox validation matrix and it does not broaden Tracebox's data
 collection.
 
 ## Observed host baseline
@@ -18,10 +20,13 @@ collection.
 The current Tracker tree:
 
 - has `minSdk 26`, `compileSdk 37`, and `targetSdk 37`;
-- already has `standard` and `traceboxTrial` diagnostics flavors;
-- consumes `io.github.tracebox:tracebox:0.1.0-alpha.1` in the trial flavor;
-- installs the alpha disabled through `TraceboxTrialController`;
-- has a user-facing Tracebox trial settings screen;
+- currently has `standard` and `traceboxTrial` diagnostics flavors that the
+  final integration must collapse into the normal application;
+- currently consumes `io.github.tracebox:tracebox:0.1.0-alpha.1` only in the
+  trial flavor;
+- currently installs the alpha disabled through `TraceboxTrialController`;
+- has a user-facing Tracebox settings surface that can be migrated out of the
+  trial-only controller;
 - installs its own `Thread.UncaughtExceptionHandler`;
 - stores legacy crash messages, stacks, device/battery/network context, and
   file/database exports; and
@@ -31,17 +36,19 @@ Tracebox foundation targets API 23, so it is compatible with Tracker's API-26
 baseline. The alpha and foundation Kotlin package/API migration must be handled
 explicitly when the dependency is updated.
 
-## Entry gate
+## Integration sequencing
 
-Begin Tracker code changes only after Tracebox reaches
-`PERSONAL_RELEASE_READY`:
+Tracker host-side integration may be prepared once Tracebox reaches
+`IMPLEMENTATION_COMPLETE`, so source migration and unit tests do not leave
+avoidable implementation work for the emulator window. Pin the final immutable
+candidate only after Tracebox reaches `PERSONAL_RELEASE_READY`:
 
 - production capture and storage paths are connected;
 - production artifacts contain no fault-injection or approval-bypass controls;
 - host/static and required-emulator gates pass; and
 - the candidate is published or locally resolved by an immutable version.
 
-Tracker evaluation is then a downstream practical smoke. It does not block
+Tracker evaluation is a downstream practical smoke. It does not block
 Tracebox's already-established `PERSONAL_RELEASE_READY` state unless it exposes
 a reproducible Tracebox defect.
 
@@ -51,15 +58,23 @@ a reproducible Tracebox defect.
 
 - Pin one immutable Tracebox candidate version.
 - Keep Tracebox repositories content-filtered to `io.github.tracebox`.
-- Preserve Tracker's API-26 standard build.
-- Build both the rollback/no-Tracebox variant and the Tracebox-enabled variant.
-- Include Tracebox and Crashpad notices in Tracker's third-party license output.
+- Preserve Tracker's API-26 normal build.
+- Resolve Tracebox from Tracker's normal application variant and remove the
+  diagnostics-flavor split.
+- Include the packaged Tracebox and Crashpad notice resource
+  `dev.tracebox.R.raw.tracebox_third_party_notices` in Tracker's third-party
+  license output.
 
 ### User control
 
 - Reuse Tracker's existing Tracebox settings surface.
-- Install disabled unless the user has explicitly enabled the chosen profile.
-- Persist only the user's requested profile, never inferred consent.
+- Use `STANDARD_DIAGNOSTICS` on first install so Tracebox actually replaces the
+  retired crash and logging system instead of leaving Tracker without
+  diagnostics.
+- Persist every explicit profile choice, including `DISABLED`; a persisted user
+  choice takes precedence over the first-install default.
+- Keep package preparation, disclosure, save, and share explicitly
+  user-initiated even while recording is enabled.
 - Display Tracebox readiness, degraded state, deletion result, package
   preparation, disclosure, save, and share outcomes without claiming delivery.
 - Connect Tracker's collected-data deletion flow to Tracebox deletion and show a
@@ -68,35 +83,38 @@ a reproducible Tracebox defect.
 ### Recording boundary
 
 - Define Tracker events in Tracebox's generated schema.
+- Replace every active Tracker logging writer with an explicit generated-event
+  mapping or remove the call when no bounded structural event is appropriate.
 - Record only bounded structural codes and generated fields.
 - Never pass Tracker log strings, exception messages, location coordinates,
   paths, URLs, map/search text, activity history, database objects, or the
   legacy crash payload to Tracebox.
+- Keep existing legacy crash/log stores read-only except for migration-safe
+  retention and deletion; never append new records and never import their
+  free-form values into Tracebox.
 - Treat Tracker's host-owned networking as outside Tracebox's no-network claim.
 
 ### JVM crash-handler migration
 
 Tracker's current handler performs database/file work and captures free-form
-payloads. Do not feed that payload into Tracebox and do not leave two unrelated
-handlers competing indefinitely.
+payloads. Do not feed that payload into Tracebox and do not leave it installed
+beside Tracebox in the finished application.
 
 Use this migration:
 
 1. Add a startup coordinator with a unit-tested deterministic installation
    order.
-2. During the trial, configure Tracebox's explicit coexistence mode and prove
-   that Tracebox, Tracker's prior handler, and Android's prior handler are each
-   invoked at most once.
-3. Prefer Tracebox as the outer handler so its bounded capture is not delayed by
-   Tracker's database/file path.
-4. After the single-emulator migration smoke passes, stop installing Tracker's
-   handler for new crashes in the Tracebox-enabled variant.
-5. Keep legacy crash records readable/exportable/deletable until their existing
+2. Stop installing Tracker's legacy handler before installing Tracebox as the
+   sole application crash owner.
+3. Let Tracebox chain only the Android/runtime handler that existed before
+   Tracker installed any application handler.
+4. Keep legacy crash records readable/exportable/deletable until their existing
    retention path removes them; do not import them into Tracebox.
-6. Retain the standard/rollback variant until practical evaluation is accepted.
+5. Delete or permanently disconnect legacy crash/log write paths after their
+   read/export/delete migration surface is isolated.
 
-The desired steady state is one Tracebox JVM capture owner, not permanent
-double recording.
+The required steady state is one Tracebox JVM/native/Rust capture owner and one
+bounded generated-event logging path, with no production double recording.
 
 ### Exit-history ownership
 
@@ -122,15 +140,18 @@ double recording.
 
 Before emulator evaluation, Tracker should have unit tests for:
 
-- profile persistence and disabled-by-default startup;
+- Standard-profile first startup, explicit disable, and persisted-profile
+  restoration;
 - generated-event mapping and rejection of free-form Tracker values;
 - deterministic crash-handler installation/chaining;
 - no duplicate JVM capture;
+- no active legacy crash or logging writes;
+- bounded generated-event replacements for every retained logging call site;
 - Tracker recovery reads without owning Tracebox import state;
 - combined deletion result mapping;
 - package/disclosure/save/share result mapping;
 - dependency version and min-SDK compatibility; and
-- rollback variant behavior.
+- read/export/delete behavior for pre-existing legacy records.
 
 Use a fake `TraceboxHandle`; these tests must not depend on native libraries or
 an Android runtime.
@@ -139,14 +160,15 @@ an Android runtime.
 
 On the ADR-0010 required emulator, exercise:
 
-- clean install disabled;
-- explicit enable, process restart, and profile restoration;
+- clean install with Standard Diagnostics ready;
+- explicit disable, process restart, and disabled-profile restoration;
+- explicit re-enable and profile restoration;
 - one managed crash and legacy-handler migration behavior;
 - one native or Rust fault;
 - one ANR candidate and restart reconciliation;
 - package disclosure and local save;
 - disable/delete/restart with no accessible Tracebox-owned data; and
-- rollback/no-Tracebox variant startup.
+- normal-app restart with Tracebox still the sole active crash/logging owner.
 
 This is sufficient downstream validation for the personal project. Physical
 devices and additional OEM/API cells are optional and must not be implied.

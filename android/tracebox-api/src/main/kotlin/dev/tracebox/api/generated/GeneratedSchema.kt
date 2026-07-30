@@ -9,6 +9,18 @@ enum class GeneratedEventId(val stableId: Int) {
     EMERGENCYRECORD(2),
     BREADCRUMB(3),
     HANDLEDERROR(4),
+    MANAGEDCRASH(5),
+    RUSTPANIC(6),
+    ANRCANDIDATE(7),
+    OSEXIT(8),
+}
+
+object GeneratedSchemaFingerprint {
+    const val HEX: String = "1ed8573b32578a1165aaa1a3d0b4f139549b5041bdba9aaa4329feb1c8c371e3"
+
+    fun bytes(): ByteArray = ByteArray(HEX.length / 2) { index ->
+        HEX.substring(index * 2, index * 2 + 2).toInt(16).toByte()
+    }
 }
 
 /** A schema-defined, bounded recording value. */
@@ -56,6 +68,48 @@ class GeneratedHandledError(
     override val eventId = GeneratedEventId.HANDLEDERROR
 }
 
+/** Schema event 5; fields are privacy-classified in the schema. */
+class GeneratedManagedCrash(
+    val primary_exception_code: UInt,
+    val cause_count: UShort,
+    val frame_count: UShort,
+    val flags: UInt,
+) : GeneratedRecord {
+    override val eventId = GeneratedEventId.MANAGEDCRASH
+}
+
+/** Schema event 6; fields are privacy-classified in the schema. */
+class GeneratedRustPanic(
+    val payload_class: UInt,
+    val thread_role: UInt,
+    val location_code: UInt,
+    val flags: UInt,
+) : GeneratedRecord {
+    override val eventId = GeneratedEventId.RUSTPANIC
+}
+
+/** Schema event 7; fields are privacy-classified in the schema. */
+class GeneratedAnrCandidate(
+    val elapsed_millis: UInt,
+    val sample_count: UShort,
+    val frame_count: UShort,
+    val nonfatal_result: UInt,
+    val flags: UInt,
+) : GeneratedRecord {
+    override val eventId = GeneratedEventId.ANRCANDIDATE
+}
+
+/** Schema event 8; fields are privacy-classified in the schema. */
+class GeneratedOsExit(
+    val reason: Int,
+    val status: Int,
+    val importance: Int,
+    val link_confidence: UInt,
+    val artifact_state: UInt,
+) : GeneratedRecord {
+    override val eventId = GeneratedEventId.OSEXIT
+}
+
 object GeneratedDiagnostics {
     fun structuralSummary(diagnostics: Diagnostics, stream_count: UInt, thread_count: UInt, module_count: UInt, exception_code: UInt, processor_architecture: UShort, context: DiagnosticContext? = null) {
         if (diagnostics.eventEnabled(GeneratedEventId.STRUCTURALSUMMARY)) {
@@ -77,6 +131,26 @@ object GeneratedDiagnostics {
             diagnostics.record(GeneratedHandledError(kind, frame_count), context)
         }
     }
+    fun managedCrash(diagnostics: Diagnostics, primary_exception_code: UInt, cause_count: UShort, frame_count: UShort, flags: UInt, context: DiagnosticContext? = null) {
+        if (diagnostics.eventEnabled(GeneratedEventId.MANAGEDCRASH)) {
+            diagnostics.record(GeneratedManagedCrash(primary_exception_code, cause_count, frame_count, flags), context)
+        }
+    }
+    fun rustPanic(diagnostics: Diagnostics, payload_class: UInt, thread_role: UInt, location_code: UInt, flags: UInt, context: DiagnosticContext? = null) {
+        if (diagnostics.eventEnabled(GeneratedEventId.RUSTPANIC)) {
+            diagnostics.record(GeneratedRustPanic(payload_class, thread_role, location_code, flags), context)
+        }
+    }
+    fun anrCandidate(diagnostics: Diagnostics, elapsed_millis: UInt, sample_count: UShort, frame_count: UShort, nonfatal_result: UInt, flags: UInt, context: DiagnosticContext? = null) {
+        if (diagnostics.eventEnabled(GeneratedEventId.ANRCANDIDATE)) {
+            diagnostics.record(GeneratedAnrCandidate(elapsed_millis, sample_count, frame_count, nonfatal_result, flags), context)
+        }
+    }
+    fun osExit(diagnostics: Diagnostics, reason: Int, status: Int, importance: Int, link_confidence: UInt, artifact_state: UInt, context: DiagnosticContext? = null) {
+        if (diagnostics.eventEnabled(GeneratedEventId.OSEXIT)) {
+            diagnostics.record(GeneratedOsExit(reason, status, importance, link_confidence, artifact_state), context)
+        }
+    }
 }
 
 /** Generated export metadata; snapshot transformation must use this schema contract. */
@@ -86,6 +160,10 @@ object GeneratedExportMetadata {
         GeneratedEventId.EMERGENCYRECORD -> listOf("none", "none", "none", "none", "none", "none", "none")
         GeneratedEventId.BREADCRUMB -> listOf("none", "none")
         GeneratedEventId.HANDLEDERROR -> listOf("none", "none")
+        GeneratedEventId.MANAGEDCRASH -> listOf("none", "none", "none", "none")
+        GeneratedEventId.RUSTPANIC -> listOf("none", "none", "none", "none")
+        GeneratedEventId.ANRCANDIDATE -> listOf("none", "none", "none", "none", "none")
+        GeneratedEventId.OSEXIT -> listOf("none", "none", "none", "none", "none")
     }
 
     fun standardVisible(eventId: GeneratedEventId): Boolean = when (eventId) {
@@ -93,5 +171,9 @@ object GeneratedExportMetadata {
         GeneratedEventId.EMERGENCYRECORD -> false
         GeneratedEventId.BREADCRUMB -> true
         GeneratedEventId.HANDLEDERROR -> true
+        GeneratedEventId.MANAGEDCRASH -> true
+        GeneratedEventId.RUSTPANIC -> true
+        GeneratedEventId.ANRCANDIDATE -> true
+        GeneratedEventId.OSEXIT -> true
     }
 }

@@ -5,18 +5,42 @@ assert(crashpad_is_android)
 loadable_module("tracebox_crashpad") {
   sources = [
     "emergency/tracebox_emergency.c",
+    "include/tracebox/client_lifecycle_journal.h",
+    "include/tracebox/client_registration.h",
+    "include/tracebox/handler_lifecycle_drain.h",
+    "include/tracebox/handler_socket_cleanup.h",
+    "include/tracebox/signal_stack.h",
+    "signal/tracebox_signal_stack.cc",
     "tracebox_bridge.cc",
   ]
 
   include_dirs = [ "include" ]
   public_configs = [ "//:crashpad_config" ]
+  if (target_cpu == "x64") {
+    lib_dirs = [ "//tracebox_overlay/rust/x86_64" ]
+  } else if (target_cpu == "arm64") {
+    lib_dirs = [ "//tracebox_overlay/rust/arm64-v8a" ]
+  } else {
+    assert(false, "Tracebox supports only x64 and arm64 Android")
+  }
   deps = [
     "//client",
     "//handler",
     "//third_party/mini_chromium:base",
     "//util",
   ]
-  libs = [ "log" ]
+  libs = [
+    "tracebox_android_bridge",
+    "log",
+    "dl",
+    "m",
+  ]
+  ldflags = [
+    # Rust staticlibs include the standard library's archive members. Localize every archive
+    # symbol so --gc-sections can discard dormant std::net code instead of treating its
+    # default-visible symbols as shared-library export roots.
+    "-Wl,--exclude-libs,ALL",
+  ]
 
   output_name = "tracebox_crashpad"
 }

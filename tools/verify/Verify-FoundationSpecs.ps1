@@ -27,15 +27,14 @@ $protocol = Get-Content 'specs\phase0-measurement-protocol.md' -Raw
 $requiredProtocolTerms = @(
     'Existing API 36 x86_64 emulator, 4 KiB',
     'Additional API, ABI, page-size, physical-device, and OEM lanes are advisory',
-    'False-positive run',
-    'Handler idle PSS',
-    'Handler healthy CPU',
-    'Fatal crash to durable artifact',
-    'Heartbeat post work',
-    'Target-process pause',
+    'Run one ten-minute healthy watchdog false-candidate observation',
+    'Handler timer/poll wakeups',
+    'Ineligible watchdog wakeups after settling',
+    'Healthy false confirmations',
+    'Deterministic six-second stall',
+    'Handler-hang timeout/cancellation',
     'Presubmit: 60 seconds',
-    'Nightly: 30 minutes',
-    'Certification: 4 hours'
+    'Personal release: 5 minutes'
 )
 foreach ($term in $requiredProtocolTerms) {
     if (-not $protocol.Contains($term)) {
@@ -49,6 +48,20 @@ if (-not $retargeting.Contains('Accepted by explicit user decision on 2026-07-22
     -not $retargeting.Contains('existing API 36') -or
     -not $retargeting.Contains('`x86_64`, 4 KiB emulator')) {
     throw 'ADR-0009 does not freeze the API 23 single-emulator contract'
+}
+
+$personalScope = Get-Content 'docs\adr\0010-personal-project-release-scope.md' -Raw
+foreach ($term in @(
+        'Accepted by explicit user decision on 2026-07-29',
+        '`IMPLEMENTATION_COMPLETE`',
+        '`PERSONAL_RELEASE_READY`',
+        'one configurable `tracebox-lab`',
+        'one final baseline-to-HEAD review',
+        'Tracker integration'
+    )) {
+    if (-not $personalScope.Contains($term)) {
+        throw "ADR-0010 does not freeze the personal-project contract: $term"
+    }
 }
 
 $libraryPlugin = Get-Content `
@@ -101,19 +114,20 @@ if ($emergency -notmatch 'One preallocated slot is exactly 256 bytes' -or
     throw 'Emergency record layout is incomplete'
 }
 
-$traceability = Import-Csv 'docs\traceability\requirements.csv'
-if ($traceability.Count -lt 1000) {
-    throw 'Traceability coverage unexpectedly small'
+$traceability = Import-Csv 'docs\traceability\personal-release-checklist.csv'
+if ($traceability.Count -lt 20) {
+    throw 'Personal-release traceability coverage unexpectedly small'
 }
-$workPackage = $traceability | Where-Object requirement_id -eq 'WP-F0.1'
-if ($workPackage.status -ne 'PASS') {
-    throw 'WP-F0.1 is not recorded as PASS'
+$scopeRequirement = $traceability | Where-Object requirement_id -eq 'PR-001'
+if ($scopeRequirement.status -ne 'PASS') {
+    throw 'PR-001 is not recorded as PASS'
 }
 
 [pscustomobject]@{
     accepted_adrs = $resolvedAdrs.Count
+    explicit_scope_adrs = 2
     open_decisions = 12
-    traceability_rows = $traceability.Count
+    personal_release_requirements = $traceability.Count
     emergency_record_bytes = 256
     result = 'PASS'
 } | ConvertTo-Json
