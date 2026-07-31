@@ -229,7 +229,14 @@ class TraceboxHandlerService : Service() {
         try {
             drainNativeHandlerCapture()
         } finally {
-            super.onDestroy()
+            try {
+                super.onDestroy()
+            } finally {
+                // Crashpad's HandlerMain is single-use within one process. This service owns a
+                // dedicated process, so end that process with the drained service lifetime rather
+                // than letting Android cache native singleton state for the next policy epoch.
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
         }
     }
 

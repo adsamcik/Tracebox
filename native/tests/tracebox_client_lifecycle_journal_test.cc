@@ -6,6 +6,25 @@
 #include <string>
 
 int main() {
+  assert(static_cast<uint16_t>(
+             tracebox::ClientLifecycleStateV1::kRegistered) == 1);
+  assert(static_cast<uint16_t>(
+             tracebox::ClientLifecycleStateV1::kConsumed) == 2);
+  assert(static_cast<uint16_t>(
+             tracebox::ClientLifecycleStateV1::kDead) == 3);
+  assert(static_cast<uint16_t>(
+             tracebox::ClientLifecycleStateV1::kProtocolError) == 4);
+  assert(static_cast<uint16_t>(
+             tracebox::ClientLifecycleStateV1::kHandoffFailed) == 5);
+  assert(tracebox::ClientLifecycleReceiveFailureStateV1(true, true) ==
+         tracebox::ClientLifecycleStateV1::kDead);
+  assert(tracebox::ClientLifecycleReceiveFailureStateV1(true, false) ==
+         tracebox::ClientLifecycleStateV1::kProtocolError);
+  assert(tracebox::ClientLifecycleReceiveFailureStateV1(false, true) ==
+         tracebox::ClientLifecycleStateV1::kProtocolError);
+  assert(tracebox::ClientLifecycleReceiveFailureStateV1(false, false) ==
+         tracebox::ClientLifecycleStateV1::kProtocolError);
+
   std::array<uint8_t, tracebox::kClientLifecycleRawIdentityBytesV1> first{};
   std::array<uint8_t, tracebox::kClientLifecycleRawIdentityBytesV1> second{};
   first[0] = 0x01;

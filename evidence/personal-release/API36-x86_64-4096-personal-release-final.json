@@ -1,0 +1,142 @@
+{
+  "schema": "tracebox-personal-release-emulator-result-v1",
+  "scope": "Representative personal-release smoke on one API-36 x86_64 4-KiB emulator.",
+  "mode": "PERSONAL_RELEASE",
+  "command": "tools\\verify\\Invoke-PersonalReleaseEmulator.ps1 -Serial emulator-5556 -SkipHostChecks",
+  "start_time_utc": "2026-07-31T11:20:35.5856079Z",
+  "end_time_utc": "2026-07-31T11:24:35.5303616Z",
+  "endpoint": {
+    "serial": "emulator-5556",
+    "api": 36,
+    "abi": "x86_64",
+    "page_size": 4096,
+    "emulator": true
+  },
+  "provenance": {
+    "base_commit": "2c9688630c11d6d43805a5853c1ae9bf4fdc7a17",
+    "working_tree_patch_sha256": "a28b4ce548cab230b82c4c6947be88ca905680658e886284538d19c32a0b153d",
+    "source_state_recheck_sha256": "a28b4ce548cab230b82c4c6947be88ca905680658e886284538d19c32a0b153d",
+    "source_state_stable": true,
+    "source_state_entries": [
+      "??\tandroid/tracebox/src/test/kotlin/dev/tracebox/ActivityVisibilityTrackerTest.kt\tdcdeb3d30eaf23ac2d27722f294a40bd4972fbac7c20d0de52aa562baf910bf4",
+      "??\tandroid/tracebox/src/test/kotlin/dev/tracebox/PrimaryNativeReadinessRecoveryTest.kt\tfcaa8c2dce551864dd56359ddd5414476e0d3dee02f71225960ee56dfdf92e5d",
+      "M\tandroid/tracebox-native/src/main/kotlin/dev/tracebox/nativecapture/TraceboxHandlerService.kt\tc13103dbad11583e8edd227f920e9d1445346f955b0e0b152f55a1f5711ff323",
+      "M\tandroid/tracebox/src/main/kotlin/dev/tracebox/Tracebox.kt\te602a2e196b53f0f6a9d7b466c82e97a2ff3571524eac3c4bebea4ef764994df",
+      "M\tnative/crashpad/overlay/tracebox_bridge.cc\tf3af7ccadb5e8330269240867a151e9afab5450768ce0cc7dc2ca88c39a47409",
+      "M\ttest-apps/phase0-fixture/src/main/kotlin/dev/tracebox/phase0/LabPackageActivity.kt\tcce7109612ddefcbedc528d38afd5367fda129388bef90d667a2698d387bd274",
+      "M\ttest-apps/phase0-fixture/src/main/kotlin/dev/tracebox/phase0/MainActivity.kt\tea19cb9fa6531f5c98e3771f3b320317eba5fa9c3ee73ceb6af64de6a5d0fdc7",
+      "M\ttest-apps/phase0-fixture/src/test/kotlin/dev/tracebox/phase0/LabScenarioTest.kt\t07514bcded832df85b5c3cb0ac307faa8e4d161bd341f1df7381e44f29e6b7d4",
+      "M\ttools/verify/Invoke-PersonalReleaseEmulator.ps1\tca32912ee468f0090f376b4c7ff659a2a447612055be58c51ee24d319466d17c",
+      "M\ttools/verify/Verify-PersonalReleaseLab.ps1\t9840c7cff1b0ce6557c8a9e74a9bc99b1c303050ed8afd8a443cf1728d5e8c3b"
+    ],
+    "scenario_manifest_sha256": "4d8a29d65ced4e0a067c14b2fea849c6992012e60b1b1fa022c199e1100ac8f9",
+    "no_internet_apk_sha256": "54ddb33ba5e08e3c4e57189e05f6830b774cb1a5ae377fbef8b7f463281287ff",
+    "host_network_apk_sha256": "fbb2f3b5c279b043bf8ccc6135224123b05c3e891fffa8ce47daca05ffd61366",
+    "no_internet_apk": "test-apps\\phase0-fixture\\build\\outputs\\apk\\noInternet\\qualificationRelease\\phase0-fixture-noInternet-qualificationRelease.apk",
+    "host_network_apk": "test-apps\\phase0-fixture\\build\\outputs\\apk\\hostNetwork\\qualificationRelease\\phase0-fixture-hostNetwork-qualificationRelease.apk"
+  },
+  "host_gates": [],
+  "scenario_coverage": {
+    "inventory": 39,
+    "required": 13,
+    "observed": 13,
+    "missing": [],
+    "duplicate": [],
+    "unexpected": [],
+    "result": "PASS"
+  },
+  "scenarios": [
+    {
+      "id": "INSTALL.READINESS",
+      "outcome": "PASS",
+      "evidence": [
+        "I/TraceboxLab(28417): scenario_result id=INSTALL.READINESS outcome=PASS readiness=DURABLE health=READY"
+      ]
+    },
+    {
+      "id": "HANDLER.RESTART",
+      "outcome": "PASS",
+      "evidence": [
+        "I/TraceboxLab(28525): scenario_result id=MULTIPROCESS.POLICY_BARRIER outcome=PASS standard=SUCCESS standard_ready=true minimal=SUCCESS minimal_ready=true main=28525 previous_handler=28592 replacement_handler=28697"
+      ]
+    },
+    {
+      "id": "FAULT.JVM_UNCAUGHT",
+      "outcome": "PASS",
+      "evidence": [
+        "terminated_pid=28822 handler_pid=28853 termination_ms=14552 pre_death_evidence='not_required' new_dump=none changed_segments=1 restart_segment=/data/user/0/dev.tracebox.phase0/no_backup/tracebox/instances/GIQyZ1YoUFgwM_t6xEwLoMk4p48x-vmMKAJWldBKlbM/segments/wSVAarlXbwvaMh_efv4ETSzMC3K-ZEXF_Haoyik2b9o.tbseg=abac67cfeb0904e1a662ba65c7387eeaa8e9144ad4504669a596428687f9e2ee recovery_handler=29123 restart_readiness='I/TraceboxLab(29095): scenario_result id=INSTALL.READINESS outcome=PASS readiness=DURABLE health=READY'"
+      ]
+    },
+    {
+      "id": "FAULT.CPP_SEGV",
+      "outcome": "FAIL",
+      "evidence": [
+        "Background crash dump was not retired into a changed durable segment after restart"
+      ]
+    },
+    {
+      "id": "ANR.CANDIDATE",
+      "outcome": "PASS",
+      "evidence": [
+        "I/TraceboxLab(30705): scenario_anr_armed id=ANR.CANDIDATE stall=true policy=SUCCESS I/TraceboxLab(30705): scenario_anr_window_complete id=ANR.CANDIDATE stall=true segment_count_before=2 segment_count_after=2"
+      ]
+    },
+    {
+      "id": "EXIT.RESTART_RECONCILIATION",
+      "outcome": "PASS",
+      "evidence": [
+        "I/TraceboxLab(31238): scenario_anr_armed id=EXIT.RESTART_RECONCILIATION stall=true policy=SUCCESS I/TraceboxLab(31238): scenario_anr_stall_started id=EXIT.RESTART_RECONCILIATION stall=true I/am_anr  (  711): [0,31238,dev.tracebox.phase0,552091204,Input dispatching timed out (895c163 dev.tracebox.phase0/dev.tracebox.phase0.LabPackageActivity is not responding. Waited 5008ms for KeyEvent(deviceId=-1, eventTime=8332854000000, source=UNKNOWN, displayId=-1, action=DOWN, flags=0x00000000, keyCode=DPAD_CENTER(23), scanCode=0, metaState=0x00000000, repeatCount=0), policyFlags=0x6b000000).] anr_dialog_close=true selector=resource_id elapsed_ms=8070 before_tombstone=absent after_tombstone=/data/user/0/dev.tracebox.phase0/no_backup/tracebox/exit-tombstones-v1=83c1f08eeb373dc33d1c86380082bf2182fc53bb093492af389f9f4ab70217f6 osexit_segments=2 pending_journals=0"
+      ]
+    },
+    {
+      "id": "DELETE.ALL_RESTART",
+      "outcome": "PASS",
+      "evidence": [
+        "I/TraceboxLab(31912): scenario_result id=DELETE.ALL_RESTART outcome=PASS report=COMPLETE readiness=DURABLE health=DISABLED I/TraceboxLab(32005): scenario_state id=DELETE.ALL_RESTART phase=post_delete_restart outcome=PASS readiness=DURABLE health=DISABLED pre_delete_payloads=1 surviving=0 current_payloads=0"
+      ]
+    },
+    {
+      "id": "PACKAGE.DISCLOSURE",
+      "outcome": "PASS",
+      "evidence": [
+        "I/TraceboxLab(32061): scenario_result id=PACKAGE.DISCLOSURE outcome=PASS disclosure_reviewed=true approved=false"
+      ]
+    },
+    {
+      "id": "PACKAGE.EXACT_APPROVAL",
+      "outcome": "PASS",
+      "evidence": [
+        "I/TraceboxLab(32212): scenario_result id=PACKAGE.EXACT_APPROVAL outcome=PASS package_created=true size=475"
+      ]
+    },
+    {
+      "id": "PACKAGE.SAVE_SHARE",
+      "outcome": "PASS",
+      "evidence": [
+        "I/TraceboxLab(32378): scenario_save_picker id=PACKAGE.SAVE_SHARE expected_bytes=475 I/TraceboxLab(32378): scenario_share_handoff id=PACKAGE.SAVE_SHARE saved_bytes=475 expected_bytes=475 digest_match=true receipt=CHOOSER_OPENED chooser=ACTIVITY MANAGER TOP-RESUMED (dumpsys activity top-resumed) packageName=com.android.intentresolver processName=com.android.intentresolver launchedFromUid=10216 launchedFromPackage=dev.tracebox.phase0 launchedFromFeature=null userId=0 app=ProcessRecord{c8141d8 20976:com.android.intentresolver/u0a110} Intent { act=android.intent.action.CHOOSER flg=0x800001 xflg=0x4 cmp=com.android.intentresolver/.ChooserActivityLauncher clip={text/uri-list hasLabel(16) {U(content)}} (has extras) } rootOfTask=false task=Task{a27f068 #108 type=standard A=10216:dev.tracebox.phase0} taskAffinity=10110:com.android.intentresolver mActivityComponent=com.android.intentresolver/.ChooserActivity baseDir=/system/priv-app/IntentResolver/IntentResolver.apk dataDir=/data/user/0/com.android.intentresolver stateNotNeeded=false componentSpecified=false mActivityType=standard compat={420dpi} theme=0x7f0d0113 mLastReportedConfigurations:   mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.22 fontWeightAdjustment=0}   mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.2 fontWeightAdjustment=0} mLastReportedActivityWindowInfo=ActivityWindowInfo{isEmbedded=false, taskBounds=Rect(0, 0 - 1080, 2400), taskFragmentBounds=Rect(0, 0 - 1080, 2400)} CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.2 fontWeightAdjustment=0} RequestedOverrideConfiguration={0.0 ?mcc0mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=undefined mActivityType=undefined mAlwaysOnTop=undefined mRotation=undefined} ?fontWeightAdjustment} resultTo=ActivityRecord{160572876 u0 dev.tracebox.phase0/.LabPackageActivity t108} resultWho=null resultCode=43 taskDescription: label=\"null\" icon=null iconResource=/0 iconFilename=null primaryColor=fff1f0f7   backgroundColor=ffeeedf4 statusBarColor=0 navigationBarColor=0  backgroundColorFloating=fff1f0f7 readUriPermissions={UriPermission{e4987d content://dev.tracebox.phase0.tracebox.export/tbdiag-bc779487-b914-481c-a822-d633df906f62.tbdiag [user 0]}} launchFailed=false launchCount=1 lastLaunchTime=-377ms mHaveState=true mIcicle=null state=RESUMED delayedResume=false finishing=false keysPaused=false inHistory=true idle=false occludesParent=false mNoDisplay=false immersive=false launchMode=0 mActivityType=standard windows=[Window{4de1482 u0 com.android.intentresolver/com.android.intentresolver.ChooserActivityLauncher}] windowType=2 mOccludesParent=false overrideOrientation=SCREEN_ORIENTATION_UNSPECIFIED requestedOrientation=SCREEN_ORIENTATION_UNSPECIFIED mVisibleRequested=true mVisible=false mClientVisible=true reportedDrawn=false reportedVisible=false resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false supportsSizeChanges=SIZE_CHANGES_UNSUPPORTED_METADATA configChanges=0xd33 neverSandboxDisplayApis=false alwaysSandboxDisplayApis=false isTransparentPolicyRunning=false areBoundsLetterboxed=false isLetterboxRunning=false I/TraceboxLab(32378): scenario_result id=PACKAGE.SAVE_SHARE outcome=PASS saved_bytes=475 expected_bytes=475 digest_match=true chooser_returned=true receipt=CHOOSER_OPENED staging_deleted=true"
+      ]
+    },
+    {
+      "id": "NETWORK.NO_INTERNET",
+      "outcome": "PASS",
+      "evidence": [
+        "uid_packets=0"
+      ]
+    },
+    {
+      "id": "NETWORK.HOST_CONTROL",
+      "outcome": "PASS",
+      "evidence": [
+        "uid_packets=1"
+      ]
+    },
+    {
+      "id": "NETWORK.BLOCKED_EGRESS",
+      "outcome": "PASS",
+      "evidence": [
+        "uid_packets=0 workflows=2"
+      ]
+    }
+  ],
+  "result": "FAIL"
+}

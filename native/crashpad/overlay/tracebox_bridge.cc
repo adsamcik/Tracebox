@@ -61,8 +61,9 @@ constexpr uint32_t kDefaultHandlerDrainTimeoutMillis = 3'000;
 constexpr uint32_t kMaximumHandlerDrainTimeoutMillis = 5'000;
 constexpr int kStaleHandlerSocketProbeMillis = 250;
 constexpr uint32_t kConsumedHandoffWaitMillis = 1'000;
-constexpr uint32_t kDeadClientHandoffWaitMillis = 250;
+constexpr uint32_t kDeadClientHandoffWaitMillis = 2'250;
 constexpr uint32_t kShutdownHandoffWaitMillis = 2'250;
+constexpr off_t kCrashpadMetadataBytes = 32;
 constexpr long kHandoffPollNanoseconds = 10'000'000;
 constexpr long kLifecycleActivationPollNanoseconds = 1'000'000;
 // The public deadline includes cancellation, descriptor teardown, and JNI return.
@@ -1000,11 +1001,16 @@ constexpr int32_t kPolicyPartial = 1;
 constexpr int32_t kPolicyProtocol = 2;
 constexpr uint32_t kMaximumPolicyTimeoutMillis = 10'000;
 constexpr uint32_t kAutomaticAbortTimeoutMillis = 250;
-constexpr uint16_t kClientStateRegistered = 1;
-constexpr uint16_t kClientStateConsumed = 2;
-constexpr uint16_t kClientStateDead = 3;
-constexpr uint16_t kClientStateProtocolError = 4;
-constexpr uint16_t kClientStateHandoffFailed = 5;
+constexpr uint16_t kClientStateRegistered = static_cast<uint16_t>(
+    tracebox::ClientLifecycleStateV1::kRegistered);
+constexpr uint16_t kClientStateConsumed = static_cast<uint16_t>(
+    tracebox::ClientLifecycleStateV1::kConsumed);
+constexpr uint16_t kClientStateDead = static_cast<uint16_t>(
+    tracebox::ClientLifecycleStateV1::kDead);
+constexpr uint16_t kClientStateProtocolError = static_cast<uint16_t>(
+    tracebox::ClientLifecycleStateV1::kProtocolError);
+constexpr uint16_t kClientStateHandoffFailed = static_cast<uint16_t>(
+    tracebox::ClientLifecycleStateV1::kHandoffFailed);
 
 bool CaptureStagingCanGrantLease();
 enum class HandoffOutcome {
@@ -1057,12 +1063,22 @@ RegistrationOutcome SendPacket(int socket_fd,
 RegistrationOutcome ReceivePacket(int socket_fd,
                                   void* bytes,
                                   size_t size,
-                                  uint64_t deadline) {
+                                  uint64_t deadline,
+                                  bool* peer_closed = nullptr) {
+  if (peer_closed != nullptr) {
+    *peer_closed = false;
+  }
   while (true) {
     const ssize_t received =
         recv(socket_fd, bytes, size, MSG_DONTWAIT | MSG_TRUNC);
     if (received == static_cast<ssize_t>(size)) {
       return RegistrationOutcome::kSuccess;
+    }
+    if (received == 0) {
+      if (peer_closed != nullptr) {
+        *peer_closed = true;
+      }
+      return RegistrationOutcome::kUnavailable;
     }
     if (received >= 0) {
       return RegistrationOutcome::kProtocolError;
@@ -1724,12 +1740,24 @@ void* ClientLifecycleWatcher(void* argument) {
     PolicyControlMessage message{};
     const uint64_t deadline =
         BlockingDeadline(DeadlineAfterMilliseconds(kRegistrationDeadlineMillis));
-    if (deadline == 0 ||
-        ReceivePacket(lifecycle->socket_fd,
-                      &message,
-                      sizeof(message),
-                      deadline) != RegistrationOutcome::kSuccess ||
-        message.magic != kRegistrationMagic ||
+    bool peer_closed = false;
+    const RegistrationOutcome receive =
+        deadline == 0
+            ? RegistrationOutcome::kDeadlineExceeded
+            : ReceivePacket(lifecycle->socket_fd,
+                            &message,
+                            sizeof(message),
+                            deadline,
+                            &peer_closed);
+    if (receive != RegistrationOutcome::kSuccess) {
+      const bool disconnect_event =
+          (descriptor.revents & (POLLHUP | POLLERR)) != 0;
+      terminal_state = static_cast<uint16_t>(
+          tracebox::ClientLifecycleReceiveFailureStateV1(
+              peer_closed, disconnect_event));
+      break;
+    }
+    if (message.magic != kRegistrationMagic ||
         message.version != kRegistrationVersion ||
         message.message_size != sizeof(message)) {
       terminal_state = kClientStateProtocolError;
@@ -2351,8 +2379,11 @@ int ApplyClientPolicyTarget(const PolicyControlMessage& target) {
     g_client_prepared_policy.target = requested;
     g_client_prepared_policy.active = true;
     g_client_prepared_policy.finalized_operation = 0;
+    // PREPARE must fence new captures without tearing down Crashpad's shared
+    // handler socket. Closing that transport makes the handler exit before
+    // this client can acknowledge the transaction.
     if (!UpdatePolicyState(
-            target.policy_epoch, true, UINT64_MAX, true)) {
+            target.policy_epoch, true, UINT64_MAX, false)) {
       g_client_prepared_policy.active = false;
       return kPolicyProtocol;
     }
@@ -2712,6 +2743,25 @@ std::string HexIdentity(const uint8_t bytes[kProcessIdentityBytes]) {
   return encoded;
 }
 
+bool IsCanonicalCrashpadReportName(std::string_view name,
+                                   std::string_view suffix) {
+  if (!name.ends_with(suffix) || name.size() != 36 + suffix.size()) {
+    return false;
+  }
+  const std::string_view stem = name.substr(0, 36);
+  for (size_t index = 0; index < stem.size(); ++index) {
+    if (index == 8 || index == 13 || index == 18 || index == 23) {
+      if (stem[index] != '-') {
+        return false;
+      }
+    } else if (!((stem[index] >= '0' && stem[index] <= '9') ||
+                 (stem[index] >= 'a' && stem[index] <= 'f'))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 HandoffOutcome MoveOnlyPendingReportToHandoff(
     const uint8_t raw_artifact_id[kProcessIdentityBytes],
     uint32_t wait_millis) {
@@ -2730,44 +2780,108 @@ HandoffOutcome MoveOnlyPendingReportToHandoff(
   while (true) {
     const int scan_fd = dup(pending_directory);
     DIR* directory = scan_fd < 0 ? nullptr : fdopendir(scan_fd);
+    std::string report_stem;
     std::string pending_name;
-    size_t count = 0;
+    std::string metadata_name;
+    std::vector<std::string> entries;
     bool invalid = directory == nullptr;
     if (directory != nullptr) {
       while (dirent* entry = readdir(directory)) {
         const std::string_view name(entry->d_name);
-        if (!name.ends_with(".dmp") ||
-            name.find('/') != std::string_view::npos) {
+        if (name == "." || name == "..") {
           continue;
         }
-        const int report_fd = openat(
-            pending_directory,
-            entry->d_name,
-            O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-        struct stat status {};
-        const bool regular =
-            report_fd >= 0 && fstat(report_fd, &status) == 0 &&
-            S_ISREG(status.st_mode) && status.st_nlink == 1;
-        if (report_fd >= 0) {
-          close(report_fd);
-        }
-        if (!regular || ++count > 1) {
+        if (name.find('/') != std::string_view::npos ||
+            entries.size() == 3) {
           invalid = true;
           break;
         }
-        pending_name.assign(entry->d_name);
+        entries.emplace_back(entry->d_name);
       }
       closedir(directory);
     } else if (scan_fd >= 0) {
       close(scan_fd);
     }
 
-    if (invalid || count > 1) {
+    size_t dump_count = 0;
+    size_t metadata_count = 0;
+    size_t lock_count = 0;
+    for (const std::string& entry : entries) {
+      std::string_view suffix;
+      if (IsCanonicalCrashpadReportName(entry, ".dmp")) {
+        suffix = ".dmp";
+        pending_name = entry;
+        ++dump_count;
+      } else if (IsCanonicalCrashpadReportName(entry, ".meta")) {
+        suffix = ".meta";
+        metadata_name = entry;
+        ++metadata_count;
+      } else if (IsCanonicalCrashpadReportName(entry, ".lock")) {
+        suffix = ".lock";
+        ++lock_count;
+      } else {
+        invalid = true;
+        break;
+      }
+      const std::string stem =
+          entry.substr(0, entry.size() - suffix.size());
+      if (report_stem.empty()) {
+        report_stem = stem;
+      } else if (report_stem != stem) {
+        invalid = true;
+        break;
+      }
+    }
+    if (invalid || dump_count > 1 || metadata_count > 1 || lock_count > 1) {
       close(pending_directory);
       close(handoff_directory);
       return HandoffOutcome::kFailedOrAmbiguous;
     }
-    if (count == 1) {
+    if (dump_count == 1) {
+      struct stat metadata_status {};
+      const bool metadata_ready =
+          metadata_count == 1 &&
+          fstatat(pending_directory,
+                  metadata_name.c_str(),
+                  &metadata_status,
+                  AT_SYMLINK_NOFOLLOW) == 0 &&
+          S_ISREG(metadata_status.st_mode) &&
+          metadata_status.st_nlink == 1 &&
+          metadata_status.st_size == kCrashpadMetadataBytes;
+      if (!metadata_ready || lock_count != 0) {
+        if (deadline == 0 || RemainingPollMilliseconds(deadline) == 0) {
+          close(pending_directory);
+          close(handoff_directory);
+          return HandoffOutcome::kFailedOrAmbiguous;
+        }
+        const timespec delay{0, kHandoffPollNanoseconds};
+        timespec remaining = delay;
+        while (nanosleep(&remaining, &remaining) != 0 && errno == EINTR) {
+        }
+        continue;
+      }
+      const int report_fd =
+          openat(pending_directory,
+                 pending_name.c_str(),
+                 O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+      struct stat report_status {};
+      const bool report_ready =
+          report_fd >= 0 &&
+          fstat(report_fd, &report_status) == 0 &&
+          S_ISREG(report_status.st_mode) &&
+          report_status.st_nlink == 1 &&
+          report_status.st_size > 0 &&
+          static_cast<uint64_t>(report_status.st_size) <=
+              kMaximumNativeRawStagingBytes &&
+          fsync(report_fd) == 0;
+      if (report_fd >= 0) {
+        close(report_fd);
+      }
+      if (!report_ready) {
+        close(pending_directory);
+        close(handoff_directory);
+        return HandoffOutcome::kFailedOrAmbiguous;
+      }
       const std::string destination =
           HexIdentity(raw_artifact_id) + ".dmp";
       bool moved = false;
@@ -2781,8 +2895,14 @@ HandoffOutcome MoveOnlyPendingReportToHandoff(
                   1 /* RENAME_NOREPLACE */) == 0;
 #endif
       if (moved) {
-        moved = fsync(pending_directory) == 0 &&
-                fsync(handoff_directory) == 0;
+        // Persist the destination before destroying the only remaining
+        // Crashpad database ownership record for this report.
+        moved = fsync(handoff_directory) == 0;
+      }
+      if (moved) {
+        moved =
+            unlinkat(pending_directory, metadata_name.c_str(), 0) == 0 &&
+            fsync(pending_directory) == 0;
       }
       close(pending_directory);
       close(handoff_directory);
@@ -2790,10 +2910,19 @@ HandoffOutcome MoveOnlyPendingReportToHandoff(
                    : HandoffOutcome::kFailedOrAmbiguous;
     }
 
+    if (!entries.empty() &&
+        !(dump_count == 0 &&
+          metadata_count == 1 &&
+          lock_count <= 1)) {
+      close(pending_directory);
+      close(handoff_directory);
+      return HandoffOutcome::kFailedOrAmbiguous;
+    }
     if (deadline == 0 || RemainingPollMilliseconds(deadline) == 0) {
       close(pending_directory);
       close(handoff_directory);
-      return HandoffOutcome::kNoReport;
+      return entries.empty() ? HandoffOutcome::kNoReport
+                             : HandoffOutcome::kFailedOrAmbiguous;
     }
     const timespec delay{0, kHandoffPollNanoseconds};
     timespec remaining = delay;

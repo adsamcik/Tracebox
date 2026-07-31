@@ -180,6 +180,77 @@ if ($FullDiagnosticSuite) {
 }
 
 $runner = Get-Content -LiteralPath $runnerPath -Raw
+if ($runner -match '(?im)^\s*\$pid\s*=') {
+    throw 'Emulator controller assigns PowerShell automatic variable $PID'
+}
+if ($runner -match '(?im)^\s*\$matches\s*=') {
+    throw 'Emulator controller assigns PowerShell automatic variable $Matches'
+}
+$handlerDumpReader = [regex]::Match(
+    $runner,
+    '(?s)function Get-TraceboxHandlerDumps\s*\{(?<body>.*?)' +
+        'function Get-TraceboxCrashpadPendingEntries'
+)
+if (
+    -not $handlerDumpReader.Success -or
+    -not $handlerDumpReader.Groups['body'].Value.Contains('tracebox-handler-handoff') -or
+    -not $handlerDumpReader.Groups['body'].Value.Contains('[0-9a-f]{64}\.dmp$') -or
+    -not $handlerDumpReader.Groups['body'].Value.Contains('crashpad-db/pending') -or
+    -not $handlerDumpReader.Groups['body'].Value.Contains("'.meta'") -or
+    -not $handlerDumpReader.Groups['body'].Value.Contains("'.lock'") -or
+    -not $handlerDumpReader.Groups['body'].Value.Contains(
+        '$metadataBytes -eq ''32'''
+    )
+) {
+    throw (
+        'Emulator controller must recognize only a complete Crashpad pending pair ' +
+        'or a durable Tracebox handoff'
+    )
+}
+foreach ($fatalRecoveryContract in @(
+        'Wait-CrashpadPendingRetired',
+        'Assert-ProcessDeathAction ''FAULT.CPP_SEGV'' ''segv'' -RequireHandlerDump'
+    )) {
+    if (-not $runner.Contains($fatalRecoveryContract)) {
+        throw "Emulator controller is missing fatal recovery contract: $fatalRecoveryContract"
+    }
+}
+foreach ($activityContract in @(
+        '$productionActivity = ''dev.tracebox.phase0.MainActivity''',
+        '$labPackageActivity = ''dev.tracebox.phase0.LabPackageActivity''',
+        '"$hostNetworkPackage/$productionActivity"'
+    )) {
+    if (-not $runner.Contains($activityContract)) {
+        throw "Emulator controller is missing qualified fixture activity: $activityContract"
+    }
+}
+$genericProductionLaunches = [regex]::Matches(
+    $runner,
+    [regex]::Escape('"$Package/$productionActivity"')
+).Count
+$genericLabLaunches = [regex]::Matches(
+    $runner,
+    [regex]::Escape('"$Package/$labPackageActivity"')
+).Count
+if ($genericProductionLaunches -lt 1 -or $genericLabLaunches -lt 2) {
+    throw (
+        'Emulator controller does not route every package variant through qualified activities: ' +
+        "production=$genericProductionLaunches lab=$genericLabLaunches"
+    )
+}
+$resetAndLaunch = [regex]::Match(
+    $runner,
+    '(?s)function Reset-And-Launch\s*\{(?<body>.*?)function Add-ScenarioResult'
+)
+if (
+    -not $resetAndLaunch.Success -or
+    -not $resetAndLaunch.Groups['body'].Value.Contains('Start-LabAction')
+) {
+    throw 'Reset-And-Launch does not use the central qualified activity launcher'
+}
+if ($runner -match '/\.(?:MainActivity|LabPackageActivity|\$productionActivity|\$labPackageActivity)') {
+    throw 'Emulator controller uses an application-ID-relative fixture activity'
+}
 $android16UidRows = @(
     'package:dev.tracebox.phase0.hostnetwork uid:10228',
     'package:dev.tracebox.phase0 uid:10227'
@@ -257,16 +328,28 @@ $requiredRunnerBindings = @(
         'Start-ProductionFixtureAction',
         'scenario_share_handoff',
         'ChooserActivity|ResolverActivity',
+        'dumpsys activity top-resumed',
+        "'^/data/user/0/', '/data/data/'",
         'phase=post_delete_restart',
         'Fatal action terminated without durable Tracebox evidence',
         'restart_segment=',
         'exit-tombstones-v1',
-        'osexit_segments='
+        'osexit_segments=',
+        "'APPROVE PACKAGE'",
+        'scenario_anr_stall_started',
+        "keyevent '--async' KEYCODE_DPAD_CENTER",
+        'Wait-AndroidAnr',
+        'am_anr',
+        'android:id/aerr_close',
+        'anr_auto_terminated=true'
 )
 if ($FullDiagnosticSuite) {
     $requiredRunnerBindings += @(
         'locksettings set-pin',
-        'cmd user is-user-unlocked 0',
+        'getprop sys.user.0.ce_available',
+        'dumpsys user',
+        'RUNNING_UNLOCKED',
+        'RUNNING_LOCKED',
         'locksettings clear --old',
         'phase=explicit_reenable',
         'actual_stall=true',
@@ -279,6 +362,7 @@ if ($FullDiagnosticSuite) {
         'release_aar_bytes='
     )
 }
+
 foreach ($binding in $requiredRunnerBindings) {
     if (-not $runner.Contains($binding)) {
         throw "Personal-release runner is missing endpoint/provenance binding: $binding"
@@ -287,6 +371,15 @@ foreach ($binding in $requiredRunnerBindings) {
 $releaseScenarioRunner = $runner.Substring(
     $runner.IndexOf("Invoke-CertScenario 'INSTALL.READINESS'", [StringComparison]::Ordinal)
 )
+foreach ($staleRunnerBinding in @(
+    'show_first_crash_dialog',
+    'anr_show_background',
+    'mResumedActivity'
+)) {
+    if ($releaseScenarioRunner.Contains($staleRunnerBinding)) {
+        throw "Personal release runner retains stale platform binding: $staleRunnerBinding"
+    }
+}
 foreach ($legacyInvocation in @(
         'LegacyPhase0Activity',
         'FaultReceiver',
@@ -409,14 +502,37 @@ foreach ($fatalCompletionContract in @(
         '[switch] $RequireHandlerDump',
         'if ($RequireHandlerDump)',
         'Native fixture fault terminated without a new handler dump',
+        "Start-LabAction `$noInternetPackage `$Scenario 'recover' -Wait",
         "Start-LabAction `$noInternetPackage `$Scenario 'readiness' -Wait",
         'Wait-RecoveredSegment',
+        'Wait-ProductionHandlerReady',
+        'Wait-ProductionReadiness',
         'Managed fault evidence did not remain durable after restart',
-        'restartSegment = $recoveredSegment'
+        'restartSegment = $recoveredSegment',
+        'restartReadiness = $restartReadiness'
     )) {
     if (-not $fatalCompletionBlock.Contains($fatalCompletionContract)) {
         throw "Fatal restart-ingestion helper is missing: $fatalCompletionContract"
     }
+}
+if ($fatalCompletionBlock.Contains('am force-stop')) {
+    throw 'Fatal restart helper must preserve the separate Tracebox handler process'
+}
+$recoveredIndex = $fatalCompletionBlock.IndexOf('Wait-RecoveredSegment', [StringComparison]::Ordinal)
+$handlerReadyIndex = $fatalCompletionBlock.IndexOf(
+    'Wait-ProductionHandlerReady',
+    [StringComparison]::Ordinal
+)
+$finalReadinessIndex = $fatalCompletionBlock.IndexOf(
+    "Start-LabAction `$noInternetPackage `$Scenario 'readiness' -Wait",
+    [StringComparison]::Ordinal
+)
+if (
+    $recoveredIndex -lt 0 -or
+    $handlerReadyIndex -le $recoveredIndex -or
+    $finalReadinessIndex -le $handlerReadyIndex
+) {
+    throw 'Fatal restart helper must retire evidence and re-arm the handler before final readiness'
 }
 
 $fixtureFatalStart = $fatalCompletionEnd
@@ -502,7 +618,7 @@ foreach ($backgroundContract in @(
         'cmd deviceidle force-idle',
         'cmd deviceidle get deep',
         'cmd deviceidle unforce',
-        'dumpsys activity activities',
+        'Get-TopResumedActivity',
         '$noInternetPackage`:tracebox_handler',
         "kill '-6' `$mainPid",
         'Wait-NewHandlerDump',

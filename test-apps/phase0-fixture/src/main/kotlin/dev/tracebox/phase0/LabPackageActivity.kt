@@ -312,6 +312,10 @@ class LabPackageActivity : Activity() {
                 Handler(Looper.getMainLooper()).postDelayed(
                     {
                         if (stall) {
+                            Log.i(
+                                TAG,
+                                "scenario_anr_stall_started id=$requestedScenario stall=true",
+                            )
                             SystemClock.sleep(stallMillis)
                         }
                         Log.i(
@@ -453,7 +457,7 @@ class LabPackageActivity : Activity() {
         const val SAVE_REQUEST = 42
         const val SHARE_REQUEST = 43
         const val DIGEST_BUFFER_BYTES = 16 * 1024
-        const val ANR_SETTLE_MILLIS = 750L
+        const val ANR_SETTLE_MILLIS = 10_500L
         const val FAULT_ARM_DELAY_MILLIS = 750L
         const val ANR_ARM_DELAY_MILLIS = 1_000L
         const val ANR_STALL_MILLIS = 8_000L

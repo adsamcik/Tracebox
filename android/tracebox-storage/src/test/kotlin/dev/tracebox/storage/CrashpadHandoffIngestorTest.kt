@@ -530,8 +530,11 @@ class CrashpadHandoffIngestorTest {
                 ByteArray(192),
             ),
         )
-        val pending = pendingRoot.resolve("crashpad-report.dmp")
+        val reportName = "1cc0a206-73f3-4775-8cc0-0c7d4fec41dd"
+        val pending = pendingRoot.resolve("$reportName.dmp")
+        val metadata = pendingRoot.resolve("$reportName.meta")
         Files.write(pending, byteArrayOf(1, 2, 3, 4))
+        Files.write(metadata, ByteArray(32) { it.toByte() })
         val recoverer = CrashpadPendingHandoffRecoverer(
             pendingRoot,
             lifecycleRoot,
@@ -547,6 +550,7 @@ class CrashpadHandoffIngestorTest {
         )
         val handoff = fixture.handoff.resolve("${hex(rawId)}.dmp")
         assertFalse(Files.exists(pending))
+        assertFalse(Files.exists(metadata))
         assertTrue(Files.isRegularFile(handoff))
         assertTrue(Files.exists(lifecycle))
 
@@ -559,6 +563,188 @@ class CrashpadHandoffIngestorTest {
             CrashpadLifecycleDisposition.RETAINED_FOR_HANDOFF,
             lifecycleOutcome.disposition,
         )
+    }
+
+    @Test
+    fun matching_crashpad_lock_is_retained_live_and_retired_before_quiesced_recovery() {
+        val fixture = fixture()
+        val pendingRoot = fixture.root.resolve("crashpad-db/pending")
+            .also(Files::createDirectories)
+        val lifecycleRoot = fixture.root.resolve("clients").also(Files::createDirectories)
+        val processId = ByteArray(32) { 73 }
+        val rawId = ByteArray(32) { 74 }
+        assertTrue(fixture.rawStore.preCapture(rawId, processId, 1, 10))
+        Files.write(
+            lifecycleRoot.resolve(clientFileName(1u, rawId)),
+            clientJournal(
+                clientRecord(1, 302, 9u, 1u, 10uL, 42uL, processId, rawId, 1uL),
+                ByteArray(192),
+            ),
+        )
+        val reportName = "1cc0a206-73f3-4775-8cc0-0c7d4fec41dd"
+        val pending = pendingRoot.resolve("$reportName.dmp")
+        val metadata = pendingRoot.resolve("$reportName.meta")
+        val lock = pendingRoot.resolve("$reportName.lock")
+        Files.write(pending, byteArrayOf(1, 2, 3, 4))
+        Files.write(metadata, ByteArray(32) { it.toByte() })
+        Files.write(lock, ByteArray(8) { (it + 1).toByte() })
+        val recoverer = CrashpadPendingHandoffRecoverer(
+            pendingRoot,
+            lifecycleRoot,
+            fixture.handoff,
+            fixture.rawStore,
+        )
+
+        assertEquals(CrashpadPendingRecoveryResult.NONE, recoverer.recover(handlerQuiesced = false))
+        assertTrue(Files.exists(pending))
+        assertTrue(Files.exists(metadata))
+        assertTrue(Files.exists(lock))
+
+        assertEquals(
+            CrashpadPendingRecoveryResult.RECOVERED,
+            recoverer.recover(handlerQuiesced = true),
+        )
+        assertFalse(Files.exists(pending))
+        assertFalse(Files.exists(metadata))
+        assertFalse(Files.exists(lock))
+        assertTrue(Files.isRegularFile(fixture.handoff.resolve("${hex(rawId)}.dmp")))
+    }
+
+    @Test
+    fun only_dead_and_handoff_failed_terminal_journals_recover_an_exact_pending_pair() {
+        fun runScenario(
+            terminalState: Int,
+            expected: CrashpadPendingRecoveryResult,
+        ) {
+            val fixture = fixture()
+            val pendingRoot = fixture.root.resolve("crashpad-db/pending")
+                .also(Files::createDirectories)
+            val lifecycleRoot = fixture.root.resolve("clients")
+                .also(Files::createDirectories)
+            val processId = ByteArray(32) { (80 + terminalState).toByte() }
+            val rawId = ByteArray(32) { (90 + terminalState).toByte() }
+            assertTrue(fixture.rawStore.preCapture(rawId, processId, 1, 11))
+            val lifecycle = lifecycleRoot.resolve(clientFileName(1u, rawId))
+            Files.write(
+                lifecycle,
+                clientJournal(
+                    clientRecord(1, 310 + terminalState, 9u, 1u, 11uL, 43uL, processId, rawId, 1uL),
+                    clientRecord(
+                        terminalState,
+                        310 + terminalState,
+                        9u,
+                        1u,
+                        11uL,
+                        43uL,
+                        processId,
+                        rawId,
+                        2uL,
+                    ),
+                ),
+            )
+            val reportName = "1cc0a206-73f3-4775-8cc0-0c7d4fec41dd"
+            val pending = pendingRoot.resolve("$reportName.dmp")
+            val metadata = pendingRoot.resolve("$reportName.meta")
+            Files.write(pending, byteArrayOf(5, 6, 7, 8))
+            Files.write(metadata, ByteArray(32) { (it + terminalState).toByte() })
+
+            assertEquals(
+                expected,
+                CrashpadPendingHandoffRecoverer(
+                    pendingRoot,
+                    lifecycleRoot,
+                    fixture.handoff,
+                    fixture.rawStore,
+                ).recover(handlerQuiesced = true),
+            )
+
+            val handoff = fixture.handoff.resolve("${hex(rawId)}.dmp")
+            if (expected == CrashpadPendingRecoveryResult.RECOVERED) {
+                assertFalse(Files.exists(pending))
+                assertFalse(Files.exists(metadata))
+                assertTrue(Files.isRegularFile(handoff))
+            } else {
+                assertTrue(Files.isRegularFile(pending))
+                assertTrue(Files.isRegularFile(metadata))
+                assertTrue(Files.isRegularFile(lifecycle))
+                assertFalse(Files.exists(handoff))
+            }
+        }
+
+        runScenario(terminalState = 3, expected = CrashpadPendingRecoveryResult.RECOVERED)
+        runScenario(terminalState = 5, expected = CrashpadPendingRecoveryResult.RECOVERED)
+        runScenario(terminalState = 4, expected = CrashpadPendingRecoveryResult.AMBIGUOUS)
+    }
+
+    @Test
+    fun quiesced_recovery_retires_only_a_canonical_orphaned_crashpad_sidecar() {
+        val fixture = fixture()
+        val pendingRoot = fixture.root.resolve("crashpad-db/pending")
+            .also(Files::createDirectories)
+        val lifecycleRoot = fixture.root.resolve("clients").also(Files::createDirectories)
+        val metadata = pendingRoot.resolve(
+            "1cc0a206-73f3-4775-8cc0-0c7d4fec41dd.meta",
+        )
+        Files.write(metadata, ByteArray(32) { it.toByte() })
+        val recoverer = CrashpadPendingHandoffRecoverer(
+            pendingRoot,
+            lifecycleRoot,
+            fixture.handoff,
+            fixture.rawStore,
+        )
+
+        assertEquals(CrashpadPendingRecoveryResult.NONE, recoverer.recover(handlerQuiesced = false))
+        assertTrue(Files.exists(metadata))
+        assertEquals(CrashpadPendingRecoveryResult.NONE, recoverer.recover(handlerQuiesced = true))
+        assertFalse(Files.exists(metadata))
+
+        val malformed = pendingRoot.resolve(
+            "1cc0a206-73f3-4775-8cc0-0c7d4fec41dd.meta",
+        )
+        Files.write(malformed, ByteArray(31))
+        assertEquals(
+            CrashpadPendingRecoveryResult.AMBIGUOUS,
+            recoverer.recover(handlerQuiesced = true),
+        )
+        assertTrue(Files.exists(malformed))
+    }
+
+    @Test
+    fun retiring_exact_orphaned_crashpad_sidecars_releases_their_metadata_quota() {
+        val root = Files.createTempDirectory("tracebox-pending-sidecar-quota")
+        val pendingRoot = root.resolve("crashpad-db/pending").also(Files::createDirectories)
+        val lifecycleRoot = root.resolve("clients").also(Files::createDirectories)
+        val handoffRoot = root.resolve("handoff").also(Files::createDirectories)
+        val coordinator = pendingQuotaCoordinator(root)
+        val rawStore = RawArtifactStore(root.resolve("raw"), 128L, coordinator)
+        val baseline = coordinator.used(UidBucket.METADATA)
+        val reportName = "1cc0a206-73f3-4775-8cc0-0c7d4fec41dd"
+        val metadata = pendingRoot.resolve("$reportName.meta")
+        val lock = pendingRoot.resolve("$reportName.lock")
+        Files.write(metadata, ByteArray(32) { it.toByte() })
+        Files.write(lock, ByteArray(8) { (it + 1).toByte() })
+        assertTrue(coordinator.reserve(metadata, UidBucket.METADATA, 32))
+        assertTrue(coordinator.reserve(lock, UidBucket.METADATA, 8))
+        assertEquals(baseline + 40, coordinator.used(UidBucket.METADATA))
+        val recoverer = CrashpadPendingHandoffRecoverer(
+            pendingRoot,
+            lifecycleRoot,
+            handoffRoot,
+            rawStore,
+            coordinator,
+        )
+
+        assertEquals(CrashpadPendingRecoveryResult.NONE, recoverer.recover(handlerQuiesced = false))
+        assertEquals(baseline + 40, coordinator.used(UidBucket.METADATA))
+        assertTrue(Files.exists(metadata))
+        assertTrue(Files.exists(lock))
+
+        assertEquals(CrashpadPendingRecoveryResult.NONE, recoverer.recover(handlerQuiesced = true))
+        assertFalse(Files.exists(metadata))
+        assertFalse(Files.exists(lock))
+        assertFalse(coordinator.allocations().containsKey(metadata))
+        assertFalse(coordinator.allocations().containsKey(lock))
+        assertEquals(baseline, coordinator.used(UidBucket.METADATA))
     }
 
     @Test

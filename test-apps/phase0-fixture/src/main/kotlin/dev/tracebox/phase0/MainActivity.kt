@@ -43,7 +43,9 @@ class MainActivity : Activity() {
             },
         )
         LabRuntime.install(this)
-        startService(Intent(this, ProductionParticipantService::class.java))
+        if (intent.getBooleanExtra(START_PARTICIPANT_EXTRA, false)) {
+            startService(Intent(this, ProductionParticipantService::class.java))
+        }
         Log.i(LAB_TAG, "production_lane_started=true")
         executeAutomation(intent)
     }
@@ -148,6 +150,7 @@ class MainActivity : Activity() {
         const val SCENARIO_EXTRA = "tracebox.scenario_id"
         const val PROBE_HOST_EXTRA = "tracebox.probe_host"
         const val PROBE_PORT_EXTRA = "tracebox.probe_port"
+        const val START_PARTICIPANT_EXTRA = "tracebox.start_participant"
         const val ONE_MIB = 1024 * 1024
         const val DEFAULT_PROBE_HOST = "10.0.2.2"
         const val DEFAULT_PROBE_PORT = 9

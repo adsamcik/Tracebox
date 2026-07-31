@@ -103,6 +103,7 @@ class TraceboxStorageLifecycleTest {
             "native-handler/tracebox-handler-start-permit-v1.new" to UidBucket.METADATA,
             "native-handler/tracebox-handler-handoff/$rawHex.dmp" to UidBucket.RAW_ARTIFACTS,
             "native-handler/crashpad-db/pending/report.dmp" to UidBucket.RAW_ARTIFACTS,
+            "native-handler/crashpad-db/pending/report.meta" to UidBucket.RAW_ARTIFACTS,
         )
 
         accepted.forEach { (relative, bucket) ->

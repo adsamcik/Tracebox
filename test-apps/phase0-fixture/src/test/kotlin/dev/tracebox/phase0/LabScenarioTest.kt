@@ -87,25 +87,105 @@ class LabScenarioTest {
         assertTrue(runner.contains("[int] \$ExpectedApi = 36"))
         assertTrue(runner.contains("[int] \$ExpectedPageSize = 4096"))
         assertTrue(runner.contains("\$abi -ne 'x86_64'"))
+        assertTrue(
+            runner.contains(
+                "\$productionActivity = 'dev.tracebox.phase0.MainActivity'",
+            ),
+        )
+        assertTrue(
+            runner.contains(
+                "\$labPackageActivity = 'dev.tracebox.phase0.LabPackageActivity'",
+            ),
+        )
+        assertFalse(runner.contains("/.MainActivity"))
+        assertFalse(runner.contains("/.LabPackageActivity"))
+        assertFalse(
+            runner.lineSequence().any { line ->
+                val normalized = line.trimStart()
+                normalized.startsWith("\$pid =", ignoreCase = true) ||
+                    normalized.startsWith("\$matches =", ignoreCase = true)
+            },
+        )
+        assertTrue(runner.contains("shell readlink '-f' \$Path"))
+        assertTrue(runner.contains("'^/data/user/0/', '/data/data/'"))
+        assertTrue(
+            runner.contains(
+                "Select-String \"\$([regex]::Escape(\$candidatePath))\\s*\$\"",
+            ),
+        )
         assertTrue(runner.contains("working_tree_patch_sha256"))
         assertTrue(runner.contains("scenario_manifest_sha256"))
         assertTrue(runner.contains("locksettings set-pin"))
-        assertTrue(runner.contains("cmd user is-user-unlocked 0"))
+        assertTrue(runner.contains("getprop sys.user.0.ce_available"))
+        assertTrue(runner.contains("dumpsys user"))
+        assertTrue(runner.contains("RUNNING_UNLOCKED"))
+        assertTrue(runner.contains("RUNNING_LOCKED"))
         assertTrue(runner.contains("locksettings clear --old"))
         assertTrue(runner.contains("input keyevent KEYCODE_HOME"))
         assertTrue(runner.contains("am make-uid-idle \$noInternetPackage"))
         assertTrue(runner.contains("cmd deviceidle force-idle"))
         assertTrue(runner.contains("cmd deviceidle get deep"))
         assertTrue(runner.contains("cmd deviceidle unforce"))
-        assertTrue(runner.contains("dumpsys activity activities"))
+        assertTrue(runner.contains("dumpsys activity top-resumed"))
+        assertFalse(runner.contains("mResumedActivity"))
         assertTrue(runner.contains("\$noInternetPackage`:tracebox_handler"))
         assertTrue(runner.contains("kill '-6' \$mainPid"))
         assertTrue(runner.contains("Wait-NewHandlerDump"))
         assertTrue(runner.contains("Wait-RecoveredSegment"))
+        val handlerDumpReader = runner
+            .substringAfter("function Get-TraceboxHandlerDumps")
+            .substringBefore("function Get-TraceboxCrashpadPendingEntries")
+        assertTrue(handlerDumpReader.contains("tracebox-handler-handoff"))
+        assertTrue(handlerDumpReader.contains("[0-9a-f]{64}\\.dmp\$"))
+        assertTrue(handlerDumpReader.contains("crashpad-db/pending"))
+        assertTrue(handlerDumpReader.contains("'.meta'"))
+        assertTrue(handlerDumpReader.contains("'.lock'"))
+        assertTrue(handlerDumpReader.contains("\$metadataBytes -eq '32'"))
+        assertTrue(runner.contains("Wait-CrashpadPendingRetired"))
+        assertTrue(
+            runner.contains(
+                "Assert-ProcessDeathAction 'FAULT.CPP_SEGV' 'segv' -RequireHandlerDump",
+            ),
+        )
         assertTrue(runner.contains("scenario_share_handoff"))
         assertTrue(runner.contains("ChooserActivity|ResolverActivity"))
         assertTrue(runner.contains("phase=post_delete_restart"))
         assertTrue(runner.contains("phase=explicit_reenable"))
+        assertTrue(runner.contains("'APPROVE PACKAGE'"))
+        assertTrue(runner.contains("scenario_anr_stall_started"))
+        assertTrue(runner.contains("keyevent '--async' KEYCODE_DPAD_CENTER"))
+        assertTrue(runner.contains("Wait-AndroidAnr"))
+        assertTrue(runner.contains("am_anr"))
+        assertTrue(runner.contains("android:id/aerr_close"))
+        assertTrue(runner.contains("anr_auto_terminated=true"))
+        assertFalse(runner.contains("show_first_crash_dialog"))
+        assertFalse(runner.contains("anr_show_background"))
+        val fatalRestart = runner
+            .substringAfter("function Complete-FatalCaptureAndRestart")
+            .substringBefore("function Assert-ProductionFixtureFaultCapture")
+        assertFalse(fatalRestart.contains("am force-stop"))
+        val recoveredIndex = fatalRestart.indexOf("Wait-RecoveredSegment")
+        val handlerReadyIndex = fatalRestart.indexOf("Wait-ProductionHandlerReady")
+        val finalReadinessIndex = fatalRestart.indexOf(
+            "Start-LabAction \$noInternetPackage \$Scenario 'readiness' -Wait",
+        )
+        assertTrue(recoveredIndex >= 0)
+        assertTrue(handlerReadyIndex > recoveredIndex)
+        assertTrue(finalReadinessIndex > handlerReadyIndex)
+        assertTrue(fatalRestart.contains("Wait-ProductionReadiness"))
+    }
+
+    @Test
+    fun anr_fixture_stalls_after_the_production_startup_grace() {
+        val activity = Files.readString(
+            repositoryRoot().resolve(
+                "test-apps/phase0-fixture/src/main/kotlin/dev/tracebox/phase0/" +
+                    "LabPackageActivity.kt",
+            ),
+        )
+
+        assertTrue(activity.contains("ANR_SETTLE_MILLIS = 10_500L"))
+        assertTrue(activity.contains("scenario_anr_stall_started"))
     }
 
     @Test

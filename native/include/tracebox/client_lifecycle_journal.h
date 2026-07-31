@@ -15,6 +15,22 @@ constexpr std::size_t kClientLifecycleJournalBytesV1 = 384;
 constexpr std::string_view kClientLifecycleJournalPrefixV1 = "client-r";
 constexpr std::string_view kClientLifecycleJournalSuffixV1 = ".tbclient";
 
+enum class ClientLifecycleStateV1 : uint16_t {
+  kRegistered = 1,
+  kConsumed = 2,
+  kDead = 3,
+  kProtocolError = 4,
+  kHandoffFailed = 5,
+};
+
+inline constexpr ClientLifecycleStateV1
+ClientLifecycleReceiveFailureStateV1(bool zero_length_receive,
+                                     bool disconnect_event) {
+  return zero_length_receive && disconnect_event
+             ? ClientLifecycleStateV1::kDead
+             : ClientLifecycleStateV1::kProtocolError;
+}
+
 struct ClientLifecycleJournalNameV1 {
   uint32_t process_role = 0;
   std::array<uint8_t, kClientLifecycleRawIdentityBytesV1> raw_artifact_id{};

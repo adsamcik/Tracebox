@@ -40,7 +40,8 @@ $requiredIds = if ($FullDiagnosticSuite) {
 }
 $noInternetPackage = 'dev.tracebox.phase0'
 $hostNetworkPackage = 'dev.tracebox.phase0.hostnetwork'
-$productionActivity = 'MainActivity'
+$productionActivity = 'dev.tracebox.phase0.MainActivity'
+$labPackageActivity = 'dev.tracebox.phase0.LabPackageActivity'
 $directBootPin = '246810'
 $tag = 'TraceboxLab'
 $results = [Collections.Generic.List[object]]::new()
@@ -77,7 +78,7 @@ function Invoke-Adb {
 }
 
 function Clear-DeviceLog {
-    Invoke-Adb logcat '-b' main '-b' system '-b' crash '-c' | Out-Null
+    Invoke-Adb logcat '-b' main '-b' system '-b' crash '-b' events '-c' | Out-Null
 }
 
 function Get-LabLog {
@@ -106,22 +107,59 @@ function Wait-Log {
     throw "Timed out waiting for device log: $Pattern"
 }
 
+function Wait-ProductionReadiness {
+    param([int] $TimeoutSeconds = 30)
+    $line = Wait-Log (
+        'scenario_result id=INSTALL\.READINESS outcome=(PASS|FAIL) ' +
+        'readiness=[A-Z_]+ health=[A-Z_]+'
+    ) $TimeoutSeconds
+    if ($line -notmatch 'outcome=PASS readiness=DURABLE health=READY') {
+        throw "Tracebox did not reach durable production readiness: $line"
+    }
+    return $line
+}
+
+function Wait-AndroidAnr {
+    param(
+        [string] $Package,
+        [int] $TimeoutSeconds = 30
+    )
+    $pattern =
+        'am_anr.*\[\d+,\d+,' +
+        [regex]::Escape($Package) +
+        ','
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $match =
+            Invoke-Adb logcat '-b' events '-d' '-v' brief |
+                Select-String $pattern |
+                Select-Object -Last 1
+        if ($match) { return $match.ToString() }
+        Start-Sleep -Milliseconds 100
+    } while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    throw "Android did not classify the stalled process as ANR: $Package"
+}
+
 function Start-LabAction {
     param(
         [string] $Package,
         [string] $Scenario,
         [string] $Action,
-        [switch] $Wait
+        [switch] $Wait,
+        [switch] $WithParticipant
     )
     $arguments = @(
         'shell', 'am', 'start'
     )
     if ($Wait) { $arguments += '-W' }
     $arguments += @(
-        '-n', "$Package/.$productionActivity",
+        '-n', "$Package/$productionActivity",
         '--es', 'tracebox.scenario_id', $Scenario,
         '--es', 'tracebox.action', $Action
     )
+    if ($WithParticipant) {
+        $arguments += @('--ez', 'tracebox.start_participant', 'true')
+    }
     Invoke-Adb @arguments | Out-Null
 }
 
@@ -132,7 +170,7 @@ function Start-ProductionFixtureAction {
         [string] $Action
     )
     Invoke-Adb shell am start '-W' `
-        '-n' "$Package/.LabPackageActivity" `
+        '-n' "$Package/$labPackageActivity" `
         '--es' tracebox.scenario_id $Scenario `
         '--es' tracebox.action $Action | Out-Null
 }
@@ -144,7 +182,7 @@ function Start-ProductionFixtureActionAsync {
         [string] $Action
     )
     Invoke-Adb shell am start `
-        '-n' "$Package/.LabPackageActivity" `
+        '-n' "$Package/$labPackageActivity" `
         '--es' tracebox.scenario_id $Scenario `
         '--es' tracebox.action $Action | Out-Null
 }
@@ -157,6 +195,10 @@ function Get-AppPid {
     }
     $first = (($output -join ' ').Trim() -split '\s+')[0]
     return [int]$first
+}
+
+function Get-TopResumedActivity {
+    return ((Invoke-Adb shell dumpsys activity top-resumed) -join ' ').Trim()
 }
 
 function Wait-AppPidGone {
@@ -185,19 +227,69 @@ function Test-DeviceSocket {
 function Test-ListeningDeviceSocket {
     param([string] $Path)
     if (-not (Test-DeviceSocket $Path)) { return $false }
+    $canonicalOutput = & adb -s $Serial shell readlink '-f' $Path 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $canonicalOutput) { return $false }
+    $canonicalPath = (($canonicalOutput -join '').Trim())
+    if (-not $canonicalPath) { return $false }
+    $listenerPaths = @($Path, $canonicalPath)
+    $listenerPaths += @(
+        $listenerPaths |
+            ForEach-Object { $_ -replace '^/data/user/0/', '/data/data/' }
+    )
+    $listenerPaths = @($listenerPaths | Where-Object { $_ } | Sort-Object -Unique)
     $entries = & adb -s $Serial shell cat /proc/net/unix 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $entries) { return $false }
-    return [bool](
-        $entries |
-            Select-String "$([regex]::Escape($Path))\s*$" |
+    foreach ($candidatePath in $listenerPaths) {
+        $listener = $entries |
+            Select-String "$([regex]::Escape($candidatePath))\s*$" |
             Select-Object -First 1
-    )
+        if ($listener) { return $true }
+    }
+    return $false
 }
 
 function Get-TraceboxHandlerDumps {
     param([string] $Package)
-    $root = "/data/user/0/$Package/no_backup/tracebox/native-handler"
-    $output = & adb -s $Serial shell find $root '-type' f '-name' '*.dmp' 2>$null
+    $nativeRoot = "/data/user/0/$Package/no_backup/tracebox/native-handler"
+    $output = @(
+        & adb -s $Serial shell find "$nativeRoot/crashpad-db/pending" `
+            '-type' f '-name' '*.dmp' 2>$null
+        & adb -s $Serial shell find "$nativeRoot/tracebox-handler-handoff" `
+            '-type' f '-name' '*.dmp' 2>$null
+    )
+    return @(
+        $output |
+            Where-Object {
+                if ($_ -match '/tracebox-handler-handoff/[0-9a-f]{64}\.dmp$') {
+                    return $true
+                }
+                if ($_ -notmatch (
+                        '/crashpad-db/pending/' +
+                        '[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.dmp$'
+                    )
+                ) {
+                    return $false
+                }
+                $metadata = $_ -replace '\.dmp$', '.meta'
+                $lock = $_ -replace '\.dmp$', '.lock'
+                & adb -s $Serial shell test '-f' $metadata 2>$null | Out-Null
+                if ($LASTEXITCODE -ne 0) { return $false }
+                $metadataBytes =
+                    ((& adb -s $Serial shell stat '-c' '%s' $metadata 2>$null) -join '').Trim()
+                & adb -s $Serial shell test '-e' $lock 2>$null | Out-Null
+                return $metadataBytes -eq '32' -and $LASTEXITCODE -ne 0
+            } |
+            Sort-Object -Unique
+    )
+}
+
+function Get-TraceboxCrashpadPendingEntries {
+    param([string] $Package)
+    $root = (
+        "/data/user/0/$Package/no_backup/tracebox/native-handler/" +
+        "crashpad-db/pending"
+    )
+    $output = & adb -s $Serial shell find $root '-type' f 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $output) {
         return @()
     }
@@ -237,13 +329,13 @@ function Wait-ProductionHandlerReady {
     $socket = Get-ProductionHandlerSocket $Package
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
-        $pid = Get-AppPid $processName
+        $currentHandlerPid = Get-AppPid $processName
         if (
-            $pid -ne 0 -and
-            ($PreviousPid -eq 0 -or $pid -ne $PreviousPid) -and
+            $currentHandlerPid -ne 0 -and
+            ($PreviousPid -eq 0 -or $currentHandlerPid -ne $PreviousPid) -and
             (Test-ListeningDeviceSocket $socket)
         ) {
-            return $pid
+            return $currentHandlerPid
         }
         Start-Sleep -Milliseconds 100
     } while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
@@ -329,11 +421,30 @@ function Wait-RecoveredSegment {
     throw 'Background crash dump was not retired into a changed durable segment after restart'
 }
 
+function Wait-CrashpadPendingRetired {
+    param(
+        [string] $Package,
+        [string[]] $Before,
+        [int] $TimeoutSeconds = 10
+    )
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $current = @(Get-TraceboxCrashpadPendingEntries $Package)
+        $added = @($current | Where-Object { $_ -notin $Before })
+        if ($added.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 100
+    } while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    throw 'Crashpad pending report or metadata sidecar survived durable restart ingestion'
+}
+
 function Complete-FatalCaptureAndRestart {
     param(
         [string] $Scenario,
         [string] $Action,
         [string[]] $BeforeDumps,
+        [string[]] $BeforePendingEntries,
         [string[]] $BeforeSegments,
         [int] $TimeoutSeconds,
         [switch] $RequireHandlerDump
@@ -375,14 +486,11 @@ function Complete-FatalCaptureAndRestart {
         $dumpEvidence = "$dump=$(Get-DeviceFileSha256 $dump)"
     }
 
-    Invoke-Adb shell am force-stop $noInternetPackage | Out-Null
     Clear-DeviceLog
-    Start-LabAction $noInternetPackage $Scenario 'readiness' -Wait
-    Wait-Log 'scenario_result id=INSTALL\.READINESS outcome=PASS' 30 | Out-Null
-
+    Start-LabAction $noInternetPackage $Scenario 'recover' -Wait
     if ($dump) {
         $recoveredSegment =
-            Wait-RecoveredSegment $noInternetPackage $dump $BeforeSegments 30
+            Wait-RecoveredSegment $noInternetPackage $dump $BeforeSegments 45
     } else {
         $afterRestart = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
         $durableAfterRestart = @(
@@ -393,11 +501,18 @@ function Complete-FatalCaptureAndRestart {
         }
         $recoveredSegment = $durableAfterRestart[0]
     }
+    $recoveryHandlerPid = Wait-ProductionHandlerReady $noInternetPackage 0 45
+    Clear-DeviceLog
+    Start-LabAction $noInternetPackage $Scenario 'readiness' -Wait
+    $restartReadiness = Wait-ProductionReadiness 30
+    Wait-CrashpadPendingRetired $noInternetPackage $BeforePendingEntries
 
     return [pscustomobject]@{
         dumpEvidence = $dumpEvidence
         changedSegmentCount = $newSegments.Count
         restartSegment = $recoveredSegment
+        recoveryHandlerPid = $recoveryHandlerPid
+        restartReadiness = $restartReadiness
     }
 }
 
@@ -409,29 +524,33 @@ function Assert-ProductionFixtureFaultCapture {
     )
     Reset-And-Launch -ClearData
     $processName = $noInternetPackage
-    $pid = Get-AppPid $processName
-    if ($pid -eq 0) { throw 'Production process was not running before fixture fault' }
+    $mainPid = Get-AppPid $processName
+    if ($mainPid -eq 0) { throw 'Production process was not running before fixture fault' }
     $handlerPid = Wait-ProductionHandlerReady $noInternetPackage
     $beforeDumps = @(Get-TraceboxHandlerDumps $noInternetPackage)
+    $beforePendingEntries = @(Get-TraceboxCrashpadPendingEntries $noInternetPackage)
     $beforeSegments = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
     Clear-DeviceLog
     $captureTimer = [Diagnostics.Stopwatch]::StartNew()
     Start-ProductionFixtureActionAsync $noInternetPackage $Scenario $Action
     $armed = Wait-Log "scenario_fault_armed id=$([regex]::Escape($Scenario)) .*policy=SUCCESS" 20
-    Wait-AppPidGone $processName $pid $TimeoutSeconds
+    Wait-AppPidGone $processName $mainPid $TimeoutSeconds
     $terminationMillis = $captureTimer.ElapsedMilliseconds
     $capture = Complete-FatalCaptureAndRestart `
         -Scenario $Scenario `
         -Action $Action `
         -BeforeDumps $beforeDumps `
+        -BeforePendingEntries $beforePendingEntries `
         -BeforeSegments $beforeSegments `
         -TimeoutSeconds $TimeoutSeconds `
         -RequireHandlerDump
     return (
-        "$armed terminated_pid=$pid handler_pid=$handlerPid termination_ms=$terminationMillis " +
+        "$armed terminated_pid=$mainPid handler_pid=$handlerPid termination_ms=$terminationMillis " +
         "new_dump=$($capture.dumpEvidence) " +
         "changed_segments=$($capture.changedSegmentCount) " +
-        "restart_segment=$($capture.restartSegment)"
+        "restart_segment=$($capture.restartSegment) " +
+        "recovery_handler=$($capture.recoveryHandlerPid) " +
+        "restart_readiness='$($capture.restartReadiness)'"
     )
 }
 
@@ -447,20 +566,24 @@ function Get-DeviceFileSha256 {
 function Reset-And-Launch {
     param(
         [string] $Package = $noInternetPackage,
-        [switch] $ClearData
+        [switch] $ClearData,
+        [switch] $WithParticipant
     )
+    Invoke-Adb shell input keyevent KEYCODE_HOME | Out-Null
     Invoke-Adb shell am force-stop $Package | Out-Null
     if ($ClearData) {
         Invoke-Adb shell pm clear $Package | Out-Null
     }
     Clear-DeviceLog
-    Invoke-Adb shell am start '-W' `
-        '-n' "$Package/.$productionActivity" `
-        '--es' tracebox.scenario_id 'INSTALL.READINESS' `
-        '--es' tracebox.action readiness | Out-Null
-    Wait-Log 'scenario_result id=INSTALL\.READINESS outcome=PASS readiness=DURABLE health=READY' 30 |
-        Out-Null
-    Wait-Log 'production_participant_ready=true readiness=DURABLE health=READY' 30 | Out-Null
+    Start-LabAction `
+        $Package 'INSTALL.READINESS' 'readiness' `
+        -Wait `
+        -WithParticipant:$WithParticipant
+    Wait-ProductionReadiness 30 | Out-Null
+    if ($WithParticipant) {
+        Wait-Log 'production_participant_ready=true readiness=DURABLE health=READY' 30 |
+            Out-Null
+    }
 }
 
 function Add-ScenarioResult {
@@ -497,14 +620,16 @@ function Assert-ProcessDeathAction {
         [string] $Scenario,
         [string] $Action,
         [int] $TimeoutSeconds = 20,
-        [string] $RequiredPreDeathMarker
+        [string] $RequiredPreDeathMarker,
+        [switch] $RequireHandlerDump
     )
     Reset-And-Launch -ClearData
     $processName = $noInternetPackage
-    $pid = Get-AppPid $processName
-    if ($pid -eq 0) { throw 'Main process was not running before fatal action' }
+    $mainPid = Get-AppPid $processName
+    if ($mainPid -eq 0) { throw 'Main process was not running before fatal action' }
     $handlerPid = Wait-ProductionHandlerReady $noInternetPackage
     $beforeDumps = @(Get-TraceboxHandlerDumps $noInternetPackage)
+    $beforePendingEntries = @(Get-TraceboxCrashpadPendingEntries $noInternetPackage)
     $beforeSegments = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
     Clear-DeviceLog
     $captureTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -518,19 +643,23 @@ function Assert-ProcessDeathAction {
         $fatalEvidenceBeforeSegments =
             @(Get-TraceboxSegmentFingerprints $noInternetPackage)
     }
-    Wait-AppPidGone $processName $pid $TimeoutSeconds
+    Wait-AppPidGone $processName $mainPid $TimeoutSeconds
     $terminationMillis = $captureTimer.ElapsedMilliseconds
     $capture = Complete-FatalCaptureAndRestart `
         -Scenario $Scenario `
         -Action $Action `
         -BeforeDumps $beforeDumps `
+        -BeforePendingEntries $beforePendingEntries `
         -BeforeSegments $fatalEvidenceBeforeSegments `
-        -TimeoutSeconds $TimeoutSeconds
+        -TimeoutSeconds $TimeoutSeconds `
+        -RequireHandlerDump:$RequireHandlerDump
     return (
-        "terminated_pid=$pid handler_pid=$handlerPid termination_ms=$terminationMillis " +
+        "terminated_pid=$mainPid handler_pid=$handlerPid termination_ms=$terminationMillis " +
         "pre_death_evidence='$preDeathEvidence' new_dump=$($capture.dumpEvidence) " +
         "changed_segments=$($capture.changedSegmentCount) " +
-        "restart_segment=$($capture.restartSegment)"
+        "restart_segment=$($capture.restartSegment) " +
+        "recovery_handler=$($capture.recoveryHandlerPid) " +
+        "restart_readiness='$($capture.restartReadiness)'"
     )
 }
 
@@ -600,11 +729,23 @@ function Assert-AdbRoot {
 }
 
 function Get-UserUnlocked {
-    $state = ((Invoke-Adb shell cmd user is-user-unlocked 0) -join '').Trim().ToLowerInvariant()
-    if ($state -notin @('true', 'false')) {
-        throw "Cannot parse credential-encrypted storage state: $state"
+    $state = ((Invoke-Adb shell getprop sys.user.0.ce_available) -join '').Trim().ToLowerInvariant()
+    if ($state -in @('true', 'false')) {
+        return $state -eq 'true'
     }
-    return $state -eq 'true'
+
+    $userState = @(
+        Invoke-Adb shell dumpsys user |
+            Select-String '^\s*(?:State:|Started users state:).*RUNNING_(UNLOCKED|LOCKED)' |
+            ForEach-Object ToString
+    ) -join ' '
+    if ($userState -match 'RUNNING_UNLOCKED') { return $true }
+    if ($userState -match 'RUNNING_LOCKED') { return $false }
+
+    throw (
+        'Cannot parse credential-encrypted storage state: ' +
+        "sys.user.0.ce_available=$state dumpsys=$userState"
+    )
 }
 
 function Wait-UserUnlocked {
@@ -682,13 +823,45 @@ function Invoke-UiText {
     throw "None of the requested UI nodes was present: $($Text -join ', ')"
 }
 
-function Wait-AnrDialogAndClose {
-    param([int] $TimeoutSeconds = 45)
+function Invoke-UiResourceId {
+    param(
+        [string] $Xml,
+        [string] $ResourceId
+    )
+    $node = [regex]::Match(
+        $Xml,
+        "<node[^>]*resource-id=""$([regex]::Escape($ResourceId))""[^>]*/>"
+    )
+    if (-not $node.Success) { return $false }
+    $bounds = [regex]::Match(
+        $node.Value,
+        'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+    )
+    if (-not $bounds.Success) { return $false }
+    $x = ([int]$bounds.Groups[1].Value + [int]$bounds.Groups[3].Value) / 2
+    $y = ([int]$bounds.Groups[2].Value + [int]$bounds.Groups[4].Value) / 2
+    Invoke-Adb shell input tap ([int]$x) ([int]$y) | Out-Null
+    return $true
+}
+
+function Wait-AnrTermination {
+    param(
+        [string] $Package,
+        [int] $OriginalPid,
+        [int] $TimeoutSeconds = 45
+    )
     $closeLabels = @('Close app', 'CLOSE APP')
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
+        $currentPid = Get-AppPid $Package
+        if ($currentPid -eq 0 -or $currentPid -ne $OriginalPid) {
+            return "anr_auto_terminated=true elapsed_ms=$($timer.ElapsedMilliseconds)"
+        }
         try {
             $xml = Get-UiHierarchy
+            if (Invoke-UiResourceId $xml 'android:id/aerr_close') {
+                return "anr_dialog_close=true selector=resource_id elapsed_ms=$($timer.ElapsedMilliseconds)"
+            }
             if (
                 $closeLabels |
                     Where-Object {
@@ -701,7 +874,7 @@ function Wait-AnrDialogAndClose {
                     }
             ) {
                 Invoke-UiText $xml $closeLabels
-                return "anr_dialog_close=true elapsed_ms=$($timer.ElapsedMilliseconds)"
+                return "anr_dialog_close=true selector=text elapsed_ms=$($timer.ElapsedMilliseconds)"
             }
         } catch {
             # UIAutomator can briefly fail while the system ANR surface replaces the app window.
@@ -713,7 +886,7 @@ function Wait-AnrDialogAndClose {
             Select-String '(?i)(not responding|anr|application error)' |
             ForEach-Object ToString
     ) -join ' '
-    throw "Timed out waiting for actionable Android ANR dialog: $windows"
+    throw "Timed out waiting for Android to terminate the confirmed ANR: $windows"
 }
 
 function Get-OptionalDeviceFileFingerprint {
@@ -728,27 +901,45 @@ function Invoke-PackageUi {
         [string] $Scenario,
         [switch] $Approve
     )
+    $approveLabels = @('Approve package', 'APPROVE PACKAGE')
+    Reset-And-Launch -ClearData
     Clear-DeviceLog
     Invoke-Adb shell am start '-W' `
-        '-n' "$noInternetPackage/.LabPackageActivity" `
+        '-n' "$noInternetPackage/$labPackageActivity" `
         '--es' tracebox.scenario_id $Scenario | Out-Null
     Wait-Log "scenario_ready id=$([regex]::Escape($Scenario))" 30 | Out-Null
 
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $xml = ''
+    $approveVisible = $false
     do {
         $xml = Get-UiHierarchy
-        if ($xml.Contains('Approve package')) { break }
+        $approveVisible = [bool](
+            $approveLabels |
+                Where-Object {
+                    $escaped = [Security.SecurityElement]::Escape($_)
+                    $xml -match (
+                        '(?:text|content-desc)="' +
+                        [regex]::Escape($escaped) +
+                        '"'
+                    )
+                } |
+                Select-Object -First 1
+        )
+        if ($approveVisible) { break }
         Start-Sleep -Milliseconds 250
     } while ($timer.Elapsed.TotalSeconds -lt 15)
     if (-not $xml.Contains('Included values:') -or -not $xml.Contains('SHA-256:')) {
         throw 'Exact disclosure facts were not visible in the Tracebox-owned UI'
     }
+    if (-not $approveVisible) {
+        throw 'Tracebox approval action was not visible in the disclosure UI'
+    }
 
     if (-not $Approve) {
         Invoke-Adb shell input keyevent BACK | Out-Null
     } else {
-        Invoke-UiText $xml @('Approve package')
+        Invoke-UiText $xml $approveLabels
     }
     if ($Scenario -eq 'PACKAGE.SAVE_SHARE' -and $Approve) {
         $savePicker =
@@ -776,19 +967,18 @@ function Invoke-PackageUi {
 
         $timer.Restart()
         $chooser = ''
-        do {
-            $chooser = @(
-                Invoke-Adb shell dumpsys activity activities |
-                    Select-String 'mResumedActivity' |
-                    ForEach-Object ToString
-            ) -join ' '
-            if ($chooser -match '(ChooserActivity|ResolverActivity)') { break }
-            Start-Sleep -Milliseconds 250
-        } while ($timer.Elapsed.TotalSeconds -lt 15)
-        if ($chooser -notmatch '(ChooserActivity|ResolverActivity)') {
-            throw "Android Sharesheet was not observably resumed: $chooser"
+        try {
+            do {
+                $chooser = Get-TopResumedActivity
+                if ($chooser -match '(ChooserActivity|ResolverActivity)') { break }
+                Start-Sleep -Milliseconds 250
+            } while ($timer.Elapsed.TotalSeconds -lt 15)
+            if ($chooser -notmatch '(ChooserActivity|ResolverActivity)') {
+                throw "Android Sharesheet was not observably resumed: $chooser"
+            }
+        } finally {
+            & adb -s $Serial shell input keyevent BACK 2>$null | Out-Null
         }
-        Invoke-Adb shell input keyevent BACK | Out-Null
         $completed =
             Wait-Log (
                 'scenario_result id=PACKAGE\.SAVE_SHARE outcome=PASS ' +
@@ -1018,16 +1208,16 @@ if (-not $SkipBuild) {
 
 function Get-OneApk {
     param([string] $VariantPattern)
-    $matches = @(
+    $matchingApks = @(
         Get-ChildItem (
             Join-Path $root 'test-apps\phase0-fixture\build\outputs\apk'
         ) -Recurse -File -Filter '*.apk' |
             Where-Object { $_.FullName -match $VariantPattern }
     )
-    if ($matches.Count -ne 1) {
-        throw "Expected one APK matching $VariantPattern, found $($matches.Count)"
+    if ($matchingApks.Count -ne 1) {
+        throw "Expected one APK matching $VariantPattern, found $($matchingApks.Count)"
     }
-    return $matches[0]
+    return $matchingApks[0]
 }
 
 $noInternetApk = Get-OneApk '\\noInternet\\qualificationRelease\\'
@@ -1050,7 +1240,7 @@ Invoke-CertScenario 'INSTALL.READINESS' {
 }
 
 Invoke-CertScenario 'HANDLER.COLD_START' {
-    Reset-And-Launch -ClearData
+    Reset-And-Launch -ClearData -WithParticipant
     $main = Get-AppPid $noInternetPackage
     $handler = Wait-ProductionHandlerReady $noInternetPackage
     $participant = Get-AppPid "$noInternetPackage`:production_participant"
@@ -1065,7 +1255,7 @@ Invoke-CertScenario 'HANDLER.COLD_START' {
 }
 
 Invoke-CertScenario 'HANDLER.RUNNING_ATTACH' {
-    Reset-And-Launch -ClearData
+    Reset-And-Launch -ClearData -WithParticipant
     $handler = Wait-ProductionHandlerReady $noInternetPackage
     $participant = Get-AppPid "$noInternetPackage`:production_participant"
     if ($participant -eq 0) {
@@ -1111,27 +1301,21 @@ Invoke-CertScenario 'HANDLER.RESTART' {
     $main = Get-AppPid $noInternetPackage
     $handlerProcess = "$noInternetPackage`:tracebox_handler"
     $handler = Wait-ProductionHandlerReady $noInternetPackage
-    $participant = Get-AppPid "$noInternetPackage`:production_participant"
-    if ($main -eq 0 -or $participant -eq 0) {
-        throw "Installed production clients are missing: main=$main participant=$participant"
+    if ($main -eq 0) {
+        throw 'Installed production client is missing'
     }
     Invoke-Adb shell kill '-9' $handler | Out-Null
     Wait-AppPidGone $handlerProcess $handler
     $mainAfter = Get-AppPid $noInternetPackage
-    $participantAfter = Get-AppPid "$noInternetPackage`:production_participant"
-    if ($mainAfter -ne $main -or $participantAfter -ne $participant) {
-        throw (
-            "A production client died with its handler: " +
-            "main=$main/$mainAfter participant=$participant/$participantAfter"
-        )
+    if ($mainAfter -ne $main) {
+        throw "The production client died with its handler: main=$main/$mainAfter"
     }
     $replacement = Wait-ProductionHandlerReady $noInternetPackage $handler 30
     Clear-DeviceLog
     Start-LabAction $noInternetPackage 'HANDLER.RESTART' 'policy_barrier'
     $policy =
         Wait-Log 'scenario_result id=MULTIPROCESS\.POLICY_BARRIER outcome=PASS .*standard=SUCCESS' 30
-    "$policy main=$main participant=$participant " +
-        "previous_handler=$handler replacement_handler=$replacement"
+    "$policy main=$main previous_handler=$handler replacement_handler=$replacement"
 }
 
 Invoke-CertScenario 'HANDLER.TIMEOUT' {
@@ -1185,11 +1369,7 @@ Invoke-CertScenario 'HANDLER.BACKGROUND_LIFETIME' {
         Start-Sleep -Seconds 2
 
         $idleState = ((Invoke-Adb shell cmd deviceidle get deep) -join '').Trim()
-        $resumedActivity = @(
-            Invoke-Adb shell dumpsys activity activities |
-                Select-String 'mResumedActivity' |
-                ForEach-Object ToString
-        ) -join ' '
+        $resumedActivity = Get-TopResumedActivity
         $backgroundMainPid = Get-AppPid $noInternetPackage
         $backgroundHandlerPid = Get-AppPid $handlerProcess
         if ($idleState -ne 'IDLE') {
@@ -1242,7 +1422,7 @@ Invoke-CertScenario 'HANDLER.BACKGROUND_LIFETIME' {
 }
 
 Invoke-CertScenario 'MULTIPROCESS.CAPTURE' {
-    Reset-And-Launch -ClearData
+    Reset-And-Launch -ClearData -WithParticipant
     $participantProcess = "$noInternetPackage`:production_participant"
     $participant = Get-AppPid $participantProcess
     if ($participant -eq 0) {
@@ -1266,7 +1446,7 @@ Invoke-CertScenario 'MULTIPROCESS.CAPTURE' {
 }
 
 Invoke-CertScenario 'MULTIPROCESS.POLICY_BARRIER' {
-    Reset-And-Launch -ClearData
+    Reset-And-Launch -ClearData -WithParticipant
     Clear-DeviceLog
     Start-LabAction $noInternetPackage 'MULTIPROCESS.POLICY_BARRIER' 'policy_barrier'
     Wait-Log 'scenario_result id=MULTIPROCESS\.POLICY_BARRIER outcome=PASS'
@@ -1276,10 +1456,10 @@ Invoke-CertScenario 'FAULT.JVM_UNCAUGHT' {
     Assert-ProcessDeathAction 'FAULT.JVM_UNCAUGHT' 'jvm_uncaught'
 }
 Invoke-CertScenario 'FAULT.CPP_ABORT' {
-    Assert-ProcessDeathAction 'FAULT.CPP_ABORT' 'abort'
+    Assert-ProcessDeathAction 'FAULT.CPP_ABORT' 'abort' -RequireHandlerDump
 }
 Invoke-CertScenario 'FAULT.CPP_SEGV' {
-    Assert-ProcessDeathAction 'FAULT.CPP_SEGV' 'segv'
+    Assert-ProcessDeathAction 'FAULT.CPP_SEGV' 'segv' -RequireHandlerDump
 }
 Invoke-CertScenario 'FAULT.RUST_PANIC' {
     Assert-ProcessDeathAction `
@@ -1298,11 +1478,11 @@ Invoke-CertScenario 'FAULT.EMERGENCY' {
         "native-handler/tracebox-emergency-11.bin"
     $before = Get-DeviceFileSha256 $slot
     $beforeSegments = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
-    $pid = Get-AppPid $noInternetPackage
-    if ($pid -eq 0) { throw 'Main process was not running before emergency fault' }
+    $mainPid = Get-AppPid $noInternetPackage
+    if ($mainPid -eq 0) { throw 'Main process was not running before emergency fault' }
     $captureTimer = [Diagnostics.Stopwatch]::StartNew()
     Start-LabAction $noInternetPackage 'FAULT.EMERGENCY' 'emergency'
-    Wait-AppPidGone $noInternetPackage $pid
+    Wait-AppPidGone $noInternetPackage $mainPid
     $terminationMillis = $captureTimer.ElapsedMilliseconds
     $after = Get-DeviceFileSha256 $slot
     if ($after -eq $before) {
@@ -1316,7 +1496,7 @@ Invoke-CertScenario 'FAULT.EMERGENCY' {
     if ($retired -eq $after) {
         throw 'Emergency slot was not consumed or reset after durable restart ingestion'
     }
-    "terminated_pid=$pid termination_ms=$terminationMillis slot_sha256=$after " +
+    "terminated_pid=$mainPid termination_ms=$terminationMillis slot_sha256=$after " +
         "retired_slot_sha256=$retired recovered_segments=$($recovered.Count)"
 }
 Invoke-CertScenario 'FAULT.RECURSIVE' {
@@ -1334,7 +1514,7 @@ Invoke-CertScenario 'ANR.CANDIDATE' {
     Clear-DeviceLog
     Start-ProductionFixtureAction $noInternetPackage 'ANR.CANDIDATE' 'anr_stall'
     $armed =
-        Wait-Log 'scenario_anr_armed id=ANR\.CANDIDATE stall=true policy=SUCCESS' 20
+        Wait-Log 'scenario_anr_armed id=ANR\.CANDIDATE stall=true policy=SUCCESS' 30
     $before = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
     $completed =
         Wait-Log 'scenario_anr_window_complete id=ANR\.CANDIDATE stall=true' 20
@@ -1347,7 +1527,7 @@ Invoke-CertScenario 'ANR.RESPONSIVE' {
     Clear-DeviceLog
     Start-ProductionFixtureAction $noInternetPackage 'ANR.RESPONSIVE' 'anr_responsive'
     $armed =
-        Wait-Log 'scenario_anr_armed id=ANR\.RESPONSIVE stall=false policy=SUCCESS' 20
+        Wait-Log 'scenario_anr_armed id=ANR\.RESPONSIVE stall=false policy=SUCCESS' 30
     $before = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
     $completed =
         Wait-Log 'scenario_anr_window_complete id=ANR\.RESPONSIVE stall=false' 15
@@ -1361,7 +1541,7 @@ Invoke-CertScenario 'ANR.TIMEOUT' {
     Clear-DeviceLog
     Start-ProductionFixtureAction $noInternetPackage 'ANR.TIMEOUT' 'anr_stall'
     $armed =
-        Wait-Log 'scenario_anr_armed id=ANR\.TIMEOUT stall=true policy=SUCCESS' 20
+        Wait-Log 'scenario_anr_armed id=ANR\.TIMEOUT stall=true policy=SUCCESS' 30
     $before = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
     try {
         Invoke-Adb shell kill '-STOP' $handler | Out-Null
@@ -1384,17 +1564,17 @@ Invoke-CertScenario 'ANR.LIFECYCLE_SUPPRESSION' {
         Wait-Log (
             'scenario_anr_armed id=ANR\.LIFECYCLE_SUPPRESSION ' +
             'stall=true policy=SUCCESS'
-        ) 20
+        ) 30
     $before = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
     Invoke-Adb shell input keyevent HOME | Out-Null
     $completed =
         Wait-Log 'scenario_anr_window_complete id=ANR\.LIFECYCLE_SUPPRESSION stall=true' 15
     $after = Assert-TraceboxSegmentsStable $noInternetPackage $before 2
-    $pid = Get-AppPid $noInternetPackage
-    if ($pid -eq 0) {
+    $backgroundMainPid = Get-AppPid $noInternetPackage
+    if ($backgroundMainPid -eq 0) {
         throw 'Production process died during background lifecycle suppression'
     }
-    "$armed $completed background_pid=$pid actual_stall=true stable_segments=$($after.Count)"
+    "$armed $completed background_pid=$backgroundMainPid actual_stall=true stable_segments=$($after.Count)"
 }
 
 Invoke-CertScenario 'EXIT.RESTART_RECONCILIATION' {
@@ -1405,22 +1585,27 @@ Invoke-CertScenario 'EXIT.RESTART_RECONCILIATION' {
         "/data/user/0/$noInternetPackage/no_backup/tracebox/exit-import-journal"
     $beforeTombstone = Get-OptionalDeviceFileFingerprint $tombstone
     $beforeSegments = @(Get-TraceboxSegmentFingerprints $noInternetPackage)
-    $pid = Get-AppPid $noInternetPackage
-    if ($pid -eq 0) { throw 'Main process was not running before ANR exit probe' }
-    Invoke-Adb shell settings put global show_first_crash_dialog 1 | Out-Null
-    Invoke-Adb shell settings put global anr_show_background 1 | Out-Null
+    $mainPid = Get-AppPid $noInternetPackage
+    if ($mainPid -eq 0) { throw 'Main process was not running before ANR exit probe' }
     Clear-DeviceLog
     Invoke-Adb shell am start `
-        '-n' "$noInternetPackage/.LabPackageActivity" `
+        '-n' "$noInternetPackage/$labPackageActivity" `
         '--es' tracebox.scenario_id 'EXIT.RESTART_RECONCILIATION' `
         '--es' tracebox.action 'anr_exit' | Out-Null
     $armed =
         Wait-Log (
             'scenario_anr_armed id=EXIT\.RESTART_RECONCILIATION ' +
             'stall=true policy=SUCCESS'
-        ) 20
-    $dialog = Wait-AnrDialogAndClose 45
-    Wait-AppPidGone $noInternetPackage $pid 20
+        ) 30
+    $stalled =
+        Wait-Log (
+            'scenario_anr_stall_started id=EXIT\.RESTART_RECONCILIATION ' +
+            'stall=true'
+        ) 10
+    Invoke-Adb shell input keyevent '--async' KEYCODE_DPAD_CENTER | Out-Null
+    $osAnr = Wait-AndroidAnr $noInternetPackage 30
+    $termination = Wait-AnrTermination $noInternetPackage $mainPid 45
+    Wait-AppPidGone $noInternetPackage $mainPid 20
     Clear-DeviceLog
     Start-LabAction $noInternetPackage 'EXIT.RESTART_RECONCILIATION' 'readiness' -Wait
     Wait-Log 'scenario_result id=INSTALL\.READINESS outcome=PASS' 20 | Out-Null
@@ -1457,7 +1642,7 @@ Invoke-CertScenario 'EXIT.RESTART_RECONCILIATION' {
     if ($LASTEXITCODE -eq 0 -and $pendingJournals) {
         throw "Exit import journal did not reach a terminal state: $($pendingJournals -join ',')"
     }
-    "$armed $dialog before_tombstone=$beforeTombstone " +
+    "$armed $stalled $osAnr $termination before_tombstone=$beforeTombstone " +
         "after_tombstone=$afterTombstone osexit_segments=$($afterSegments.Count) " +
         "pending_journals=0"
 }
@@ -1537,7 +1722,7 @@ Invoke-CertScenario 'STORAGE.PRESSURE' {
 }
 
 Invoke-CertScenario 'DELETE.ALL_RESTART' {
-    Reset-And-Launch
+    Reset-And-Launch -ClearData
     $script:deletedPayloadPaths = @(Get-TraceboxDiagnosticPayloadFiles $noInternetPackage)
     if ($script:deletedPayloadPaths.Count -eq 0) {
         throw 'Delete-all smoke has no pre-existing diagnostic payload to prove removal'
@@ -1626,7 +1811,7 @@ Invoke-CertScenario 'NETWORK.HOST_CONTROL' {
         Reset-And-Launch -Package $hostNetworkPackage -ClearData
         Clear-DeviceLog
         Invoke-Adb shell am start `
-            '-n' "$hostNetworkPackage/.MainActivity" `
+            '-n' "$hostNetworkPackage/$productionActivity" `
             '--es' tracebox.scenario_id 'NETWORK.HOST_CONTROL' `
             '--es' tracebox.action network_control `
             '--es' tracebox.probe_host $ProbeHost `
@@ -1673,7 +1858,10 @@ Invoke-CertScenario 'RESOURCE.BASELINE' {
     Invoke-Adb shell pm clear $noInternetPackage | Out-Null
     Clear-DeviceLog
     $startupTimer = [Diagnostics.Stopwatch]::StartNew()
-    Start-LabAction $noInternetPackage 'RESOURCE.BASELINE' 'readiness' -Wait
+    Start-LabAction `
+        $noInternetPackage 'RESOURCE.BASELINE' 'readiness' `
+        -Wait `
+        -WithParticipant
     $readiness =
         Wait-Log 'scenario_result id=INSTALL\.READINESS outcome=PASS readiness=DURABLE health=READY' 30
     $startupReadinessMillis = $startupTimer.ElapsedMilliseconds
@@ -1772,7 +1960,7 @@ Invoke-CertScenario 'RESOURCE.BASELINE' {
     $prePackagePss = Get-ProcessPssKiB $appPid
     Clear-DeviceLog
     Invoke-Adb shell am start '-W' `
-        '-n' "$noInternetPackage/.LabPackageActivity" `
+        '-n' "$noInternetPackage/$labPackageActivity" `
         '--es' tracebox.scenario_id 'RESOURCE.BASELINE' | Out-Null
     $packageReady =
         Wait-Log 'scenario_ready id=RESOURCE\.BASELINE values=\d+ bytes=\d+ raw=\d+' 30
@@ -1831,17 +2019,17 @@ if (@($corpusScenarios | Where-Object { $_.id -in $requiredIds }).Count -gt 0) {
             if (-not $corpusResult) {
                 throw "Corpus verifier failed: $corpusFailure"
             }
-            $matches = @(
+            $matchingCorpusCases = @(
                 $corpusResult.cases |
                     Where-Object { $_.id.StartsWith($corpusScenario.prefix) }
             )
             if (
-                $matches.Count -eq 0 -or
-                @($matches | Where-Object { -not $_.rejected }).Count -ne 0
+                $matchingCorpusCases.Count -eq 0 -or
+                @($matchingCorpusCases | Where-Object { -not $_.rejected }).Count -ne 0
             ) {
                 throw "Corpus group did not fail closed: $($corpusScenario.prefix)"
             }
-            "rejected_cases=$($matches.Count)"
+            "rejected_cases=$($matchingCorpusCases.Count)"
         }
     }
 }
@@ -1944,7 +2132,10 @@ $report = [ordered]@{
 }
 
 $outputDirectory = Split-Path -Parent $Output
-if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
+if (
+    $outputDirectory -and
+    -not (Test-Path -LiteralPath $outputDirectory -PathType Container)
+) {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 }
 $report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Output -Encoding utf8

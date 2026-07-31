@@ -285,6 +285,66 @@ private data class NativeHandlerServiceBinding(
     val connection: ServiceConnection,
 )
 
+/**
+ * Keeps activity hand-offs and asynchronous watchdog creation on one ordered eligibility boundary.
+ * A watchdog attached after the first Activity start immediately receives the current state.
+ */
+internal class ActivityVisibilityTracker {
+    private val lock = Any()
+    private var visibleActivities = 0
+    private var eligibilitySink: ((Boolean) -> Unit)? = null
+
+    fun activityStarted() {
+        synchronized(lock) {
+            visibleActivities += 1
+            eligibilitySink?.invoke(true)
+        }
+    }
+
+    fun activityStopped() {
+        synchronized(lock) {
+            visibleActivities = (visibleActivities - 1).coerceAtLeast(0)
+            eligibilitySink?.invoke(visibleActivities > 0)
+        }
+    }
+
+    fun attach(sink: (Boolean) -> Unit) {
+        synchronized(lock) {
+            eligibilitySink = sink
+            sink(visibleActivities > 0)
+        }
+    }
+
+    fun detach() {
+        synchronized(lock) {
+            eligibilitySink = null
+        }
+    }
+}
+
+/**
+ * Restores public readiness only when a previously healthy primary runtime recovers its native
+ * participant. Initial startup and unrelated degraded states remain owned by their original path.
+ */
+internal class PrimaryNativeReadinessRecovery {
+    private var restoreReady = false
+
+    fun begin(readiness: Readiness, health: TraceboxHealth) {
+        restoreReady = restoreReady ||
+            (readiness == Readiness.DURABLE && health == TraceboxHealth.READY)
+    }
+
+    fun complete(recovered: Boolean): Boolean {
+        if (!recovered || !restoreReady) return false
+        restoreReady = false
+        return true
+    }
+
+    fun clear() {
+        restoreReady = false
+    }
+}
+
 internal class DefaultTraceboxHandle(
     private val applicationContext: Context,
     val configuration: TraceboxConfiguration,
@@ -403,10 +463,10 @@ internal class DefaultTraceboxHandle(
     @Volatile
     private var authorizedRepairEnableEpoch: Long? = null
 
-    private val visibilityCallbacksInstalled = AtomicBoolean(false)
-
+    private val activityVisibility = ActivityVisibilityTracker()
+    private val primaryNativeReadinessRecovery = PrimaryNativeReadinessRecovery()
+    private var visibilityCallbacks: Application.ActivityLifecycleCallbacks? = null
     private var watchdog: AnrWatchdog? = null
-    private var visibleActivities = 0
     private val packageSurface = RuntimePackages(this)
 
     override val readiness: StateFlow<Readiness> = mutableReadiness.asStateFlow()
@@ -428,6 +488,7 @@ internal class DefaultTraceboxHandle(
     override val packages: DiagnosticPackages = packageSurface
 
     init {
+        installVisibilityCallbacks()
         Thread.setDefaultUncaughtExceptionHandler(installedJvmHandler)
         enqueue(::initialize)
     }
@@ -478,8 +539,7 @@ internal class DefaultTraceboxHandle(
         invalidateRuntimePackageCapabilities()
         secondaryPolicyObserver?.shutdownNow()
         secondaryPolicyObserver = null
-        primaryNativeObserver?.shutdownNow()
-        primaryNativeObserver = null
+        stopPrimaryNativeObserver()
         val terminalBarrier = Runnable {
             synchronized(profileLock) {
                 try {
@@ -524,6 +584,7 @@ internal class DefaultTraceboxHandle(
             Thread.setDefaultUncaughtExceptionHandler(previousJvmHandler)
         }
         releaseCoordinatorLease()
+        uninstallVisibilityCallbacks()
         Tracebox.onClosed(this)
     }
 
@@ -763,7 +824,6 @@ internal class DefaultTraceboxHandle(
                 rawStore.expire(System.currentTimeMillis(), RAW_ARTIFACT_TTL_MILLIS)
                 rawStore.deleteUnverifiableOrphans()
             }
-            installVisibilityCallbacks()
             val persistedProfile =
                 if (configuration.persistRequestedProfile) profileStore.read() else null
             val requested = resolveRequestedProfile(configuration, persistedProfile)
@@ -872,6 +932,7 @@ internal class DefaultTraceboxHandle(
     private fun stopPrimaryNativeObserver() {
         primaryNativeObserver?.shutdownNow()
         primaryNativeObserver = null
+        primaryNativeReadinessRecovery.clear()
     }
 
     private fun refreshSecondaryPolicy() {
@@ -1013,6 +1074,7 @@ internal class DefaultTraceboxHandle(
 
     private fun applyProfile(profile: DiagnosticsProfile, observedEpoch: Long? = null): PolicyUpdateResult {
         invalidateRuntimePackageCapabilities()
+        primaryNativeReadinessRecovery.clear()
         val page = controlPage ?: return PolicyUpdateResult.FAILED
         if (policyTransitionJournal.load() !is PolicyTransitionLoad.Empty &&
             (!coordinatesGlobalStorage ||
@@ -2014,6 +2076,7 @@ internal class DefaultTraceboxHandle(
     private fun quiesceManagedWriters(
         preserveVolatileManagedCrashes: Boolean = false,
     ): Boolean {
+        activityVisibility.detach()
         watchdog?.close()
         watchdog = null
         val currentWriter = writer
@@ -2686,7 +2749,7 @@ internal class DefaultTraceboxHandle(
                 },
             ).also {
                 it.start()
-                it.setEligible(visibleActivities > 0)
+                activityVisibility.attach(it::setEligible)
             }
         }
     }
@@ -2747,8 +2810,10 @@ internal class DefaultTraceboxHandle(
             )
         ) return
 
+        primaryNativeReadinessRecovery.begin(mutableReadiness.value, mutableHealth.value)
         nativeReady = false
         val quota = uidQuota ?: run {
+            primaryNativeReadinessRecovery.clear()
             markDegraded()
             return
         }
@@ -2780,11 +2845,17 @@ internal class DefaultTraceboxHandle(
         // The handler service acquires the cross-process mutation barrier through socket
         // readiness. Launch only after releasing our copy of that barrier.
         nativeReady = startNativeHandler(snapshot)
-        if (!nativeReady || !primaryNativeCaptureAlive() ||
-            stablePrimaryCaptureSnapshot() != snapshot
-        ) {
+        val recovered = nativeReady &&
+            primaryNativeCaptureAlive() &&
+            stablePrimaryCaptureSnapshot() == snapshot &&
+            crashpadRecoveryReady &&
+            directBootRecoveryReady
+        if (!recovered) {
             quiesceNativeClient()
             markDegraded()
+        } else if (primaryNativeReadinessRecovery.complete(recovered = true)) {
+            mutableHealth.value = TraceboxHealth.READY
+            mutableReadiness.value = Readiness.DURABLE
         }
     }
 
@@ -3150,24 +3221,28 @@ internal class DefaultTraceboxHandle(
 
     private fun installVisibilityCallbacks() {
         val application = applicationContext as? Application ?: return
-        if (!visibilityCallbacksInstalled.compareAndSet(false, true)) return
-        application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+        if (visibilityCallbacks != null) return
+        val callbacks = object : Application.ActivityLifecycleCallbacks {
             override fun onActivityCreated(activity: Activity, savedInstanceState: android.os.Bundle?) = Unit
-            override fun onActivityStarted(activity: Activity) {
-                visibleActivities += 1
-                watchdog?.setEligible(true)
-            }
+            override fun onActivityStarted(activity: Activity) = activityVisibility.activityStarted()
 
             override fun onActivityResumed(activity: Activity) = Unit
             override fun onActivityPaused(activity: Activity) = Unit
-            override fun onActivityStopped(activity: Activity) {
-                visibleActivities = (visibleActivities - 1).coerceAtLeast(0)
-                if (visibleActivities == 0) watchdog?.setEligible(false)
-            }
+            override fun onActivityStopped(activity: Activity) = activityVisibility.activityStopped()
 
             override fun onActivitySaveInstanceState(activity: Activity, outState: android.os.Bundle) = Unit
             override fun onActivityDestroyed(activity: Activity) = Unit
-        })
+        }
+        visibilityCallbacks = callbacks
+        application.registerActivityLifecycleCallbacks(callbacks)
+    }
+
+    private fun uninstallVisibilityCallbacks() {
+        activityVisibility.detach()
+        val application = applicationContext as? Application ?: return
+        val callbacks = visibilityCallbacks ?: return
+        visibilityCallbacks = null
+        application.unregisterActivityLifecycleCallbacks(callbacks)
     }
 
     private fun reconcileExitHistory() {

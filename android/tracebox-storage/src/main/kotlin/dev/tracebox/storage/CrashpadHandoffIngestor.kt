@@ -413,8 +413,10 @@ enum class CrashpadPendingRecoveryResult {
  *
  * Crashpad does not persist the Tracebox raw identity in its database filename. Attribution is
  * therefore accepted only at the deliberately single-lease boundary: one regular bounded pending
- * dump and one exact, registered-but-incomplete lifecycle journal while the handler is positively
- * quiesced. Every other combination remains in place and blocks rearming.
+ * dump, its optional exact Crashpad metadata sidecar, and one exact lifecycle registration that is
+ * either incomplete or terminal only because the client died before handoff completed. Recovery is
+ * permitted only while the handler is positively quiesced. Every other combination remains in
+ * place and blocks rearming.
  */
 class CrashpadPendingHandoffRecoverer(
     pendingDirectory: Path,
@@ -460,12 +462,45 @@ class CrashpadPendingHandoffRecoverer(
         }
         val pending = when (val audit = auditPendingDirectory()) {
             PendingDirectoryAudit.Empty -> return CrashpadPendingRecoveryResult.NONE
-            is PendingDirectoryAudit.Single -> audit.dump
+            is PendingDirectoryAudit.MetadataOnly -> {
+                if (audit.lock != null &&
+                    retireSidecar(audit.lock) != CrashpadPendingRecoveryResult.NONE
+                ) {
+                    return CrashpadPendingRecoveryResult.FAILED
+                }
+                return retireSidecar(audit.metadata)
+            }
+
+            is PendingDirectoryAudit.Single -> {
+                if (audit.report.lock == null) {
+                    audit.report
+                } else {
+                    if (retireSidecar(audit.report.lock) !=
+                        CrashpadPendingRecoveryResult.NONE
+                    ) {
+                        return CrashpadPendingRecoveryResult.FAILED
+                    }
+                    when (val withoutLock = auditPendingDirectory()) {
+                        is PendingDirectoryAudit.Single -> withoutLock.report.takeIf {
+                            it.lock == null && samePendingReportWithoutLock(audit.report, it)
+                        } ?: return CrashpadPendingRecoveryResult.AMBIGUOUS
+
+                        PendingDirectoryAudit.Empty,
+                        is PendingDirectoryAudit.MetadataOnly,
+                        PendingDirectoryAudit.Ambiguous,
+                        -> return CrashpadPendingRecoveryResult.AMBIGUOUS
+
+                        PendingDirectoryAudit.Failed ->
+                            return CrashpadPendingRecoveryResult.FAILED
+                    }
+                }
+            }
+
             PendingDirectoryAudit.Ambiguous -> return CrashpadPendingRecoveryResult.AMBIGUOUS
             PendingDirectoryAudit.Failed -> return CrashpadPendingRecoveryResult.FAILED
         }
         val registration = when (val audit = auditLifecycleDirectory()) {
-            is LifecycleDirectoryAudit.SingleIncomplete -> audit.registration
+            is LifecycleDirectoryAudit.SingleRecoverable -> audit.registration
             LifecycleDirectoryAudit.Ambiguous -> return CrashpadPendingRecoveryResult.AMBIGUOUS
             LifecycleDirectoryAudit.Failed -> return CrashpadPendingRecoveryResult.FAILED
         }
@@ -502,19 +537,20 @@ class CrashpadPendingHandoffRecoverer(
         // complete census before attribution so a same-UID race cannot replace a dump or journal,
         // add a second lease, or populate handoff storage between the first audit and the rename.
         val confirmedPending = when (val audit = auditPendingDirectory()) {
-            is PendingDirectoryAudit.Single -> audit.dump
+            is PendingDirectoryAudit.Single -> audit.report
             PendingDirectoryAudit.Empty,
+            is PendingDirectoryAudit.MetadataOnly,
             PendingDirectoryAudit.Ambiguous,
             -> return CrashpadPendingRecoveryResult.AMBIGUOUS
 
             PendingDirectoryAudit.Failed -> return CrashpadPendingRecoveryResult.FAILED
         }
         val confirmedRegistration = when (val audit = auditLifecycleDirectory()) {
-            is LifecycleDirectoryAudit.SingleIncomplete -> audit.registration
+            is LifecycleDirectoryAudit.SingleRecoverable -> audit.registration
             LifecycleDirectoryAudit.Ambiguous -> return CrashpadPendingRecoveryResult.AMBIGUOUS
             LifecycleDirectoryAudit.Failed -> return CrashpadPendingRecoveryResult.FAILED
         }
-        if (!samePendingDump(pending, confirmedPending) ||
+        if (!samePendingReport(pending, confirmedPending) ||
             !sameRegistration(registration, confirmedRegistration) ||
             !matchesRawJournal(confirmedRegistration.lifecycle)
         ) {
@@ -527,19 +563,20 @@ class CrashpadPendingHandoffRecoverer(
         }
 
         val reservation = prepareQuotaTransfer(
-            confirmedPending.path,
+            confirmedPending.dump.path,
             destination,
-            confirmedPending.bytes,
+            confirmedPending.dump.bytes,
         ) ?: return CrashpadPendingRecoveryResult.FAILED
         val finalPending = when (val audit = auditPendingDirectory()) {
-            is PendingDirectoryAudit.Single -> audit.dump
+            is PendingDirectoryAudit.Single -> audit.report
             PendingDirectoryAudit.Empty,
+            is PendingDirectoryAudit.MetadataOnly,
             PendingDirectoryAudit.Ambiguous,
             -> {
                 rollbackPendingMove(
-                    confirmedPending.path,
+                    confirmedPending.dump.path,
                     destination,
-                    confirmedPending.bytes,
+                    confirmedPending.dump.bytes,
                     reservation,
                 )
                 return CrashpadPendingRecoveryResult.AMBIGUOUS
@@ -547,21 +584,21 @@ class CrashpadPendingHandoffRecoverer(
 
             PendingDirectoryAudit.Failed -> {
                 rollbackPendingMove(
-                    confirmedPending.path,
+                    confirmedPending.dump.path,
                     destination,
-                    confirmedPending.bytes,
+                    confirmedPending.dump.bytes,
                     reservation,
                 )
                 return CrashpadPendingRecoveryResult.FAILED
             }
         }
         val finalRegistration = when (val audit = auditLifecycleDirectory()) {
-            is LifecycleDirectoryAudit.SingleIncomplete -> audit.registration
+            is LifecycleDirectoryAudit.SingleRecoverable -> audit.registration
             LifecycleDirectoryAudit.Ambiguous -> {
                 rollbackPendingMove(
-                    confirmedPending.path,
+                    confirmedPending.dump.path,
                     destination,
-                    confirmedPending.bytes,
+                    confirmedPending.dump.bytes,
                     reservation,
                 )
                 return CrashpadPendingRecoveryResult.AMBIGUOUS
@@ -569,24 +606,24 @@ class CrashpadPendingHandoffRecoverer(
 
             LifecycleDirectoryAudit.Failed -> {
                 rollbackPendingMove(
-                    confirmedPending.path,
+                    confirmedPending.dump.path,
                     destination,
-                    confirmedPending.bytes,
+                    confirmedPending.dump.bytes,
                     reservation,
                 )
                 return CrashpadPendingRecoveryResult.FAILED
             }
         }
         val finalHandoffEmpty = handoffDirectoryEmpty()
-        if (!samePendingDump(confirmedPending, finalPending) ||
+        if (!samePendingReport(confirmedPending, finalPending) ||
             !sameRegistration(confirmedRegistration, finalRegistration) ||
             !matchesRawJournal(finalRegistration.lifecycle) ||
             finalHandoffEmpty != true
         ) {
             rollbackPendingMove(
-                confirmedPending.path,
+                confirmedPending.dump.path,
                 destination,
-                confirmedPending.bytes,
+                confirmedPending.dump.bytes,
                 reservation,
             )
             return if (finalHandoffEmpty == null) {
@@ -595,36 +632,50 @@ class CrashpadPendingHandoffRecoverer(
                 CrashpadPendingRecoveryResult.AMBIGUOUS
             }
         }
+        var handoffCommitted = false
         return try {
-            Files.move(finalPending.path, destination, StandardCopyOption.ATOMIC_MOVE)
+            Files.move(finalPending.dump.path, destination, StandardCopyOption.ATOMIC_MOVE)
             val moved = readPendingDump(destination)
-            if (moved == null || !samePendingDumpAfterMove(finalPending, moved)) {
+            if (moved == null || !samePendingDumpAfterMove(finalPending.dump, moved)) {
                 rollbackPendingMove(
-                    finalPending.path,
+                    finalPending.dump.path,
                     destination,
-                    finalPending.bytes,
+                    finalPending.dump.bytes,
                     reservation,
                 )
                 return CrashpadPendingRecoveryResult.FAILED
             }
-            forceDirectory(pendingDirectory)
             forceDirectory(handoffDirectory)
+            handoffCommitted = true
+            if (finalPending.metadata != null &&
+                retireSidecar(finalPending.metadata) !=
+                CrashpadPendingRecoveryResult.NONE
+            ) {
+                // The handoff is already authoritative. Keep it available for ingestion and let a
+                // later quiesced startup retry cleanup of the exact orphaned sidecar.
+                return CrashpadPendingRecoveryResult.FAILED
+            }
+            forceDirectory(pendingDirectory)
             CrashpadPendingRecoveryResult.RECOVERED
         } catch (_: IOException) {
-            rollbackPendingMove(
-                finalPending.path,
-                destination,
-                finalPending.bytes,
-                reservation,
-            )
+            if (!handoffCommitted) {
+                rollbackPendingMove(
+                    finalPending.dump.path,
+                    destination,
+                    finalPending.dump.bytes,
+                    reservation,
+                )
+            }
             CrashpadPendingRecoveryResult.FAILED
         } catch (_: UnsupportedOperationException) {
-            rollbackPendingMove(
-                finalPending.path,
-                destination,
-                finalPending.bytes,
-                reservation,
-            )
+            if (!handoffCommitted) {
+                rollbackPendingMove(
+                    finalPending.dump.path,
+                    destination,
+                    finalPending.dump.bytes,
+                    reservation,
+                )
+            }
             CrashpadPendingRecoveryResult.FAILED
         }
     }
@@ -642,12 +693,46 @@ class CrashpadPendingHandoffRecoverer(
         return try {
             Files.list(pendingDirectory).use { stream ->
                 val iterator = stream.iterator()
-                if (!iterator.hasNext()) return PendingDirectoryAudit.Empty
-                val candidate = iterator.next()
-                if (iterator.hasNext()) return PendingDirectoryAudit.Ambiguous
-                val dump = readPendingDump(candidate)
-                    ?: return PendingDirectoryAudit.Ambiguous
-                PendingDirectoryAudit.Single(dump)
+                val entries = ArrayList<Path>(4)
+                while (iterator.hasNext() && entries.size < 4) {
+                    entries.add(iterator.next())
+                }
+                if (iterator.hasNext() || entries.size > 3) {
+                    return PendingDirectoryAudit.Ambiguous
+                }
+                if (entries.isEmpty()) return PendingDirectoryAudit.Empty
+
+                val dumps = entries.mapNotNull(::readPendingDump)
+                val metadata = entries.mapNotNull(::readPendingMetadata)
+                val locks = entries.mapNotNull(::readPendingLock)
+                if (dumps.size + metadata.size + locks.size != entries.size ||
+                    dumps.size > 1 ||
+                    metadata.size > 1 ||
+                    locks.size > 1
+                ) {
+                    return PendingDirectoryAudit.Ambiguous
+                }
+                if (dumps.size > 1) return PendingDirectoryAudit.Ambiguous
+                if (dumps.isEmpty()) {
+                    val sidecar = metadata.singleOrNull()
+                        ?: return PendingDirectoryAudit.Ambiguous
+                    val lock = locks.singleOrNull()
+                    if (lock != null && lock.reportName != sidecar.reportName) {
+                        return PendingDirectoryAudit.Ambiguous
+                    }
+                    return PendingDirectoryAudit.MetadataOnly(sidecar, lock)
+                }
+
+                val dump = dumps.single()
+                val reportName = dumpReportName(dump.path)
+                val sidecar = metadata.singleOrNull()
+                val lock = locks.singleOrNull()
+                if ((sidecar != null && sidecar.reportName != reportName) ||
+                    (lock != null && lock.reportName != reportName)
+                ) {
+                    return PendingDirectoryAudit.Ambiguous
+                }
+                PendingDirectoryAudit.Single(PendingReport(dump, sidecar, lock))
             }
         } catch (_: IOException) {
             PendingDirectoryAudit.Failed
@@ -685,6 +770,87 @@ class CrashpadPendingHandoffRecoverer(
         }
     }
 
+    private fun readPendingMetadata(path: Path): PendingSidecar? =
+        readPendingSidecar(
+            path,
+            CRASHPAD_METADATA_FILE,
+            CRASHPAD_METADATA_BYTES.toLong(),
+            PendingSidecarKind.METADATA,
+        )
+
+    private fun readPendingLock(path: Path): PendingSidecar? =
+        readPendingSidecar(
+            path,
+            CRASHPAD_LOCK_FILE,
+            CRASHPAD_LOCK_BYTES.toLong(),
+            PendingSidecarKind.LOCK,
+        )
+
+    private fun readPendingSidecar(
+        path: Path,
+        pattern: Regex,
+        expectedBytes: Long,
+        kind: PendingSidecarKind,
+    ): PendingSidecar? {
+        val normalized = path.toAbsolutePath().normalize()
+        val match = pattern.matchEntire(normalized.fileName?.toString().orEmpty())
+            ?: return null
+        if (normalized.parent != pendingDirectory || hasSymbolicLinkComponent(normalized)) {
+            return null
+        }
+        val attributes = try {
+            Files.readAttributes(
+                normalized,
+                BasicFileAttributes::class.java,
+                LinkOption.NOFOLLOW_LINKS,
+            )
+        } catch (_: IOException) {
+            return null
+        }
+        return PendingSidecar(
+            path = normalized,
+            reportName = match.groupValues[1],
+            fileKey = attributes.fileKey(),
+            lastModifiedMillis = attributes.lastModifiedTime().toMillis(),
+            kind = kind,
+        ).takeIf {
+            attributes.isRegularFile &&
+                attributes.size() == expectedBytes
+        }
+    }
+
+    private fun dumpReportName(path: Path): String? =
+        CRASHPAD_DUMP_FILE.matchEntire(path.fileName?.toString().orEmpty())
+            ?.groupValues
+            ?.get(1)
+
+    private fun retireSidecar(
+        sidecar: PendingSidecar,
+    ): CrashpadPendingRecoveryResult {
+        val confirmed = when (sidecar.kind) {
+            PendingSidecarKind.METADATA -> readPendingMetadata(sidecar.path)
+            PendingSidecarKind.LOCK -> readPendingLock(sidecar.path)
+        }
+        if (confirmed == null || !samePendingSidecar(sidecar, confirmed)) {
+            return CrashpadPendingRecoveryResult.AMBIGUOUS
+        }
+        return try {
+            Files.delete(sidecar.path)
+            forceDirectory(pendingDirectory)
+            try {
+                uidQuota?.release(sidecar.path)
+            } catch (_: StorageMutationBarrierException) {
+                // The sidecar deletion is authoritative. Quota startup reconciliation repairs a
+                // stale ledger entry without putting a deleted ownership record back in place.
+            }
+            CrashpadPendingRecoveryResult.NONE
+        } catch (_: IOException) {
+            CrashpadPendingRecoveryResult.FAILED
+        } catch (_: UnsupportedOperationException) {
+            CrashpadPendingRecoveryResult.FAILED
+        }
+    }
+
     private fun auditLifecycleDirectory(): LifecycleDirectoryAudit {
         if (hasSymbolicLinkComponent(lifecycleDirectory) ||
             !Files.isDirectory(lifecycleDirectory, LinkOption.NOFOLLOW_LINKS)
@@ -695,22 +861,27 @@ class CrashpadPendingHandoffRecoverer(
             Files.list(lifecycleDirectory).use { stream ->
                 val iterator = stream.iterator()
                 var inspected = 0
-                var incomplete: LifecycleRegistration? = null
+                var recoverable: LifecycleRegistration? = null
                 while (iterator.hasNext()) {
                     if (inspected++ == MAX_LIFECYCLE_FILES) {
                         return LifecycleDirectoryAudit.Ambiguous
                     }
                     when (val decoded = decodeJournal(iterator.next())) {
                         is JournalDecode.Incomplete -> {
-                            if (incomplete != null) return LifecycleDirectoryAudit.Ambiguous
-                            incomplete = decoded.registration
+                            if (recoverable != null) return LifecycleDirectoryAudit.Ambiguous
+                            recoverable = decoded.registration
+                        }
+
+                        is JournalDecode.RecoverableTerminal -> {
+                            if (recoverable != null) return LifecycleDirectoryAudit.Ambiguous
+                            recoverable = decoded.registration
                         }
 
                         JournalDecode.Complete -> Unit
                         JournalDecode.Invalid -> return LifecycleDirectoryAudit.Ambiguous
                     }
                 }
-                incomplete?.let(LifecycleDirectoryAudit::SingleIncomplete)
+                recoverable?.let(LifecycleDirectoryAudit::SingleRecoverable)
                     ?: LifecycleDirectoryAudit.Ambiguous
             }
         } catch (_: IOException) {
@@ -766,12 +937,25 @@ class CrashpadPendingHandoffRecoverer(
             )
         }
         val terminal = decodeRecord(terminalBytes) ?: return JournalDecode.Invalid
-        return if (terminal.state != CrashpadClientState.REGISTERED &&
-            sameLifecycleIdentity(registered, terminal)
+        if (terminal.state == CrashpadClientState.REGISTERED ||
+            !sameLifecycleIdentity(registered, terminal)
         ) {
-            JournalDecode.Complete
+            return JournalDecode.Invalid
+        }
+        return if (terminal.state == CrashpadClientState.DEAD ||
+            terminal.state == CrashpadClientState.HANDOFF_FAILED
+        ) {
+            JournalDecode.RecoverableTerminal(
+                LifecycleRegistration(
+                    normalized,
+                    attributes.fileKey(),
+                    attributes.lastModifiedTime().toMillis(),
+                    registeredBytes,
+                    registered,
+                ),
+            )
         } else {
-            JournalDecode.Invalid
+            JournalDecode.Complete
         }
     }
 
@@ -866,6 +1050,40 @@ class CrashpadPendingHandoffRecoverer(
             first.bytes == second.bytes &&
             first.lastModifiedMillis == second.lastModifiedMillis &&
             first.fileKey == second.fileKey
+
+    private fun samePendingReport(first: PendingReport, second: PendingReport): Boolean =
+        samePendingDump(first.dump, second.dump) &&
+            when {
+                first.metadata == null -> second.metadata == null
+                second.metadata == null -> false
+                else -> samePendingSidecar(first.metadata, second.metadata)
+            } &&
+            when {
+                first.lock == null -> second.lock == null
+                second.lock == null -> false
+                else -> samePendingSidecar(first.lock, second.lock)
+            }
+
+    private fun samePendingReportWithoutLock(
+        first: PendingReport,
+        second: PendingReport,
+    ): Boolean =
+        samePendingDump(first.dump, second.dump) &&
+            when {
+                first.metadata == null -> second.metadata == null
+                second.metadata == null -> false
+                else -> samePendingSidecar(first.metadata, second.metadata)
+            }
+
+    private fun samePendingSidecar(
+        first: PendingSidecar,
+        second: PendingSidecar,
+    ): Boolean =
+        first.path == second.path &&
+            first.reportName == second.reportName &&
+            first.lastModifiedMillis == second.lastModifiedMillis &&
+            first.fileKey == second.fileKey &&
+            first.kind == second.kind
 
     private fun samePendingDumpAfterMove(first: PendingDump, second: PendingDump): Boolean =
         first.bytes == second.bytes &&
@@ -1005,9 +1223,32 @@ class CrashpadPendingHandoffRecoverer(
         val lastModifiedMillis: Long,
     )
 
+    private enum class PendingSidecarKind {
+        METADATA,
+        LOCK,
+    }
+
+    private data class PendingSidecar(
+        val path: Path,
+        val reportName: String,
+        val fileKey: Any?,
+        val lastModifiedMillis: Long,
+        val kind: PendingSidecarKind,
+    )
+
+    private data class PendingReport(
+        val dump: PendingDump,
+        val metadata: PendingSidecar?,
+        val lock: PendingSidecar?,
+    )
+
     private sealed interface PendingDirectoryAudit {
         data object Empty : PendingDirectoryAudit
-        data class Single(val dump: PendingDump) : PendingDirectoryAudit
+        data class MetadataOnly(
+            val metadata: PendingSidecar,
+            val lock: PendingSidecar?,
+        ) : PendingDirectoryAudit
+        data class Single(val report: PendingReport) : PendingDirectoryAudit
         data object Ambiguous : PendingDirectoryAudit
         data object Failed : PendingDirectoryAudit
     }
@@ -1021,7 +1262,7 @@ class CrashpadPendingHandoffRecoverer(
     )
 
     private sealed interface LifecycleDirectoryAudit {
-        data class SingleIncomplete(
+        data class SingleRecoverable(
             val registration: LifecycleRegistration,
         ) : LifecycleDirectoryAudit
 
@@ -1031,6 +1272,7 @@ class CrashpadPendingHandoffRecoverer(
 
     private sealed interface JournalDecode {
         data class Incomplete(val registration: LifecycleRegistration) : JournalDecode
+        data class RecoverableTerminal(val registration: LifecycleRegistration) : JournalDecode
         data object Complete : JournalDecode
         data object Invalid : JournalDecode
     }
@@ -1050,6 +1292,13 @@ class CrashpadPendingHandoffRecoverer(
         const val CLIENT_JOURNAL_BYTES = CLIENT_RECORD_BYTES * 2
         const val CLIENT_PADDING_BYTES = 64
         const val CLIENT_CHECKSUM_OFFSET = CLIENT_RECORD_BYTES - Int.SIZE_BYTES
+        const val CRASHPAD_METADATA_BYTES = 32
+        const val CRASHPAD_LOCK_BYTES = Long.SIZE_BYTES
+        const val CRASHPAD_REPORT_NAME =
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+        val CRASHPAD_DUMP_FILE = Regex("^($CRASHPAD_REPORT_NAME)\\.dmp$")
+        val CRASHPAD_METADATA_FILE = Regex("^($CRASHPAD_REPORT_NAME)\\.meta$")
+        val CRASHPAD_LOCK_FILE = Regex("^($CRASHPAD_REPORT_NAME)\\.lock$")
         val CLIENT_FILE_NAME =
             Regex("^client-r([1-9][0-9]{0,9})-([0-9a-f]{64})\\.tbclient$")
     }
