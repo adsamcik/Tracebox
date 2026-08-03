@@ -17,9 +17,14 @@ class TraceboxDiagnosticsActivity : ComponentActivity() {
             finish()
             return
         }
+        val binding = TraceboxDiagnosticsUi.currentBinding()
         setContent {
             MaterialTheme {
-                TraceboxDiagnosticsScreen(handle = handle)
+                TraceboxDiagnosticsScreen(
+                    handle = handle,
+                    configuration = binding.configuration,
+                    uploader = binding.uploader,
+                )
             }
         }
     }

@@ -3,6 +3,7 @@ package dev.tracebox.ui.compose
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -17,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,19 +48,27 @@ import dev.tracebox.api.PackagePreparationResult
 import dev.tracebox.api.PackageRequest
 import dev.tracebox.api.PackageResult
 import dev.tracebox.api.PolicyUpdateResult
+import dev.tracebox.api.Readiness
 import dev.tracebox.api.SavePackageResult
 import dev.tracebox.api.TraceboxHandle
+import dev.tracebox.api.TraceboxHealth
 import dev.tracebox.api.TraceboxPolicy
 import java.util.Locale
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Reusable diagnostics screen; hosts may embed it directly or launch [TraceboxDiagnosticsActivity]. */
+/**
+ * Simple-first diagnostics UI. Casual users get one reviewed send/share flow; host-selected
+ * technical controls stay behind an advanced disclosure.
+ */
 @Composable
 fun TraceboxDiagnosticsScreen(
     handle: TraceboxHandle,
     modifier: Modifier = Modifier,
+    configuration: TraceboxDiagnosticsUiConfiguration = TraceboxDiagnosticsUiConfiguration(),
+    uploader: TraceboxDiagnosticUploader? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -65,9 +76,23 @@ fun TraceboxDiagnosticsScreen(
     val readiness by handle.readiness.collectAsStateWithLifecycle()
     val health by handle.health.collectAsStateWithLifecycle()
     val summary by handle.summary.collectAsStateWithLifecycle()
+    val strings = configuration.strings
+    val advanced = configuration.advancedControls
+    val actions = configuration.packageActions
+    val primaryAction = resolvePrimaryAction(
+        configured = configuration.primaryAction,
+        actions = actions,
+        uploaderAvailable = uploader != null,
+    )
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var currentPackage by remember { mutableStateOf<DiagnosticPackage?>(null) }
+    // Preserve the fail-closed delivery choice if Android recreates this screen while the
+    // disclosure activity is open. Enums are directly saveable by Compose.
+    var pendingPrimaryAction by rememberSaveable {
+        mutableStateOf(ResolvedPrimaryAction.REVIEW_ONLY)
+    }
+    var advancedExpanded by rememberSaveable { mutableStateOf(advanced.initiallyExpanded) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     fun runOperation(operation: suspend () -> String) {
@@ -76,11 +101,25 @@ fun TraceboxDiagnosticsScreen(
             busy = true
             message = try {
                 operation()
-            } catch (_: RuntimeException) {
-                "Operation failed. Tracebox remains fail-closed."
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                strings.operationFailure
             } finally {
                 busy = false
             }
+        }
+    }
+
+    suspend fun uploadPackage(diagnosticPackage: DiagnosticPackage): String {
+        val transport = uploader ?: return strings.uploadUnavailable
+        return when (withContext(Dispatchers.IO) {
+            transport.upload(TraceboxUploadRequest(diagnosticPackage))
+        }) {
+            is TraceboxUploadResult.Uploaded -> strings.uploadSuccess
+            TraceboxUploadResult.RetryableFailure -> strings.uploadRetryableFailure
+            TraceboxUploadResult.Rejected -> strings.uploadRejected
+            TraceboxUploadResult.Failed -> strings.uploadFailure
         }
     }
 
@@ -89,8 +128,10 @@ fun TraceboxDiagnosticsScreen(
         currentPackage = null
         when (withContext(Dispatchers.IO) { handle.updatePolicy(next) }) {
             PolicyUpdateResult.SUCCESS -> "Runtime controls updated."
-            PolicyUpdateResult.LOCAL_ONLY_RESTRICTED -> "Restrictions are durable locally; another process is still stopping."
-            PolicyUpdateResult.PARTIAL -> "The policy is durable, but one runtime participant is degraded."
+            PolicyUpdateResult.LOCAL_ONLY_RESTRICTED ->
+                "Restrictions are durable locally; another process is still stopping."
+            PolicyUpdateResult.PARTIAL ->
+                "The policy is durable, but one runtime participant is degraded."
             PolicyUpdateResult.FAILED -> "The policy was not changed."
         }
     }
@@ -98,24 +139,51 @@ fun TraceboxDiagnosticsScreen(
     val approvalLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
+        val delivery = pendingPrimaryAction
+        pendingPrimaryAction = ResolvedPrimaryAction.REVIEW_ONLY
         runOperation {
             val token = result.data
                 .takeIf { result.resultCode == Activity.RESULT_OK }
                 ?.let(ApprovalToken::fromActivityResult)
-                ?: return@runOperation "Package approval was cancelled."
-            when (val created = withContext(Dispatchers.IO) {
+                ?: return@runOperation "Package review was cancelled."
+            val diagnosticPackage = when (val created = withContext(Dispatchers.IO) {
                 handle.packages.create(PackageRequest.STANDARD, token)
             }) {
-                is PackageResult.Created -> {
-                    currentPackage?.deleteStaging()
-                    currentPackage = created.diagnosticPackage
-                    "Diagnostic package is ready to save or share."
+                is PackageResult.Created -> created.diagnosticPackage
+                PackageResult.NotReady -> return@runOperation "Diagnostics are not ready for packaging."
+                PackageResult.Rejected -> return@runOperation "The approval did not match the reviewed package."
+            }
+            currentPackage?.deleteStaging()
+            currentPackage = diagnosticPackage
+            when (delivery) {
+                ResolvedPrimaryAction.UPLOAD -> uploadPackage(diagnosticPackage)
+                ResolvedPrimaryAction.SHARE -> {
+                    val intent = diagnosticPackage.shareIntent(context)
+                        ?: return@runOperation "The package could not be shared."
+                    context.startActivity(intent)
+                    strings.packageReady
                 }
-                PackageResult.NotReady -> "Diagnostics are not ready for packaging."
-                PackageResult.Rejected -> "The approval did not match the finalized package."
+                ResolvedPrimaryAction.REVIEW_ONLY -> strings.packageReady
             }
         }
     }
+
+    fun requestReview(delivery: ResolvedPrimaryAction) = runOperation {
+        when (val prepared = withContext(Dispatchers.IO) {
+            handle.packages.prepare(PackageRequest.STANDARD)
+        }) {
+            is PackagePreparationResult.Ready -> {
+                val intent = handle.packages.approvalIntent(context, prepared.preview)
+                    ?: return@runOperation "The review activity is unavailable."
+                pendingPrimaryAction = delivery
+                approvalLauncher.launch(intent)
+                strings.privacyNotice
+            }
+            PackagePreparationResult.NotReady -> "Diagnostics are not ready for packaging."
+            PackagePreparationResult.Rejected -> "Package preparation was rejected."
+        }
+    }
+
     val saveLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -125,7 +193,7 @@ fun TraceboxDiagnosticsScreen(
         } else {
             runOperation {
                 val diagnosticPackage = currentPackage
-                    ?: return@runOperation "Create a package first."
+                    ?: return@runOperation "Review diagnostics first."
                 when (val saved = withContext(Dispatchers.IO) {
                     diagnosticPackage.save(context, destination)
                 }) {
@@ -145,97 +213,190 @@ fun TraceboxDiagnosticsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Tracebox diagnostics", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Offline diagnostics stay on this device until you explicitly save or share a reviewed package.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        StatusCard(
-            readiness = readiness.name.lowercase(Locale.ROOT),
-            health = health.name.lowercase(Locale.ROOT),
-            count = summary.recordedValueCount,
-        )
-        ControlCard("Runtime") {
-            ToggleRow("Diagnostics", policy.enabled, !busy) {
-                applyPolicy(policy.copy(enabled = it))
-            }
-            CycleRow(
-                label = "Minimum log level",
-                value = policy.minimumLogLevel.name,
-                enabled = !busy && policy.enabled,
-            ) {
-                val levels = LogLevel.entries
-                applyPolicy(policy.copy(minimumLogLevel = levels[(policy.minimumLogLevel.ordinal + 1) % levels.size]))
-            }
-            ToggleRow("Mirror redacted logs to Logcat", policy.mirrorToLogcat, !busy && policy.enabled) {
-                applyPolicy(policy.copy(mirrorToLogcat = it))
-            }
-            ToggleRow("Performance timings", policy.performanceLoggingEnabled, !busy && policy.enabled) {
-                applyPolicy(policy.copy(performanceLoggingEnabled = it))
-            }
-            CycleRow(
-                label = "Minimum performance duration",
-                value = formatDuration(policy.minimumPerformanceDurationNanos),
-                enabled = !busy && policy.enabled && policy.performanceLoggingEnabled,
-            ) {
-                val thresholds = longArrayOf(0L, 1_000_000L, 10_000_000L, 100_000_000L)
-                val current = thresholds.indexOf(policy.minimumPerformanceDurationNanos)
-                applyPolicy(policy.copy(minimumPerformanceDurationNanos = thresholds[(current + 1).coerceAtLeast(0) % thresholds.size]))
-            }
+        if (configuration.showHeading) {
+            Text(strings.title, style = MaterialTheme.typography.headlineSmall)
+            Text(strings.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        ControlCard("Capture sources") {
-            CaptureKind.entries.forEach { kind ->
-                ToggleRow(captureLabel(kind), kind in policy.captures, !busy && policy.enabled) { enabled ->
-                    val captures = policy.captures.toMutableSet().apply {
-                        if (enabled) add(kind) else remove(kind)
-                    }
-                    applyPolicy(policy.copy(captures = captures))
+
+        if (configuration.showCasualStatus) {
+            CasualStatusCard(
+                ready = readiness == Readiness.DURABLE && health == TraceboxHealth.READY,
+                readyText = strings.statusReady,
+                unavailableText = strings.statusUnavailable,
+            )
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(strings.supportTitle, style = MaterialTheme.typography.titleLarge)
+                Text(strings.supportDescription, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(
+                    strings.privacyNotice,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Button(
+                    onClick = { requestReview(primaryAction) },
+                    enabled = !busy && policy.enabled,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(primaryButtonLabel(primaryAction, strings))
                 }
             }
         }
-        ControlCard("Export") {
-            Button(
-                onClick = {
-                    runOperation {
-                        when (val prepared = withContext(Dispatchers.IO) {
-                            handle.packages.prepare(PackageRequest.STANDARD)
-                        }) {
-                            is PackagePreparationResult.Ready -> {
-                                val intent = handle.packages.approvalIntent(context, prepared.preview)
-                                    ?: return@runOperation "The review activity is unavailable."
-                                approvalLauncher.launch(intent)
-                                "Review the exact package contents before approving."
+
+        currentPackage?.let { diagnosticPackage ->
+            if ((actions.upload && uploader != null) || actions.share || actions.save) {
+                ControlCard(strings.moreSharingOptions) {
+                    if (actions.upload && uploader != null) {
+                        OutlinedButton(
+                            onClick = { runOperation { uploadPackage(diagnosticPackage) } },
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(strings.sendPackage) }
+                    }
+                    if (actions.share) {
+                        OutlinedButton(
+                            onClick = {
+                                val intent = diagnosticPackage.shareIntent(context)
+                                if (intent == null) {
+                                    message = "The package could not be shared."
+                                } else {
+                                    context.startActivity(intent)
+                                }
+                            },
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(strings.sharePackage) }
+                    }
+                    if (actions.save) {
+                        OutlinedButton(
+                            onClick = { saveLauncher.launch(diagnosticPackage.createSaveIntent()) },
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(strings.savePackage) }
+                    }
+                }
+            }
+        }
+
+        if (advanced.visible) {
+            OutlinedButton(
+                onClick = { advancedExpanded = !advancedExpanded },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (advancedExpanded) strings.hideAdvancedOptions else strings.advancedOptions)
+            }
+            AnimatedVisibility(advancedExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (advanced.statusDetails) {
+                        StatusCard(
+                            title = strings.statusTitle,
+                            readiness = readiness.name.lowercase(Locale.ROOT),
+                            health = health.name.lowercase(Locale.ROOT),
+                            count = summary.recordedValueCount,
+                        )
+                    }
+                    if (advanced.hasRuntimeControls()) {
+                        ControlCard(strings.runtimeTitle) {
+                            if (advanced.diagnosticsEnabled) {
+                                ToggleRow(strings.diagnosticsEnabled, policy.enabled, !busy) {
+                                    applyPolicy(policy.copy(enabled = it))
+                                }
                             }
-                            PackagePreparationResult.NotReady -> "Diagnostics are not ready for packaging."
-                            PackagePreparationResult.Rejected -> "Package preparation was rejected."
+                            if (advanced.logLevels.isNotEmpty()) {
+                                CycleRow(
+                                    label = strings.minimumLogLevel,
+                                    value = policy.minimumLogLevel.name,
+                                    enabled = !busy && policy.enabled,
+                                ) {
+                                    applyPolicy(policy.copy(
+                                        minimumLogLevel = nextValue(
+                                            policy.minimumLogLevel,
+                                            advanced.logLevels,
+                                        ),
+                                    ))
+                                }
+                            }
+                            if (advanced.logcatMirroring) {
+                                ToggleRow(
+                                    strings.mirrorToLogcat,
+                                    policy.mirrorToLogcat,
+                                    !busy && policy.enabled,
+                                ) { applyPolicy(policy.copy(mirrorToLogcat = it)) }
+                            }
+                            if (advanced.performanceLogging) {
+                                ToggleRow(
+                                    strings.performanceTimings,
+                                    policy.performanceLoggingEnabled,
+                                    !busy && policy.enabled,
+                                ) { applyPolicy(policy.copy(performanceLoggingEnabled = it)) }
+                                if (advanced.performanceThresholdsNanos.isNotEmpty()) {
+                                    CycleRow(
+                                        label = strings.minimumPerformanceDuration,
+                                        value = formatDuration(policy.minimumPerformanceDurationNanos),
+                                        enabled = !busy && policy.enabled &&
+                                            policy.performanceLoggingEnabled,
+                                    ) {
+                                        applyPolicy(policy.copy(
+                                            minimumPerformanceDurationNanos = nextValue(
+                                                policy.minimumPerformanceDurationNanos,
+                                                advanced.performanceThresholdsNanos,
+                                            ),
+                                        ))
+                                    }
+                                }
+                            }
                         }
                     }
-                },
-                enabled = !busy && policy.enabled,
+                    if (advanced.captureKinds.isNotEmpty()) {
+                        ControlCard(strings.captureSourcesTitle) {
+                            CaptureKind.entries
+                                .filter(advanced.captureKinds::contains)
+                                .forEach { kind ->
+                                    ToggleRow(
+                                        captureLabel(kind),
+                                        kind in policy.captures,
+                                        !busy && policy.enabled,
+                                    ) { enabled ->
+                                        val captures = policy.captures.toMutableSet().apply {
+                                            if (enabled) add(kind) else remove(kind)
+                                        }
+                                        applyPolicy(policy.copy(captures = captures))
+                                    }
+                                }
+                        }
+                    }
+                    if (advanced.resetToDefaults) {
+                        OutlinedButton(
+                            onClick = { applyPolicy(configuration.defaultPolicy) },
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(strings.restoreDefaults) }
+                    }
+                    if (actions.deleteAllData) {
+                        TextButton(
+                            onClick = { showDeleteConfirmation = true },
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(strings.deleteAllData) }
+                    }
+                }
+            }
+        } else if (actions.deleteAllData) {
+            TextButton(
+                onClick = { showDeleteConfirmation = true },
+                enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Review and create package") }
-            OutlinedButton(
-                onClick = {
-                    val intent = currentPackage?.createSaveIntent()
-                    if (intent == null) message = "Create a package first." else saveLauncher.launch(intent)
-                },
-                enabled = !busy && currentPackage != null,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Save package") }
-            OutlinedButton(
-                onClick = {
-                    val intent = currentPackage?.shareIntent(context)
-                    if (intent == null) message = "Create a package first." else context.startActivity(intent)
-                },
-                enabled = !busy && currentPackage != null,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Share package") }
+            ) { Text(strings.deleteAllData) }
         }
-        OutlinedButton(
-            onClick = { showDeleteConfirmation = true },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Delete all Tracebox data") }
+
         if (busy) CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Spacer(Modifier.height(24.dp))
@@ -244,32 +405,55 @@ fun TraceboxDiagnosticsScreen(
     if (showDeleteConfirmation) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmation = false },
-            title = { Text("Delete diagnostics?") },
-            text = { Text("This removes Tracebox records and staged packages from this app.") },
+            title = { Text(strings.deleteDialogTitle) },
+            text = { Text(strings.deleteDialogBody) },
             confirmButton = {
                 TextButton(onClick = {
                     showDeleteConfirmation = false
                     runOperation {
                         currentPackage?.deleteStaging()
                         currentPackage = null
-                        when (withContext(Dispatchers.IO) { handle.delete(DeleteRequest.ALL_TRACEBOX_DATA) }) {
-                            DeleteReport.COMPLETE -> "All Tracebox data was deleted."
-                            DeleteReport.PENDING_FAILURE -> "Some handler-owned data remains and will be retried."
+                        when (withContext(Dispatchers.IO) {
+                            handle.delete(DeleteRequest.ALL_TRACEBOX_DATA)
+                        }) {
+                            DeleteReport.COMPLETE -> "All diagnostic data was deleted."
+                            DeleteReport.PENDING_FAILURE ->
+                                "Some handler-owned data remains and will be retried."
                             DeleteReport.REJECTED -> "Deletion could not start."
                         }
                     }
-                }) { Text("Delete") }
+                }) { Text(strings.deleteConfirm) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancel") }
+                TextButton(onClick = { showDeleteConfirmation = false }) {
+                    Text(strings.cancel)
+                }
             },
         )
     }
 }
 
 @Composable
-private fun StatusCard(readiness: String, health: String, count: Long) {
-    ControlCard("Status") {
+private fun CasualStatusCard(
+    ready: Boolean,
+    readyText: String,
+    unavailableText: String,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Text(
+            text = if (ready) readyText else unavailableText,
+            modifier = Modifier.padding(16.dp),
+            style = MaterialTheme.typography.titleMedium,
+        )
+    }
+}
+
+@Composable
+private fun StatusCard(title: String, readiness: String, health: String, count: Long) {
+    ControlCard(title) {
         Text("Readiness: $readiness")
         Text("Health: $health")
         Text("Recorded in this process session: $count")
@@ -312,6 +496,24 @@ private fun CycleRow(label: String, value: String, enabled: Boolean, onClick: ()
         Text(label, modifier = Modifier.weight(1f))
         TextButton(onClick = onClick, enabled = enabled) { Text(value) }
     }
+}
+
+private fun TraceboxAdvancedControls.hasRuntimeControls(): Boolean =
+    diagnosticsEnabled || logLevels.isNotEmpty() || logcatMirroring || performanceLogging
+
+private fun primaryButtonLabel(
+    action: ResolvedPrimaryAction,
+    strings: TraceboxDiagnosticsUiStrings,
+): String = when (action) {
+    ResolvedPrimaryAction.UPLOAD -> strings.reviewAndUpload
+    ResolvedPrimaryAction.SHARE -> strings.reviewAndShare
+    ResolvedPrimaryAction.REVIEW_ONLY -> strings.reviewOnly
+}
+
+private fun <T> nextValue(current: T, values: List<T>): T {
+    require(values.isNotEmpty())
+    val currentIndex = values.indexOf(current)
+    return values[if (currentIndex < 0) 0 else (currentIndex + 1) % values.size]
 }
 
 private fun captureLabel(kind: CaptureKind): String = when (kind) {

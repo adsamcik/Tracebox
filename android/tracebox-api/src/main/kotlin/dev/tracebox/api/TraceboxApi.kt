@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import java.io.Closeable
+import java.io.InputStream
 import kotlinx.coroutines.flow.StateFlow
 import dev.tracebox.api.generated.GeneratedEventId
 import dev.tracebox.api.generated.GeneratedRecord
@@ -169,7 +170,7 @@ enum class SaveFailure { OUTPUT_UNAVAILABLE, WRITE_FAILED }
 /** Accurate final handoff state; Android cannot prove recipient delivery. */
 enum class SharePackageResult { NOT_STARTED, CHOOSER_OPENED, DELIVERY_UNKNOWN }
 
-/** A package created from exact approved bytes. It has no network or automatic upload surface. */
+/** A package created from exact user-approved bytes. Tracebox never uploads it automatically. */
 interface DiagnosticPackage {
     val plaintextDigestSha256: ByteArray
     val sizeBytes: Long
@@ -183,6 +184,15 @@ interface DiagnosticPackage {
 
     /** Copies exact approved bytes to a user-selected SAF destination. Call off the main thread. */
     fun save(context: Context, destination: Uri, isCancelled: () -> Boolean = { false }): SavePackageResult
+
+    /**
+     * Gives a host transport synchronous, read-only access to the exact approved package bytes.
+     *
+     * The stream is valid only for [block] and is closed by Tracebox. This deliberately avoids
+     * exposing a storage path or long-lived URI. Returns `null` if the package capability has
+     * expired. Call off the main thread.
+     */
+    fun <T> useInputStream(block: (InputStream) -> T): T?
 
     /** Deletes Tracebox-owned staging for this package; it cannot delete the OS-owned destination. */
     fun deleteStaging(): Boolean

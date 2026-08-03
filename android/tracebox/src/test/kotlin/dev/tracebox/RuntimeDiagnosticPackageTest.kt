@@ -14,6 +14,14 @@ import kotlin.test.assertTrue
 
 class RuntimeDiagnosticPackageTest {
     @Test
+    fun disclosure_formats_package_size_without_hiding_exact_technical_bytes() {
+        assertEquals("0 bytes", formatPackageSize(0L))
+        assertEquals("1 KB", formatPackageSize(1_024L))
+        assertEquals("2 KB", formatPackageSize(1_536L))
+        assertEquals("1 MB", formatPackageSize(1_048_576L))
+    }
+
+    @Test
     fun staging_expiry_is_a_future_deadline_and_fresh_files_are_not_expired() {
         val now = 1_000_000L
         val deadline = packageStagingExpiryDeadlineMillis(now)

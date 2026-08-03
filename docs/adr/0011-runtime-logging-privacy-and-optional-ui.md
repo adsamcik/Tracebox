@@ -48,4 +48,5 @@ independently. Privacy is simple at call sites, but templates containing runtime
 PII cannot be detected automatically and are prohibited by the API contract.
 
 This performance API records bounded diagnostic timings; it does not authorize
-the Phase 6 metrics/traces or uploader scope.
+the Phase 6 metrics/traces scope. ADR-0012 separately authorizes a host-owned,
+post-approval uploader contract without adding transport to Tracebox.

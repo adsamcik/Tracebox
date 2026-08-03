@@ -4909,6 +4909,11 @@ private class RuntimeDiagnosticPackage(
         } ?: SavePackageResult.Failed(SaveFailure.OUTPUT_UNAVAILABLE)
     }
 
+    override fun <T> useInputStream(block: (java.io.InputStream) -> T): T? =
+        runtime.withPackageCapability(capabilityGeneration) {
+            bytes.inputStream().use(block)
+        }
+
     override fun deleteStaging(): Boolean = synchronized(staged) {
         val paths = staged.toList()
         var complete = true
@@ -5035,7 +5040,7 @@ class TraceboxPackageDisclosureActivity : Activity() {
             return
         }
         val disclosure = preview.disclosure
-        val details = buildString {
+        val technicalDetails = buildString {
             append("Included values: ").append(disclosure.includedValueCount).append('\n')
             append("Included bytes: ").append(disclosure.includedBytes).append('\n')
             append("Privacy classes: ").append(disclosure.privacyClasses).append('\n')
@@ -5047,23 +5052,86 @@ class TraceboxPackageDisclosureActivity : Activity() {
             append("Warnings: ").append(disclosure.warnings).append('\n')
             append("SHA-256: ").append(disclosure.plaintextDigestSha256.joinToString("") { "%02x".format(it) })
         }
-        setContentView(android.widget.LinearLayout(this).apply {
+        val spacing = (16 * resources.displayMetrics.density).toInt()
+        val content = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            addView(android.widget.TextView(this@TraceboxPackageDisclosureActivity).apply { text = details })
+            setPadding(spacing, spacing, spacing, spacing)
+            addView(android.widget.TextView(this@TraceboxPackageDisclosureActivity).apply {
+                text = "Review diagnostic package"
+                textSize = 24f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            })
+            addView(android.widget.TextView(this@TraceboxPackageDisclosureActivity).apply {
+                text = "Nothing leaves this device until you approve this exact package."
+                textSize = 16f
+                setPadding(0, spacing / 2, 0, spacing)
+            })
+            addView(android.widget.TextView(this@TraceboxPackageDisclosureActivity).apply {
+                text = buildString {
+                    append(disclosure.includedValueCount).append(" diagnostic items\n")
+                    append(formatPackageSize(disclosure.includedBytes)).append(" total\n\n")
+                    append("Raw crash artifacts are excluded. Privacy transformations are already applied.")
+                }
+                textSize = 18f
+                setPadding(spacing, spacing, spacing, spacing)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = spacing.toFloat()
+                    setColor(resolveDisclosureSurfaceColor())
+                }
+            })
+            val detailsView = android.widget.TextView(this@TraceboxPackageDisclosureActivity).apply {
+                text = technicalDetails
+                textSize = 13f
+                setTextIsSelectable(true)
+                visibility = android.view.View.GONE
+                setPadding(0, spacing / 2, 0, spacing / 2)
+            }
             addView(android.widget.Button(this@TraceboxPackageDisclosureActivity).apply {
-                text = "Approve package"
+                text = "Show technical details"
+                setOnClickListener {
+                    val showing = detailsView.visibility == android.view.View.VISIBLE
+                    detailsView.visibility = if (showing) android.view.View.GONE else android.view.View.VISIBLE
+                    text = if (showing) "Show technical details" else "Hide technical details"
+                }
+            })
+            addView(detailsView)
+            addView(android.widget.Button(this@TraceboxPackageDisclosureActivity).apply {
+                text = "Approve and continue"
                 setOnClickListener {
                     val nonce = RuntimePackageRegistry.approve(checkNotNull(digest)) ?: return@setOnClickListener
                     setResult(RESULT_OK, ApprovalToken.resultIntent(nonce))
                     finish()
                 }
             })
-        })
+            addView(android.widget.Button(this@TraceboxPackageDisclosureActivity).apply {
+                text = "Cancel"
+                setOnClickListener {
+                    setResult(RESULT_CANCELED)
+                    finish()
+                }
+            })
+        }
+        setContentView(android.widget.ScrollView(this).apply { addView(content) })
+    }
+
+    private fun resolveDisclosureSurfaceColor(): Int {
+        val value = android.util.TypedValue()
+        return if (theme.resolveAttribute(android.R.attr.colorBackgroundFloating, value, true)) {
+            value.data
+        } else {
+            0xffeeeeee.toInt()
+        }
     }
 
     companion object {
         const val EXTRA_DIGEST = "dev.tracebox.preview.digest"
     }
+}
+
+internal fun formatPackageSize(bytes: Long): String = when {
+    bytes < 1_024L -> "$bytes bytes"
+    bytes < 1_048_576L -> "${(bytes + 512L) / 1_024L} KB"
+    else -> "${(bytes + 524_288L) / 1_048_576L} MB"
 }
 
 internal class ManagedIdentityStore(

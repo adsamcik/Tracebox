@@ -2,7 +2,7 @@
 
 ## Status
 
-Tracker is the reference personal-project host for `0.1.0-alpha.2`. The normal
+Tracker is the reference personal-project host for `0.1.0-alpha.3`. The normal
 `dev/v10` application is hard-migrated: Tracebox is the only production logging
 and crash-diagnostics backend, with no flavor gate or legacy compatibility
 writer.
@@ -15,9 +15,9 @@ emulator. Physical-device, OEM, battery, and broad API matrices are optional.
 Tracker declares the pieces it actually uses:
 
 ```kotlin
-implementation("io.github.tracebox:tracebox:0.1.0-alpha.2")
-implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.2")
-implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.2")
+implementation("io.github.tracebox:tracebox:0.1.0-alpha.3")
+implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.3")
+implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.3")
 ```
 
 `tracebox` does not transitively depend on `tracebox-native`. Apps that need
@@ -101,11 +101,78 @@ measurement, and an optional minimum duration suppresses short samples.
 - performance timing and its minimum duration; and
 - each JVM, handled, ANR, OS-exit, native, and Rust capture source.
 
-Tracker embeds `TraceboxDiagnosticsScreen` from `tracebox-ui-compose`. The
-library owns policy controls, readiness/health/summary display, disclosure,
-package approval, save/share, and whole-store deletion. Tracker retains only
-its localized settings-navigation title and its combined collected-data
-deletion coordinator.
+Tracker embeds `TraceboxDiagnosticsScreen` from `tracebox-ui-compose`. Its
+default presentation is simple-first: one reviewed send/share action and a
+plain readiness summary. Technical status, runtime logging/performance policy,
+capture-source switches, reset, and deletion stay under a collapsed advanced
+section.
+
+The host controls the entire surface in code:
+
+```kotlin
+val defaults = TraceboxPolicy.standard()
+val ui = TraceboxDiagnosticsUiConfiguration(
+    showHeading = false,
+    primaryAction = TraceboxPrimaryAction.SHARE,
+    packageActions = TraceboxPackageActions(
+        upload = false,
+        share = true,
+        save = true,
+        deleteAllData = true,
+    ),
+    advancedControls = TraceboxAdvancedControls(
+        initiallyExpanded = false,
+        logcatMirroring = false,
+        captureKinds = setOf(CaptureKind.JVM_CRASH, CaptureKind.ANR),
+    ),
+    defaultPolicy = defaults,
+)
+
+TraceboxDiagnosticsScreen(
+    handle = checkNotNull(Tracebox.current()),
+    configuration = ui,
+)
+```
+
+`defaultPolicy` is the explicit target for the optional reset control. The
+same value should be passed to `TraceboxConfiguration.setInitialPolicy` for
+fresh installs. Opening the UI never replaces a persisted user policy.
+
+### Optional native upload
+
+An application can provide its existing authenticated backend without adding a
+network client, endpoint, permission, or worker to Tracebox:
+
+```kotlin
+val uploader = TraceboxDiagnosticUploader { request ->
+    request.useInputStream { approvedZip ->
+        appBackend.uploadDiagnostics(
+            stream = approvedZip,
+            sizeBytes = request.sizeBytes,
+            sha256 = request.plaintextDigestSha256,
+        )
+    } ?: TraceboxUploadResult.Failed
+}
+
+TraceboxDiagnosticsScreen(
+    handle = checkNotNull(Tracebox.current()),
+    configuration = ui.copy(
+        primaryAction = TraceboxPrimaryAction.UPLOAD,
+        packageActions = ui.packageActions.copy(upload = true),
+    ),
+    uploader = uploader,
+)
+```
+
+The uploader is called only after the user reviews and approves the exact
+deterministic package. It receives scoped read access to those approved ZIP
+bytes, not a database, filesystem path, or raw crash store. The standalone
+`TraceboxDiagnosticsActivity` uses the same settings after
+`TraceboxDiagnosticsUi.configure(ui, uploader)`.
+
+Tracker currently chooses reviewed Android sharing because it has no configured
+diagnostics endpoint. Adding one requires only a Tracker-owned uploader; the
+screen and package pipeline do not change.
 
 ## Hard-migration rules
 
@@ -122,11 +189,12 @@ deletion coordinator.
 
 ## Verified alpha integration
 
-For `0.1.0-alpha.2` the host compile, hard-migration architecture tests,
+For `0.1.0-alpha.3` the host compile, hard-migration architecture tests,
 Tracebox bootstrap tests, tracking resilience tests, affected OSM/activity/stats
 module tests, and debug APK assembly pass. A single x86_64 emulator launch also
 confirmed a live Tracker process, dedicated Tracebox handler, durable segment,
 policy/identity stores, and native emergency slots.
 
-Practical UI flows and real user workloads remain alpha evaluation, not missing
-implementation.
+The settings entry, casual screen, advanced disclosure, and exact-package
+review handoff are exercised on the representative emulator. Real user
+workloads remain alpha evaluation, not missing implementation.
