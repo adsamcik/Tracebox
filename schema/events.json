@@ -121,6 +121,54 @@
         {"id": 4, "name": "link_confidence", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
         {"id": 5, "name": "artifact_state", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"}
       ]
+    },
+    {
+      "id": 9,
+      "name": "LogRecord",
+      "category": "log",
+      "retention": "ordinary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "level", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "category", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 3, "name": "template_fingerprint", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 4, "name": "rendered_message", "privacy": "C2", "semantic_type": "bounded_utf8", "max_encoded_size": 1026, "transform": "parameter_redaction"},
+        {"id": 5, "name": "privacy_flags", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 6, "name": "monotonic_time_ns", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 7, "name": "duration_ns", "privacy": "C0", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 8, "name": "outcome", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"}
+      ]
+    },
+    {
+      "id": 10,
+      "name": "ExceptionRecord",
+      "category": "managed_exception",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "kind", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "exception_type", "privacy": "C1", "semantic_type": "bounded_utf8", "max_encoded_size": 258, "transform": "none"},
+        {"id": 3, "name": "frame_count", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"},
+        {"id": 4, "name": "stack_fingerprint", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 5, "name": "stack_trace", "privacy": "C1", "semantic_type": "bounded_utf8", "max_encoded_size": 2050, "transform": "none"},
+        {"id": 6, "name": "monotonic_time_ns", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"}
+      ]
+    },
+    {
+      "id": 11,
+      "name": "AnrTrace",
+      "category": "anr_trace",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "elapsed_millis", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "frame_count", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"},
+        {"id": 3, "name": "stack_fingerprint", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 4, "name": "stack_trace", "privacy": "C1", "semantic_type": "bounded_utf8", "max_encoded_size": 2050, "transform": "none"}
+      ]
     }
   ]
 }

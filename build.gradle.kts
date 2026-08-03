@@ -3,7 +3,7 @@ plugins {
 }
 
 val traceboxGroup = "io.github.tracebox"
-val traceboxVersion = providers.gradleProperty("traceboxVersion").orElse("0.1.0-foundation.1").get()
+val traceboxVersion = providers.gradleProperty("traceboxVersion").get()
 
 allprojects {
     group = traceboxGroup
@@ -25,6 +25,7 @@ tasks.register("publishFoundation") {
         ":android:tracebox-native:publish",
         ":android:tracebox-export:publish",
         ":android:tracebox-export-ui:publish",
+        ":android:tracebox-ui-compose:publish",
         ":android:tracebox:publish",
     )
 }

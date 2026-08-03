@@ -81,7 +81,7 @@ data class PackageDisclosure(
 enum class PackagePrivacyClass { C0, C1, C2 }
 
 /** Generated transformations; arbitrary transformations are not represented by this API. */
-enum class PackageTransformation { NONE }
+enum class PackageTransformation { NONE, PARAMETER_REDACTION }
 
 /** Bounded omission categories reported by a finalized package. */
 enum class PackageOmissionReason { CORRUPT_ORDINARY_RECORD }
@@ -191,10 +191,15 @@ interface DiagnosticPackage {
 /** The generated-only public Tracebox recording handle. */
 interface TraceboxHandle : Closeable {
     val diagnostics: Diagnostics
+    val log: TraceboxLogger
+    val crashes: CrashReporter
+    val policy: StateFlow<TraceboxPolicy>
+    val summary: StateFlow<DiagnosticSummary>
     val readiness: StateFlow<Readiness>
     val health: StateFlow<TraceboxHealth>
     val packages: DiagnosticPackages
 
     fun updateProfile(profile: DiagnosticsProfile): PolicyUpdateResult
+    fun updatePolicy(policy: TraceboxPolicy): PolicyUpdateResult
     fun delete(request: DeleteRequest): DeleteReport
 }

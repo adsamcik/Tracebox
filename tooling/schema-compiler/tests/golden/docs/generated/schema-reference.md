@@ -90,3 +90,42 @@ Category: `os_exit`; retention: `structural_summary`; package: `standard`; Direc
 | 4 | link_confidence | C0 | enum | 5 | none |
 | 5 | artifact_state | C0 | enum | 5 | none |
 
+## LogRecord (`9`)
+
+Category: `log`; retention: `ordinary`; package: `standard`; Direct Boot: `False`.
+
+| Field ID | Field | Privacy | Type | Maximum encoded size | Transformation |
+|---:|---|---|---|---:|---|
+| 1 | level | C0 | enum | 5 | none |
+| 2 | category | C0 | enum | 5 | none |
+| 3 | template_fingerprint | C1 | u64 | 10 | none |
+| 4 | rendered_message | C2 | bounded_utf8 | 1026 | parameter_redaction |
+| 5 | privacy_flags | C0 | u32 | 5 | none |
+| 6 | monotonic_time_ns | C1 | u64 | 10 | none |
+| 7 | duration_ns | C0 | u64 | 10 | none |
+| 8 | outcome | C0 | enum | 5 | none |
+
+## ExceptionRecord (`10`)
+
+Category: `managed_exception`; retention: `structural_summary`; package: `standard`; Direct Boot: `False`.
+
+| Field ID | Field | Privacy | Type | Maximum encoded size | Transformation |
+|---:|---|---|---|---:|---|
+| 1 | kind | C0 | enum | 5 | none |
+| 2 | exception_type | C1 | bounded_utf8 | 258 | none |
+| 3 | frame_count | C0 | u16 | 3 | none |
+| 4 | stack_fingerprint | C1 | u64 | 10 | none |
+| 5 | stack_trace | C1 | bounded_utf8 | 2050 | none |
+| 6 | monotonic_time_ns | C1 | u64 | 10 | none |
+
+## AnrTrace (`11`)
+
+Category: `anr_trace`; retention: `structural_summary`; package: `standard`; Direct Boot: `False`.
+
+| Field ID | Field | Privacy | Type | Maximum encoded size | Transformation |
+|---:|---|---|---|---:|---|
+| 1 | elapsed_millis | C0 | u32 | 5 | none |
+| 2 | frame_count | C0 | u16 | 3 | none |
+| 3 | stack_fingerprint | C1 | u64 | 10 | none |
+| 4 | stack_trace | C1 | bounded_utf8 | 2050 | none |
+

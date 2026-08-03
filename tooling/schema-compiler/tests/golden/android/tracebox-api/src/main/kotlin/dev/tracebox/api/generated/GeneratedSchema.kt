@@ -13,10 +13,13 @@ enum class GeneratedEventId(val stableId: Int) {
     RUSTPANIC(6),
     ANRCANDIDATE(7),
     OSEXIT(8),
+    LOGRECORD(9),
+    EXCEPTIONRECORD(10),
+    ANRTRACE(11),
 }
 
 object GeneratedSchemaFingerprint {
-    const val HEX: String = "1ed8573b32578a1165aaa1a3d0b4f139549b5041bdba9aaa4329feb1c8c371e3"
+    const val HEX: String = "e072b184637ce302f68f555e818d94e497ccbd0acba7cc1ef131531b8f4c8f10"
 
     fun bytes(): ByteArray = ByteArray(HEX.length / 2) { index ->
         HEX.substring(index * 2, index * 2 + 2).toInt(16).toByte()
@@ -110,6 +113,42 @@ class GeneratedOsExit(
     override val eventId = GeneratedEventId.OSEXIT
 }
 
+/** Schema event 9; fields are privacy-classified in the schema. */
+class GeneratedLogRecord(
+    val level: UInt,
+    val category: UInt,
+    val template_fingerprint: ULong,
+    val rendered_message: String,
+    val privacy_flags: UInt,
+    val monotonic_time_ns: ULong,
+    val duration_ns: ULong,
+    val outcome: UInt,
+) : GeneratedRecord {
+    override val eventId = GeneratedEventId.LOGRECORD
+}
+
+/** Schema event 10; fields are privacy-classified in the schema. */
+class GeneratedExceptionRecord(
+    val kind: UInt,
+    val exception_type: String,
+    val frame_count: UShort,
+    val stack_fingerprint: ULong,
+    val stack_trace: String,
+    val monotonic_time_ns: ULong,
+) : GeneratedRecord {
+    override val eventId = GeneratedEventId.EXCEPTIONRECORD
+}
+
+/** Schema event 11; fields are privacy-classified in the schema. */
+class GeneratedAnrTrace(
+    val elapsed_millis: UInt,
+    val frame_count: UShort,
+    val stack_fingerprint: ULong,
+    val stack_trace: String,
+) : GeneratedRecord {
+    override val eventId = GeneratedEventId.ANRTRACE
+}
+
 object GeneratedDiagnostics {
     fun structuralSummary(diagnostics: Diagnostics, stream_count: UInt, thread_count: UInt, module_count: UInt, exception_code: UInt, processor_architecture: UShort, context: DiagnosticContext? = null) {
         if (diagnostics.eventEnabled(GeneratedEventId.STRUCTURALSUMMARY)) {
@@ -151,6 +190,21 @@ object GeneratedDiagnostics {
             diagnostics.record(GeneratedOsExit(reason, status, importance, link_confidence, artifact_state), context)
         }
     }
+    fun logRecord(diagnostics: Diagnostics, level: UInt, category: UInt, template_fingerprint: ULong, rendered_message: String, privacy_flags: UInt, monotonic_time_ns: ULong, duration_ns: ULong, outcome: UInt, context: DiagnosticContext? = null) {
+        if (diagnostics.eventEnabled(GeneratedEventId.LOGRECORD)) {
+            diagnostics.record(GeneratedLogRecord(level, category, template_fingerprint, rendered_message, privacy_flags, monotonic_time_ns, duration_ns, outcome), context)
+        }
+    }
+    fun exceptionRecord(diagnostics: Diagnostics, kind: UInt, exception_type: String, frame_count: UShort, stack_fingerprint: ULong, stack_trace: String, monotonic_time_ns: ULong, context: DiagnosticContext? = null) {
+        if (diagnostics.eventEnabled(GeneratedEventId.EXCEPTIONRECORD)) {
+            diagnostics.record(GeneratedExceptionRecord(kind, exception_type, frame_count, stack_fingerprint, stack_trace, monotonic_time_ns), context)
+        }
+    }
+    fun anrTrace(diagnostics: Diagnostics, elapsed_millis: UInt, frame_count: UShort, stack_fingerprint: ULong, stack_trace: String, context: DiagnosticContext? = null) {
+        if (diagnostics.eventEnabled(GeneratedEventId.ANRTRACE)) {
+            diagnostics.record(GeneratedAnrTrace(elapsed_millis, frame_count, stack_fingerprint, stack_trace), context)
+        }
+    }
 }
 
 /** Generated export metadata; snapshot transformation must use this schema contract. */
@@ -164,6 +218,9 @@ object GeneratedExportMetadata {
         GeneratedEventId.RUSTPANIC -> listOf("none", "none", "none", "none")
         GeneratedEventId.ANRCANDIDATE -> listOf("none", "none", "none", "none", "none")
         GeneratedEventId.OSEXIT -> listOf("none", "none", "none", "none", "none")
+        GeneratedEventId.LOGRECORD -> listOf("none", "none", "none", "parameter_redaction", "none", "none", "none", "none")
+        GeneratedEventId.EXCEPTIONRECORD -> listOf("none", "none", "none", "none", "none", "none")
+        GeneratedEventId.ANRTRACE -> listOf("none", "none", "none", "none")
     }
 
     fun standardVisible(eventId: GeneratedEventId): Boolean = when (eventId) {
@@ -175,5 +232,8 @@ object GeneratedExportMetadata {
         GeneratedEventId.RUSTPANIC -> true
         GeneratedEventId.ANRCANDIDATE -> true
         GeneratedEventId.OSEXIT -> true
+        GeneratedEventId.LOGRECORD -> true
+        GeneratedEventId.EXCEPTIONRECORD -> true
+        GeneratedEventId.ANRTRACE -> true
     }
 }

@@ -18,11 +18,14 @@ dependencies {
     implementation(project(":android:tracebox-storage"))
     implementation(project(":android:tracebox-directboot"))
     implementation(project(":android:tracebox-anr-exit"))
-    implementation(project(":android:tracebox-native"))
+    // Native capture is an explicit host dependency. The managed artifact compiles against its
+    // bridge but does not publish or package native binaries for applications that do not opt in.
+    compileOnly(project(":android:tracebox-native"))
     implementation(project(":android:tracebox-export"))
     implementation(project(":android:tracebox-export-ui"))
     api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation(kotlin("test-junit"))
+    testImplementation(project(":android:tracebox-native"))
 }
 
 extra["traceboxPublicationName"] = "Tracebox Android"

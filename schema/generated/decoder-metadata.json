@@ -351,8 +351,182 @@
       "name": "OsExit",
       "package_visibility": "standard",
       "retention": "structural_summary"
+    },
+    {
+      "category": "log",
+      "direct_boot_eligible": false,
+      "fields": [
+        {
+          "id": 1,
+          "max_encoded_size": 5,
+          "name": "level",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        },
+        {
+          "id": 2,
+          "max_encoded_size": 5,
+          "name": "category",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        },
+        {
+          "id": 3,
+          "max_encoded_size": 10,
+          "name": "template_fingerprint",
+          "privacy": "C1",
+          "semantic_type": "u64",
+          "transform": "none"
+        },
+        {
+          "id": 4,
+          "max_encoded_size": 1026,
+          "name": "rendered_message",
+          "privacy": "C2",
+          "semantic_type": "bounded_utf8",
+          "transform": "parameter_redaction"
+        },
+        {
+          "id": 5,
+          "max_encoded_size": 5,
+          "name": "privacy_flags",
+          "privacy": "C0",
+          "semantic_type": "u32",
+          "transform": "none"
+        },
+        {
+          "id": 6,
+          "max_encoded_size": 10,
+          "name": "monotonic_time_ns",
+          "privacy": "C1",
+          "semantic_type": "u64",
+          "transform": "none"
+        },
+        {
+          "id": 7,
+          "max_encoded_size": 10,
+          "name": "duration_ns",
+          "privacy": "C0",
+          "semantic_type": "u64",
+          "transform": "none"
+        },
+        {
+          "id": 8,
+          "max_encoded_size": 5,
+          "name": "outcome",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        }
+      ],
+      "id": 9,
+      "name": "LogRecord",
+      "package_visibility": "standard",
+      "retention": "ordinary"
+    },
+    {
+      "category": "managed_exception",
+      "direct_boot_eligible": false,
+      "fields": [
+        {
+          "id": 1,
+          "max_encoded_size": 5,
+          "name": "kind",
+          "privacy": "C0",
+          "semantic_type": "enum",
+          "transform": "none"
+        },
+        {
+          "id": 2,
+          "max_encoded_size": 258,
+          "name": "exception_type",
+          "privacy": "C1",
+          "semantic_type": "bounded_utf8",
+          "transform": "none"
+        },
+        {
+          "id": 3,
+          "max_encoded_size": 3,
+          "name": "frame_count",
+          "privacy": "C0",
+          "semantic_type": "u16",
+          "transform": "none"
+        },
+        {
+          "id": 4,
+          "max_encoded_size": 10,
+          "name": "stack_fingerprint",
+          "privacy": "C1",
+          "semantic_type": "u64",
+          "transform": "none"
+        },
+        {
+          "id": 5,
+          "max_encoded_size": 2050,
+          "name": "stack_trace",
+          "privacy": "C1",
+          "semantic_type": "bounded_utf8",
+          "transform": "none"
+        },
+        {
+          "id": 6,
+          "max_encoded_size": 10,
+          "name": "monotonic_time_ns",
+          "privacy": "C1",
+          "semantic_type": "u64",
+          "transform": "none"
+        }
+      ],
+      "id": 10,
+      "name": "ExceptionRecord",
+      "package_visibility": "standard",
+      "retention": "structural_summary"
+    },
+    {
+      "category": "anr_trace",
+      "direct_boot_eligible": false,
+      "fields": [
+        {
+          "id": 1,
+          "max_encoded_size": 5,
+          "name": "elapsed_millis",
+          "privacy": "C0",
+          "semantic_type": "u32",
+          "transform": "none"
+        },
+        {
+          "id": 2,
+          "max_encoded_size": 3,
+          "name": "frame_count",
+          "privacy": "C0",
+          "semantic_type": "u16",
+          "transform": "none"
+        },
+        {
+          "id": 3,
+          "max_encoded_size": 10,
+          "name": "stack_fingerprint",
+          "privacy": "C1",
+          "semantic_type": "u64",
+          "transform": "none"
+        },
+        {
+          "id": 4,
+          "max_encoded_size": 2050,
+          "name": "stack_trace",
+          "privacy": "C1",
+          "semantic_type": "bounded_utf8",
+          "transform": "none"
+        }
+      ],
+      "id": 11,
+      "name": "AnrTrace",
+      "package_visibility": "standard",
+      "retention": "structural_summary"
     }
   ],
-  "fingerprint": "1ed8573b32578a1165aaa1a3d0b4f139549b5041bdba9aaa4329feb1c8c371e3",
+  "fingerprint": "e072b184637ce302f68f555e818d94e497ccbd0acba7cc1ef131531b8f4c8f10",
   "schema_version": 1
 }

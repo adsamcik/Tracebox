@@ -17,6 +17,8 @@ import dev.tracebox.api.generated.GeneratedEventId
 import dev.tracebox.api.generated.GeneratedHandledError
 import dev.tracebox.api.generated.GeneratedRecord
 import dev.tracebox.api.generated.GeneratedStructuralSummary
+import dev.tracebox.api.generated.GeneratedLogRecord
+import dev.tracebox.api.generated.GeneratedExceptionRecord
 import dev.tracebox.core.GateAcceptance
 import dev.tracebox.core.GateResult
 import dev.tracebox.core.JvmCapturePolicy
@@ -1225,7 +1227,7 @@ class SummarySpoolDeletionParticipant(
                 value: GeneratedRecord,
                 payload: ByteArray,
             ): GeneratedRecordAppendResult {
-                val descriptor = descriptor(value.eventId)
+                val descriptor = descriptor(value)
                 latest = when (val accepted = policyGate.accept(descriptor.category, descriptor.priority, payload)) {
                     is GateAcceptance.Rejected -> GeneratedRecordAppendResult.Dropped(accepted.reason)
                     is GateAcceptance.Accepted -> when (
@@ -1245,6 +1247,18 @@ class SummarySpoolDeletionParticipant(
 
             fun latestResult(): GeneratedRecordAppendResult = latest
 
+            private fun descriptor(value: GeneratedRecord): Descriptor = when (value) {
+                is GeneratedLogRecord -> Descriptor(
+                    256L,
+                    if (value.level >= 3u) RecordPriority.HANDLED_ERROR else RecordPriority.BREADCRUMB,
+                )
+                is GeneratedExceptionRecord -> Descriptor(
+                    512L,
+                    if (value.kind == 1u) RecordPriority.CRASH_ANR else RecordPriority.HANDLED_ERROR,
+                )
+                else -> descriptor(value.eventId)
+            }
+
             private fun descriptor(eventId: GeneratedEventId): Descriptor = when (eventId) {
                 GeneratedEventId.STRUCTURALSUMMARY -> Descriptor(1L, RecordPriority.CRASH_ANR)
                 GeneratedEventId.EMERGENCYRECORD -> Descriptor(2L, RecordPriority.CRASH_ANR)
@@ -1254,6 +1268,9 @@ class SummarySpoolDeletionParticipant(
                 GeneratedEventId.RUSTPANIC -> Descriptor(32L, RecordPriority.CRASH_ANR)
                 GeneratedEventId.ANRCANDIDATE -> Descriptor(64L, RecordPriority.CRASH_ANR)
                 GeneratedEventId.OSEXIT -> Descriptor(128L, RecordPriority.CRASH_ANR)
+                GeneratedEventId.LOGRECORD -> Descriptor(256L, RecordPriority.BREADCRUMB)
+                GeneratedEventId.EXCEPTIONRECORD -> Descriptor(512L, RecordPriority.HANDLED_ERROR)
+                GeneratedEventId.ANRTRACE -> Descriptor(1024L, RecordPriority.CRASH_ANR)
             }
 
             private fun encode(value: GeneratedRecord): ByteArray = GeneratedRecordCodec.encode(value)

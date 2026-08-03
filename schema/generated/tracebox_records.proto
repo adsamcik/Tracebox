@@ -51,3 +51,27 @@ message OsExit {
   uint32 link_confidence = 4; // max encoded size 5; privacy C0
   uint32 artifact_state = 5; // max encoded size 5; privacy C0
 }
+message LogRecord {
+  uint32 level = 1; // max encoded size 5; privacy C0
+  uint32 category = 2; // max encoded size 5; privacy C0
+  uint64 template_fingerprint = 3; // max encoded size 10; privacy C1
+  string rendered_message = 4; // max encoded size 1026; privacy C2
+  uint32 privacy_flags = 5; // max encoded size 5; privacy C0
+  uint64 monotonic_time_ns = 6; // max encoded size 10; privacy C1
+  uint64 duration_ns = 7; // max encoded size 10; privacy C0
+  uint32 outcome = 8; // max encoded size 5; privacy C0
+}
+message ExceptionRecord {
+  uint32 kind = 1; // max encoded size 5; privacy C0
+  string exception_type = 2; // max encoded size 258; privacy C1
+  uint32 frame_count = 3; // max encoded size 3; privacy C0
+  uint64 stack_fingerprint = 4; // max encoded size 10; privacy C1
+  string stack_trace = 5; // max encoded size 2050; privacy C1
+  uint64 monotonic_time_ns = 6; // max encoded size 10; privacy C1
+}
+message AnrTrace {
+  uint32 elapsed_millis = 1; // max encoded size 5; privacy C0
+  uint32 frame_count = 2; // max encoded size 3; privacy C0
+  uint64 stack_fingerprint = 3; // max encoded size 10; privacy C1
+  string stack_trace = 4; // max encoded size 2050; privacy C1
+}

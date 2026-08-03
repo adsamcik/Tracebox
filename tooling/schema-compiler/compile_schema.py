@@ -49,10 +49,10 @@ def _direct_boot_projection(schema) -> tuple[dict, str]:
 
 
 def render(schema, fingerprint: str) -> dict[str, str]:
-    kotlin_types = {"u16": "UShort", "u32": "UInt", "u64": "ULong", "i32": "Int", "enum": "UInt", "fixed32": "UInt"}
-    c_types = {"u16": "uint16_t", "u32": "uint32_t", "u64": "uint64_t", "i32": "int32_t", "enum": "uint32_t", "fixed32": "uint32_t"}
-    rust_types = {"u16": "u16", "u32": "u32", "u64": "u64", "i32": "i32", "enum": "u32", "fixed32": "u32"}
-    protobuf_types = {"u16": "uint32", "u32": "uint32", "u64": "uint64", "i32": "int32", "enum": "uint32", "fixed32": "fixed32"}
+    kotlin_types = {"u16": "UShort", "u32": "UInt", "u64": "ULong", "i32": "Int", "enum": "UInt", "fixed32": "UInt", "bounded_utf8": "String"}
+    c_types = {"u16": "uint16_t", "u32": "uint32_t", "u64": "uint64_t", "i32": "int32_t", "enum": "uint32_t", "fixed32": "uint32_t", "bounded_utf8": "tb_utf8_view_v1"}
+    rust_types = {"u16": "u16", "u32": "u32", "u64": "u64", "i32": "i32", "enum": "u32", "fixed32": "u32", "bounded_utf8": "crate::Utf8ViewV1"}
+    protobuf_types = {"u16": "uint32", "u32": "uint32", "u64": "uint64", "i32": "int32", "enum": "uint32", "fixed32": "fixed32", "bounded_utf8": "string"}
     metadata = {
         "schema_version": schema.version,
         "fingerprint": fingerprint,
@@ -264,6 +264,16 @@ typedef enum {
   if (recorder_ready == 0u) {{
     return TB_STATUS_NOT_READY;
   }}
+"""
+        for field in event.fields:
+            if field.semantic_type == "bounded_utf8":
+                maximum = field.max_encoded_size - 2
+                c_source += f"""  if (value->{field.name}.length > {maximum}u ||
+      (value->{field.name}.length != 0u && value->{field.name}.data == NULL)) {{
+    return TB_STATUS_INVALID_ARGUMENT;
+  }}
+"""
+        c_source += f"""
   return TB_STATUS_OK;
 }}
 

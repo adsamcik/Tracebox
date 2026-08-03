@@ -20,7 +20,8 @@ failure actionable:
   reconciliation;
 - bounded storage, quota enforcement, crash-safe deletion, and deletion of
   handler/raw/tombstone data;
-- payload-free structural diagnostics with no networking or uploader;
+- bounded privacy-aware parameterized logs and structural diagnostics with no
+  networking or uploader;
 - deterministic disclosure, package, save/share, and receipt workflows;
 - build identity and host symbolication; and
 - the Android 16 private-storage path fix: a platform-owned alias above the
@@ -90,12 +91,15 @@ Tracker integrates Tracebox unconditionally, with no product flavor or trial:
 - Tracebox is the sole crash and diagnostic backend;
 - legacy crash/log Room data is read/exported/deleted only during migration and
   receives no new writes;
-- verbose, debug, info, and generic free-form compatibility logs are discarded;
-- warnings, errors, assertions, and a small set of explicit domain codes are
-  recorded once without payloads or count amplification;
+- verbose, debug, info, warn, and error calls use Tracebox directly and remain
+  runtime-gated; useful state boundaries are retained without restoring
+  historical log volume;
+- template parameters are privacy-classified before rendering or storage, and
+  throwable paths retain structural stack identity without messages;
+- performance boundaries use the same independently switchable logger API;
 - the handler process does not initialize Tracker/Hilt application work; and
-- diagnostics disclosure, package, save/share, disable, and deletion remain
-  available in Tracker settings.
+- the reusable Tracebox Compose screen provides runtime controls, diagnostics
+  disclosure, package save/share, and deletion in Tracker settings.
 
 The Tracker emulator smoke is intentionally small: launch to ready, confirm the
 dedicated handler, record one structural diagnostic, disable and re-enable,

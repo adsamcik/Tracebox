@@ -1,5 +1,9 @@
 # ADR-0010: Personal-Project Release Scope and Tracker Integration
 
+The fixed-catalog logging portion of this ADR is superseded by ADR-0011. The
+personal-project validation scope and hard replacement of legacy writers remain
+in force.
+
 ## Status
 
 Accepted by explicit user decision on 2026-07-29.
@@ -135,15 +139,16 @@ The Tracker integration must:
 - remain compatible with Tracker's API-26 baseline;
 - consume the immutable Tracebox candidate from Tracker's normal application
   variant, with no diagnostics flavor or rollback flavor;
-- use generated structural event types rather than Tracker's free-form logs;
+- use ADR-0011 parameterized Tracebox logging with privacy-classified runtime
+  values rather than Tracker's legacy free-form writers;
 - start with `STANDARD_DIAGNOSTICS` on first install, persist explicit user
   profile choices (including `DISABLED`), and keep package export
   user-initiated;
 - make Tracebox the sole active owner of JVM/native/Rust crash capture and stop
   installing or writing through Tracker's legacy crash handler;
-- replace Tracker's active logging writers with a fixed, bounded
-  Tracker-to-Tracebox event mapping; arbitrary log strings, exception messages,
-  and throwable payloads are not forwarded;
+- replace Tracker's active logging writers with bounded ADR-0011 templates and
+  privacy-classified parameters; exception messages and arbitrary throwable
+  payloads are not forwarded;
 - avoid duplicate ownership of `ApplicationExitInfo` reconciliation;
 - connect Tracker's collected-data deletion and diagnostics settings to
   Tracebox deletion and package workflows; and

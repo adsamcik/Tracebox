@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from typing import Any
 
 PRIVACY = frozenset(("C0", "C1", "C2"))
-SEMANTIC_TYPES = frozenset(("u16", "u32", "u64", "i32", "enum", "fixed32"))
+SEMANTIC_TYPES = frozenset(
+    ("u16", "u32", "u64", "i32", "enum", "fixed32", "bounded_utf8")
+)
 
 
 class SchemaError(ValueError):

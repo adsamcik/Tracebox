@@ -52,8 +52,18 @@ import dev.tracebox.api.SavePackageResult
 import dev.tracebox.api.SharePackageResult
 import dev.tracebox.api.TraceboxHandle
 import dev.tracebox.api.TraceboxHealth
+import dev.tracebox.api.CaptureKind
+import dev.tracebox.api.CrashReporter
+import dev.tracebox.api.DiagnosticSummary
+import dev.tracebox.api.LogLevel
+import dev.tracebox.api.PrivacyConfiguration
+import dev.tracebox.api.PerformanceMeasurement
+import dev.tracebox.api.TraceboxLogger
+import dev.tracebox.api.TraceboxPolicy
 import dev.tracebox.api.generated.GeneratedDiagnostics
 import dev.tracebox.api.generated.GeneratedEventId
+import dev.tracebox.api.generated.GeneratedExceptionRecord
+import dev.tracebox.api.generated.GeneratedAnrTrace
 import dev.tracebox.api.generated.GeneratedManagedCrash
 import dev.tracebox.api.generated.GeneratedOsExit
 import dev.tracebox.api.generated.GeneratedRecord
@@ -141,6 +151,7 @@ import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.ArrayDeque
 import java.util.Base64
 import java.util.UUID
@@ -152,6 +163,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.zip.CRC32
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -167,6 +179,9 @@ class TraceboxConfiguration private constructor(
      */
     val processRole: Int,
     val initialProfile: DiagnosticsProfile,
+    val initialPolicy: TraceboxPolicy,
+    val privacyConfiguration: PrivacyConfiguration,
+    val nativeCaptureEnabled: Boolean,
     val persistRequestedProfile: Boolean,
     /**
      * Enables the explicit C0-only device-protected emergency store.
@@ -196,6 +211,9 @@ class TraceboxConfiguration private constructor(
     class Builder {
         private var processRole = DEFAULT_PROCESS_ROLE
         private var initialProfile = DiagnosticsProfile.DISABLED
+        private var initialPolicy = TraceboxPolicy.disabled()
+        private var privacyConfiguration = PrivacyConfiguration.defaults()
+        private var nativeCaptureEnabled = false
         private var persistRequestedProfile = false
         private var directBootC0Enabled = false
         private var generatedSchemaFingerprint = schemaFingerprint()
@@ -208,6 +226,21 @@ class TraceboxConfiguration private constructor(
 
         fun setInitialProfile(value: DiagnosticsProfile) = apply {
             initialProfile = value
+            initialPolicy = legacyPolicy(value)
+        }
+
+        fun setInitialPolicy(value: TraceboxPolicy) = apply {
+            initialPolicy = value
+            initialProfile = profileFor(value)
+        }
+
+        fun privacy(configure: PrivacyConfiguration.Builder.() -> Unit) = apply {
+            privacyConfiguration = PrivacyConfiguration.Builder().apply(configure).build()
+        }
+
+        /** Enables capture supplied by the separately declared tracebox-native artifact. */
+        fun setNativeCaptureEnabled(value: Boolean) = apply {
+            nativeCaptureEnabled = value
         }
 
         /**
@@ -226,6 +259,9 @@ class TraceboxConfiguration private constructor(
         fun build(): TraceboxConfiguration = TraceboxConfiguration(
             processRole,
             initialProfile,
+            initialPolicy,
+            privacyConfiguration,
+            nativeCaptureEnabled,
             persistRequestedProfile,
             directBootC0Enabled,
             generatedSchemaFingerprint.copyOf(),
@@ -235,6 +271,8 @@ class TraceboxConfiguration private constructor(
     internal fun equivalentTo(other: TraceboxConfiguration): Boolean =
         processRole == other.processRole &&
             initialProfile == other.initialProfile &&
+            initialPolicy == other.initialPolicy &&
+            nativeCaptureEnabled == other.nativeCaptureEnabled &&
             persistRequestedProfile == other.persistRequestedProfile &&
             directBootC0Enabled == other.directBootC0Enabled &&
             generatedSchemaFingerprintBytes.contentEquals(other.generatedSchemaFingerprintBytes)
@@ -251,6 +289,17 @@ class TraceboxConfiguration private constructor(
 object Tracebox {
     private val installLock = Any()
     private var installed: DefaultTraceboxHandle? = null
+
+    /** Returns the process installation for optional Tracebox-owned UI integrations. */
+    fun current(): TraceboxHandle? = synchronized(installLock) { installed }
+
+    /** Process logger; calls are safe no-ops until installation completes in this process. */
+    val log: TraceboxLogger
+        get() = current()?.log ?: UninstalledTraceboxLogger
+
+    /** Process crash reporter; calls are safe no-ops until installation completes. */
+    val crashes: CrashReporter
+        get() = current()?.crashes ?: UninstalledCrashReporter
 
     fun install(
         context: Context,
@@ -278,6 +327,25 @@ object Tracebox {
     internal fun onClosed(handle: DefaultTraceboxHandle) = synchronized(installLock) {
         if (installed === handle) installed = null
     }
+}
+
+private object UninstalledTraceboxLogger : TraceboxLogger {
+    override fun isEnabled(level: LogLevel, category: dev.tracebox.api.LogCategory): Boolean = false
+    override fun log(level: LogLevel, template: String, vararg arguments: Any?) = Unit
+    override fun error(throwable: Throwable, template: String, vararg arguments: Any?) = Unit
+    override fun performanceStart(template: String, vararg arguments: Any?): PerformanceMeasurement =
+        UninstalledPerformanceMeasurement
+}
+
+private object UninstalledPerformanceMeasurement : PerformanceMeasurement {
+    override fun success() = Unit
+    override fun failure() = Unit
+    override fun cancelled() = Unit
+}
+
+private object UninstalledCrashReporter : CrashReporter {
+    override fun record(throwable: Throwable) = Unit
+    override fun record(throwable: Throwable, template: String, vararg arguments: Any?) = Unit
 }
 
 private data class NativeHandlerServiceBinding(
@@ -353,6 +421,7 @@ internal class DefaultTraceboxHandle(
     private val directBootRoot = directBootStorageRoot(applicationContext)
     private val coordinatesGlobalStorage = isPrimaryApplicationProcess(applicationContext)
     private val profileStore = ProfileStore(root.resolve("requested-profile-v1"))
+    private val runtimePolicyStore = RuntimePolicyStore(root.resolve("requested-policy-v2"))
     private val policyTransitionJournal =
         PolicyTransitionJournal(root.resolve(POLICY_TRANSITION_FILE))
     private var coordinatorLease: PrimaryCoordinatorLease? = null
@@ -376,6 +445,8 @@ internal class DefaultTraceboxHandle(
     )
     private val mutableReadiness = MutableStateFlow(Readiness.VOLATILE_CAPTURE)
     private val mutableHealth = MutableStateFlow(TraceboxHealth.INITIALIZING)
+    private val mutablePolicy = MutableStateFlow(TraceboxPolicy.disabled())
+    private val mutableSummary = MutableStateFlow(DiagnosticSummary())
     private val closed = AtomicBoolean(false)
     private val profileLock = Any()
     private val packageCapabilityFence = RuntimePackageCapabilityFence()
@@ -393,15 +464,35 @@ internal class DefaultTraceboxHandle(
     )
     private val volatileManagedCrashes =
         BoundedManagedCrashBuffer<GeneratedManagedCrash>(VOLATILE_CRASH_CAPACITY)
+    private val volatileExceptionCrashes =
+        BoundedManagedCrashBuffer<GeneratedExceptionRecord>(VOLATILE_CRASH_CAPACITY)
     private val previousJvmHandler = Thread.getDefaultUncaughtExceptionHandler()
     private val installedJvmHandler = dev.tracebox.core.TraceboxUncaughtExceptionHandler(
         previousJvmHandler,
         dev.tracebox.core.JvmCapturePolicy(),
         ::captureManagedCrash,
     )
+    private val crashSurface: RuntimeCrashReporter by lazy {
+        RuntimeCrashReporter(
+            policy = mutablePolicy,
+            record = ::recordGeneratedException,
+            recordContext = { template, arguments -> loggerSurface.recordContext(template, arguments) },
+        )
+    }
+    private val loggerSurface: RuntimeTraceboxLogger by lazy {
+        RuntimeTraceboxLogger(
+            policy = mutablePolicy,
+            privacy = configuration.privacyConfiguration,
+            record = ::recordGenerated,
+            reportCrash = crashSurface::record,
+        )
+    }
 
     @Volatile
     private var activeProfile = DiagnosticsProfile.DISABLED
+
+    @Volatile
+    private var activeRuntimePolicy = TraceboxPolicy.disabled()
 
     @Volatile
     private var controlPage: ControlPage? = null
@@ -471,17 +562,16 @@ internal class DefaultTraceboxHandle(
 
     override val readiness: StateFlow<Readiness> = mutableReadiness.asStateFlow()
     override val health: StateFlow<TraceboxHealth> = mutableHealth.asStateFlow()
+    override val policy: StateFlow<TraceboxPolicy> = mutablePolicy.asStateFlow()
+    override val summary: StateFlow<DiagnosticSummary> = mutableSummary.asStateFlow()
+    override val log: TraceboxLogger get() = loggerSurface
+    override val crashes: CrashReporter get() = crashSurface
 
     override val diagnostics: Diagnostics = object : Diagnostics {
         override fun eventEnabled(eventId: GeneratedEventId): Boolean = accepts(eventId)
 
         override fun record(value: GeneratedRecord, context: DiagnosticContext?) {
-            if (!accepts(value.eventId)) return
-            enqueue {
-                if (accepts(value.eventId)) {
-                    generatedAdapter?.record(value, context)
-                }
-            }
+            recordGenerated(value, context)
         }
     }
 
@@ -493,14 +583,18 @@ internal class DefaultTraceboxHandle(
         enqueue(::initialize)
     }
 
-    override fun updateProfile(profile: DiagnosticsProfile): PolicyUpdateResult {
+    override fun updateProfile(profile: DiagnosticsProfile): PolicyUpdateResult =
+        updatePolicy(legacyPolicy(profile))
+
+    override fun updatePolicy(policy: TraceboxPolicy): PolicyUpdateResult {
         invalidateRuntimePackageCapabilities()
         if (!coordinatesGlobalStorage || isMainThread() || closed.get()) {
             return PolicyUpdateResult.FAILED
         }
         return call {
             synchronized(profileLock) {
-                val result = applyProfile(profile)
+                val profile = profileFor(policy)
+                val result = applyProfile(profile, runtimePolicy = policy)
                 if (shouldClearPolicyRepairMarker(profile, result) &&
                     !clearPolicyRepairRequired()
                 ) {
@@ -634,7 +728,7 @@ internal class DefaultTraceboxHandle(
                 null
             }
 
-            if (ownership != null &&
+            if (configuration.nativeCaptureEnabled && ownership != null &&
                 !coordinator.withStorageMutation { stopNativeHandler() }
             ) {
                 markDegraded()
@@ -824,9 +918,13 @@ internal class DefaultTraceboxHandle(
                 rawStore.expire(System.currentTimeMillis(), RAW_ARTIFACT_TTL_MILLIS)
                 rawStore.deleteUnverifiableOrphans()
             }
-            val persistedProfile =
-                if (configuration.persistRequestedProfile) profileStore.read() else null
-            val requested = resolveRequestedProfile(configuration, persistedProfile)
+            val persistedPolicy = if (configuration.persistRequestedProfile) {
+                runtimePolicyStore.read() ?: profileStore.read()?.let(::legacyPolicy)
+            } else {
+                null
+            }
+            val requestedPolicy = resolveRequestedPolicy(configuration, persistedPolicy)
+            val requested = profileFor(requestedPolicy)
             if (!coordinatesGlobalStorage) {
                 initializeSecondaryProcess()
                 return
@@ -838,11 +936,12 @@ internal class DefaultTraceboxHandle(
             if (policyRepairRequired()) {
                 check(policyGate?.reload() == GateResult.Reloaded)
                 volatileManagedCrashes.resolve(enabled = false, sinkReady = false)
+                volatileExceptionCrashes.resolve(enabled = false, sinkReady = false)
                 mutableHealth.value = TraceboxHealth.DEGRADED
                 mutableReadiness.value = Readiness.DURABLE
                 return
             }
-            applyProfile(requested, current.epoch)
+            applyProfile(requested, current.epoch, requestedPolicy)
         } catch (_: IOException) {
             markDegraded()
             if (!coordinatesGlobalStorage) startSecondaryPolicyObserver()
@@ -872,6 +971,8 @@ internal class DefaultTraceboxHandle(
             return
         }
         secondaryPolicySnapshot = snapshot
+        activeRuntimePolicy = runtimePolicyForSnapshot(snapshot)
+        mutablePolicy.value = activeRuntimePolicy
         activeProfile = profile
         if (snapshot.disabled) {
             quiesceNativeClient()
@@ -967,6 +1068,8 @@ internal class DefaultTraceboxHandle(
             return
         }
         activeProfile = profile
+        activeRuntimePolicy = runtimePolicyForSnapshot(confirmed)
+        mutablePolicy.value = activeRuntimePolicy
         secondaryPolicySnapshot = confirmed
         if (confirmed.disabled) {
             quiesceManagedWriters()
@@ -985,6 +1088,7 @@ internal class DefaultTraceboxHandle(
         // The stable, reloaded policy already permits managed crashes. Keep new hook records
         // memory-only until rotateWriter installs the corresponding gated sink.
         volatileManagedCrashes.resolve(enabled = true, sinkReady = false)
+        volatileExceptionCrashes.resolve(enabled = true, sinkReady = false)
         // Preserve records captured before the secondary process learned its durable policy, and
         // records caught during this bounded writer rotation. The new gated writer resolves them.
         quiesceManagedWriters(preserveVolatileManagedCrashes = true)
@@ -993,10 +1097,11 @@ internal class DefaultTraceboxHandle(
             // A previous process may have left a completed emergency/Rust slot. Opening native
             // capture resets those fixed slots, so create the gated writer and ingest them first.
             rotateWriter(snapshot)
-            drainRustPanicRing()
+            if (configuration.nativeCaptureEnabled) drainRustPanicRing()
             if (stableSecondaryPolicySnapshot() != snapshot ||
-                !startSecondaryNativeParticipant(snapshot) ||
-                !nativePolicyParticipantAlive()
+                (configuration.nativeCaptureEnabled &&
+                    (!startSecondaryNativeParticipant(snapshot) ||
+                        !nativePolicyParticipantAlive()))
             ) {
                 quiesceManagedWriters()
                 quiesceNativeClient()
@@ -1072,7 +1177,11 @@ internal class DefaultTraceboxHandle(
         }
     }
 
-    private fun applyProfile(profile: DiagnosticsProfile, observedEpoch: Long? = null): PolicyUpdateResult {
+    private fun applyProfile(
+        profile: DiagnosticsProfile,
+        observedEpoch: Long? = null,
+        runtimePolicy: TraceboxPolicy = legacyPolicy(profile),
+    ): PolicyUpdateResult {
         invalidateRuntimePackageCapabilities()
         primaryNativeReadinessRecovery.clear()
         val page = controlPage ?: return PolicyUpdateResult.FAILED
@@ -1093,7 +1202,7 @@ internal class DefaultTraceboxHandle(
             markDegraded()
             return PolicyUpdateResult.FAILED
         }
-        val requestedAtCurrentEpoch = policyFor(profile, previous.epoch)
+        val requestedAtCurrentEpoch = policyFor(runtimePolicy, previous.epoch)
         val transitionHighWater = policyTransitionJournal.highWaterEpoch() ?: previous.epoch
         val canReuseCommittedPolicy =
             requestedAtCurrentEpoch == previous &&
@@ -1117,7 +1226,7 @@ internal class DefaultTraceboxHandle(
                 markDegraded()
                 return PolicyUpdateResult.FAILED
             }
-            policyFor(profile, nextEpoch)
+            policyFor(runtimePolicy, nextEpoch)
         }
 
         val commitResult = if (canReuseCommittedPolicy) {
@@ -1149,14 +1258,19 @@ internal class DefaultTraceboxHandle(
             localPolicyMatches(page, previous) &&
             policyTransitionJournal.load() is PolicyTransitionLoad.Empty
         ) {
-            activeProfile = profileForPolicy(previous) ?: DiagnosticsProfile.DISABLED
+            activeRuntimePolicy = runtimePolicyForSnapshot(previous)
+            mutablePolicy.value = activeRuntimePolicy
+            activeProfile = profileFor(activeRuntimePolicy)
             if (activeProfile == DiagnosticsProfile.DISABLED) {
                 volatileManagedCrashes.resolve(enabled = false, sinkReady = false)
+                volatileExceptionCrashes.resolve(enabled = false, sinkReady = false)
             }
             markDegraded()
             return PolicyUpdateResult.FAILED
         }
         activeProfile = profile
+        activeRuntimePolicy = runtimePolicy
+        mutablePolicy.value = runtimePolicy
         if (commitResult != PolicyUpdateResult.SUCCESS) {
             failClosedAfterPolicyApplication(next.epoch)
             return commitResult
@@ -1164,7 +1278,7 @@ internal class DefaultTraceboxHandle(
         var auxiliaryPartial = false
         if (configuration.persistRequestedProfile) {
             try {
-                writeRequestedProfile(profile)
+                writeRequestedPolicy(profile, runtimePolicy)
             } catch (_: IOException) {
                 markDegraded()
                 auxiliaryPartial = true
@@ -1198,6 +1312,7 @@ internal class DefaultTraceboxHandle(
         // still take time. Preserve hook records in the bounded memory queue until rotateWriter
         // installs the sink, and discard them if the setup later fails closed.
         volatileManagedCrashes.resolve(enabled = true, sinkReady = false)
+        volatileExceptionCrashes.resolve(enabled = true, sinkReady = false)
         authorizedRepairEnableEpoch =
             if (policyRepairRequired()) next.epoch else null
         return try {
@@ -1205,8 +1320,9 @@ internal class DefaultTraceboxHandle(
             rotateWriter(next)
             ensureNativeAndWatchdog()
             reconcileExitHistory()
-            val ready = nativeReady &&
-                nativeClientMode == NativeRuntime.CLIENT_MODE_CRASHPAD &&
+            val nativeReadyForPolicy = !configuration.nativeCaptureEnabled ||
+                (nativeReady && nativeClientMode == NativeRuntime.CLIENT_MODE_CRASHPAD)
+            val ready = nativeReadyForPolicy &&
                 crashpadRecoveryReady &&
                 directBootRecoveryReady
             val fullyReady = ready && !auxiliaryPartial
@@ -1262,7 +1378,7 @@ internal class DefaultTraceboxHandle(
     ): PolicyUpdateResult {
         ensurePolicyTransitionReservations()
         policyTransitionJournal.begin(previous, next)
-        val coordinateNative =
+        val coordinateNative = configuration.nativeCaptureEnabled &&
             !previous.disabled && activeProfile != DiagnosticsProfile.DISABLED
 
         try {
@@ -1342,6 +1458,8 @@ internal class DefaultTraceboxHandle(
         stopPrimaryNativeObserver()
         publishDisabledExitPolicy(epoch)
         activeProfile = DiagnosticsProfile.DISABLED
+        activeRuntimePolicy = TraceboxPolicy.disabled()
+        mutablePolicy.value = activeRuntimePolicy
         quiesceManagedWriters()
         stopAllNativeParticipants()
         markDegraded()
@@ -1542,6 +1660,7 @@ internal class DefaultTraceboxHandle(
     }
 
     private fun stopAllNativeParticipants(): Boolean {
+        if (!configuration.nativeCaptureEnabled) return true
         val clientStopped = quiesceNativeClient()
         val handlerStopped = !coordinatesGlobalStorage || stopNativeHandler()
         return clientStopped && handlerStopped
@@ -2084,6 +2203,7 @@ internal class DefaultTraceboxHandle(
         generatedAdapter = null
         if (!preserveVolatileManagedCrashes) {
             volatileManagedCrashes.resolve(enabled = false, sinkReady = false)
+            volatileExceptionCrashes.resolve(enabled = false, sinkReady = false)
         }
         return if (currentWriter == null) {
             true
@@ -2100,6 +2220,12 @@ internal class DefaultTraceboxHandle(
     }
 
     private fun quiesceNativeClient(): Boolean {
+        if (!configuration.nativeCaptureEnabled) {
+            nativeReady = false
+            nativeClientMode = NativeRuntime.CLIENT_MODE_REJECTED
+            armedRawArtifactIdentity = null
+            return true
+        }
         val captureWasActive = nativeReady ||
             nativeClientMode != NativeRuntime.CLIENT_MODE_REJECTED ||
             armedRawArtifactIdentity != null
@@ -2118,7 +2244,7 @@ internal class DefaultTraceboxHandle(
     }
 
     private fun nativePolicyParticipantAlive(): Boolean =
-        nativeReady && try {
+        configuration.nativeCaptureEnabled && nativeReady && try {
             NativeRuntime.isPolicyParticipantAlive()
         } catch (_: LinkageError) {
             false
@@ -2127,6 +2253,7 @@ internal class DefaultTraceboxHandle(
         }
 
     private fun stopNativeHandler(): Boolean {
+        if (!configuration.nativeCaptureEnabled) return true
         if (!coordinatesGlobalStorage) return true
         val quota = uidQuota
         return try {
@@ -2269,7 +2396,18 @@ internal class DefaultTraceboxHandle(
         releaseMissingQuotaReservation(HandlerStartPermit.temporaryPath(nativeDirectory))
     }
 
-    private fun writeRequestedProfile(profile: DiagnosticsProfile) {
+    private fun writeRequestedPolicy(profile: DiagnosticsProfile, policy: TraceboxPolicy) {
+        val policyTarget = root.resolve(REQUESTED_POLICY_FILE)
+        val policyTemporary = policyTarget.resolveSibling("${policyTarget.fileName}.new")
+        ensureMetadataReservation(policyTarget, REQUESTED_POLICY_BYTES)
+        ensureMetadataReservation(policyTemporary, REQUESTED_POLICY_BYTES)
+        try {
+            runtimePolicyStore.write(policy)
+        } finally {
+            if (!Files.exists(policyTemporary, LinkOption.NOFOLLOW_LINKS)) {
+                uidQuota?.release(policyTemporary)
+            }
+        }
         val target = root.resolve(REQUESTED_PROFILE_FILE)
         val temporary = target.resolveSibling("${target.fileName}.new")
         ensureMetadataReservation(target, REQUESTED_PROFILE_BYTES)
@@ -2520,11 +2658,13 @@ internal class DefaultTraceboxHandle(
         writer = created
         generatedAdapter = GeneratedRecordSegmentAdapter(created, checkNotNull(policyGate))
         currentProcessIdentity = processIdentity.copyOf()
-        ingestEmergencySlot()
-        ingestRustPanicSlot()
+        if (configuration.nativeCaptureEnabled) {
+            ingestEmergencySlot()
+            ingestRustPanicSlot()
+        }
         directBootRecoveryReady = ingestDirectBootStartup()
         drainVolatileManagedCrashes()
-        crashpadRecoveryReady =
+        crashpadRecoveryReady = !configuration.nativeCaptureEnabled ||
             !coordinatesGlobalStorage || ingestCrashpadStartup(handlerQuiesced = false)
         ApplicationExitInfoAdapter().publishPolicyToken(
             applicationContext,
@@ -2734,9 +2874,11 @@ internal class DefaultTraceboxHandle(
     }
 
     private fun ensureNativeAndWatchdog() {
-        startPrimaryNativeObserver()
-        refreshPrimaryNativeParticipant()
-        if (watchdog == null) {
+        if (configuration.nativeCaptureEnabled) {
+            startPrimaryNativeObserver()
+            refreshPrimaryNativeParticipant()
+        }
+        if (CaptureKind.ANR in activeRuntimePolicy.captures && watchdog == null) {
             watchdog = AnrWatchdog(
                 requester = ::requestPrimaryNonFatal,
                 onCandidate = ::recordAnrCandidate,
@@ -2783,7 +2925,8 @@ internal class DefaultTraceboxHandle(
     }
 
     private fun primaryNativeCaptureAlive(): Boolean =
-        nativeClientMode == NativeRuntime.CLIENT_MODE_CRASHPAD &&
+        configuration.nativeCaptureEnabled &&
+            nativeClientMode == NativeRuntime.CLIENT_MODE_CRASHPAD &&
             nativePolicyParticipantAlive() &&
             try {
                 NativeRuntime.isHandlerAlive()
@@ -2794,6 +2937,7 @@ internal class DefaultTraceboxHandle(
             }
 
     private fun refreshPrimaryNativeParticipant() {
+        if (!configuration.nativeCaptureEnabled) return
         val snapshot = stablePrimaryCaptureSnapshot()
         if (snapshot == null) {
             if (activeProfile != DiagnosticsProfile.DISABLED) {
@@ -3131,6 +3275,7 @@ internal class DefaultTraceboxHandle(
     private fun nativeHandlerDirectory(): Path = root.resolve(NATIVE_HANDLER_DIRECTORY)
 
     private fun requestPrimaryNonFatal(timeoutMillis: Int): Boolean {
+        if (!configuration.nativeCaptureEnabled) return false
         val quota = uidQuota ?: return false
         val requested = try {
             quota.withStorageMutation {
@@ -3156,6 +3301,7 @@ internal class DefaultTraceboxHandle(
     }
 
     private fun drainRustPanicRing() {
+        if (!configuration.nativeCaptureEnabled) return
         val adapter = generatedAdapter ?: return
         repeat(RUST_PANIC_RING_CAPACITY) {
             val value = NativeRuntime.drainRustPanic() ?: return
@@ -3181,6 +3327,27 @@ internal class DefaultTraceboxHandle(
         }
     }
 
+    private fun recordGeneratedException(value: GeneratedExceptionRecord) {
+        val capture = if (value.kind == 1u) CaptureKind.JVM_CRASH else CaptureKind.HANDLED_EXCEPTION
+        if (capture !in activeRuntimePolicy.captures) return
+        recordGenerated(value)
+    }
+
+    private fun recordGenerated(value: GeneratedRecord, context: DiagnosticContext? = null) {
+        if (!accepts(value.eventId)) return
+        enqueue {
+            if (!accepts(value.eventId)) return@enqueue
+            val adapter = generatedAdapter ?: return@enqueue
+            adapter.record(value, context)
+            if (adapter.latestResult() is GeneratedRecordAppendResult.Appended) {
+                mutableSummary.value = DiagnosticSummary(
+                    recordedValueCount = mutableSummary.value.recordedValueCount + 1L,
+                    lastRecordedAtMillis = System.currentTimeMillis(),
+                )
+            }
+        }
+    }
+
     private fun recordAnrCandidate(candidate: AnrCandidate) {
         GeneratedDiagnostics.anrCandidate(
             diagnostics,
@@ -3190,6 +3357,26 @@ internal class DefaultTraceboxHandle(
             nonfatal_result = if (candidate.nonFatalRequested) 1u else 0u,
             flags = if (candidate.debuggerAffected) 1u else 0u,
         )
+        if (CaptureKind.ANR in activeRuntimePolicy.captures) {
+            val stack = truncateUtf8(
+                candidate.mainFrames.joinToString("\n") { frame ->
+                    "${frame.className}.${frame.methodName}:${frame.lineNumber}"
+                },
+                2_048,
+            )
+            recordGenerated(
+                GeneratedAnrTrace(
+                    elapsed_millis = candidate.delayedMillis
+                        .coerceIn(0, UInt.MAX_VALUE.toLong())
+                        .toUInt(),
+                    frame_count = candidate.mainFrames.size
+                        .coerceAtMost(UShort.MAX_VALUE.toInt())
+                        .toUShort(),
+                    stack_fingerprint = fingerprint64(stack).toULong(),
+                    stack_trace = stack,
+                ),
+            )
+        }
     }
 
     private fun captureManagedCrash(captured: dev.tracebox.core.JvmCrashRecord) {
@@ -3209,14 +3396,45 @@ internal class DefaultTraceboxHandle(
             BoundedManagedCrashOffer.DROPPED,
             -> Unit
         }
+        val firstCause = captured.causes.firstOrNull()
+        val stack = truncateUtf8(
+            firstCause?.frames.orEmpty().joinToString("\n") { frame ->
+                "${frame.declaringClass}.${frame.method}:${frame.line}"
+            },
+            2_048,
+        )
+        val exceptionRecord = GeneratedExceptionRecord(
+            kind = 1u,
+            exception_type = truncateUtf8(firstCause?.type ?: "java.lang.Throwable", 256),
+            frame_count = firstCause?.frames.orEmpty().size
+                .coerceAtMost(UShort.MAX_VALUE.toInt())
+                .toUShort(),
+            stack_fingerprint = fingerprint64("${firstCause?.type}\n$stack").toULong(),
+            stack_trace = stack,
+            monotonic_time_ns = android.os.SystemClock.elapsedRealtimeNanos().toULong(),
+        )
+        when (volatileExceptionCrashes.offer(exceptionRecord, sinkReady = adapter != null)) {
+            BoundedManagedCrashOffer.DELIVER -> checkNotNull(adapter).record(exceptionRecord, null)
+            BoundedManagedCrashOffer.QUEUED,
+            BoundedManagedCrashOffer.DROPPED,
+            -> Unit
+        }
     }
 
     private fun drainVolatileManagedCrashes() {
         val adapter = generatedAdapter
         val enabled = adapter != null && accepts(GeneratedEventId.MANAGEDCRASH)
         val pending = volatileManagedCrashes.resolve(enabled, sinkReady = adapter != null)
+        val detailedEnabled = adapter != null && accepts(GeneratedEventId.EXCEPTIONRECORD)
+        val detailed = volatileExceptionCrashes.resolve(
+            detailedEnabled,
+            sinkReady = adapter != null,
+        )
         if (!enabled) return
         pending.forEach { record -> checkNotNull(adapter).record(record, null) }
+        if (detailedEnabled) {
+            detailed.forEach { record -> checkNotNull(adapter).record(record, null) }
+        }
     }
 
     private fun installVisibilityCallbacks() {
@@ -3707,11 +3925,13 @@ internal class DefaultTraceboxHandle(
 
     private fun preview(decoded: DisclosureDecodeResult.Decoded): PackagePreview {
         val facts = decoded.facts
-        val transformations = if (facts.transformations.isEmpty() || facts.transformations.all { it == "none" }) {
-            setOf(PackageTransformation.NONE)
-        } else {
-            emptySet()
-        }
+        val transformations = facts.transformations.mapNotNull {
+            when (it) {
+                "none" -> PackageTransformation.NONE
+                "parameter_redaction" -> PackageTransformation.PARAMETER_REDACTION
+                else -> null
+            }
+        }.toSet().ifEmpty { setOf(PackageTransformation.NONE) }
         val omissions = facts.omissions.mapNotNull {
             if (it == "corrupt_ordinary_record") PackageOmissionReason.CORRUPT_ORDINARY_RECORD else null
         }.toSet()
@@ -3854,34 +4074,35 @@ internal class DefaultTraceboxHandle(
 
     internal fun stagingRoot(): Path = root.resolve("export-staging")
 
-    private fun accepts(eventId: GeneratedEventId): Boolean = when (activeProfile) {
-        DiagnosticsProfile.DISABLED -> false
-        DiagnosticsProfile.MINIMAL_CRASH ->
-            eventId == GeneratedEventId.STRUCTURALSUMMARY ||
-                eventId == GeneratedEventId.EMERGENCYRECORD ||
-                eventId == GeneratedEventId.MANAGEDCRASH ||
-                eventId == GeneratedEventId.RUSTPANIC ||
-                eventId == GeneratedEventId.ANRCANDIDATE ||
-                eventId == GeneratedEventId.OSEXIT
+    private fun accepts(eventId: GeneratedEventId): Boolean {
+        val policy = activeRuntimePolicy
+        if (!policy.enabled) return false
+        return when (eventId) {
+            GeneratedEventId.STRUCTURALSUMMARY,
+            GeneratedEventId.EMERGENCYRECORD,
+            -> CaptureKind.NATIVE_CRASH in policy.captures
 
-        DiagnosticsProfile.STANDARD_DIAGNOSTICS, DiagnosticsProfile.ENHANCED_DIAGNOSTIC_SESSION -> true
+            GeneratedEventId.BREADCRUMB -> policy.minimumLogLevel != LogLevel.OFF
+            GeneratedEventId.HANDLEDERROR -> CaptureKind.HANDLED_EXCEPTION in policy.captures
+            GeneratedEventId.MANAGEDCRASH -> CaptureKind.JVM_CRASH in policy.captures
+            GeneratedEventId.RUSTPANIC -> CaptureKind.RUST_PANIC in policy.captures
+            GeneratedEventId.ANRCANDIDATE,
+            GeneratedEventId.ANRTRACE,
+            -> CaptureKind.ANR in policy.captures
+
+            GeneratedEventId.OSEXIT -> CaptureKind.OS_EXIT in policy.captures
+            GeneratedEventId.LOGRECORD -> policy.minimumLogLevel != LogLevel.OFF
+            GeneratedEventId.EXCEPTIONRECORD ->
+                CaptureKind.JVM_CRASH in policy.captures ||
+                    CaptureKind.HANDLED_EXCEPTION in policy.captures
+        }
     }
 
-    private fun policyFor(profile: DiagnosticsProfile, epoch: Long): PolicySnapshot = when (profile) {
-        DiagnosticsProfile.DISABLED -> disabledPolicy(epoch)
-        DiagnosticsProfile.MINIMAL_CRASH -> PolicySnapshot(epoch, BREADCRUMB_MASK or HANDLED_ERROR_MASK)
-        DiagnosticsProfile.STANDARD_DIAGNOSTICS, DiagnosticsProfile.ENHANCED_DIAGNOSTIC_SESSION -> PolicySnapshot(epoch, 0)
-    }
+    private fun policyFor(policy: TraceboxPolicy, epoch: Long): PolicySnapshot =
+        runtimePolicySnapshot(policy, epoch)
 
-    private fun profileForPolicy(snapshot: PolicySnapshot): DiagnosticsProfile? = when {
-        snapshot.disabled && snapshot.denyMask == Long.MAX_VALUE -> DiagnosticsProfile.DISABLED
-        !snapshot.disabled &&
-            snapshot.denyMask == (BREADCRUMB_MASK or HANDLED_ERROR_MASK) ->
-            DiagnosticsProfile.MINIMAL_CRASH
-
-        !snapshot.disabled && snapshot.denyMask == 0L -> DiagnosticsProfile.STANDARD_DIAGNOSTICS
-        else -> null
-    }
+    private fun profileForPolicy(snapshot: PolicySnapshot): DiagnosticsProfile? =
+        profileFor(runtimePolicyForSnapshot(snapshot))
 
     private fun disabledPolicy(epoch: Long): PolicySnapshot = PolicySnapshot(epoch, Long.MAX_VALUE, disabled = true)
 
@@ -3910,14 +4131,24 @@ internal class DefaultTraceboxHandle(
 
     private fun allocateJournaledIdentity(kind: Int): ByteArray {
         val quota = checkNotNull(uidQuota)
-        val journal = root.resolve(IDENTITY_JOURNAL_FILE)
+        val journal = root.resolve(
+            if (configuration.nativeCaptureEnabled) {
+                IDENTITY_JOURNAL_FILE
+            } else {
+                MANAGED_IDENTITY_JOURNAL_FILE
+            },
+        )
         val alreadyOwned = quota.owns(journal, UidBucket.METADATA, IDENTITY_JOURNAL_MAX_BYTES)
         check(alreadyOwned || quota.reserve(journal, UidBucket.METADATA, IDENTITY_JOURNAL_MAX_BYTES)) {
             "Tracebox identity journal quota exhausted"
         }
         return try {
-            checkNotNull(NativeRuntime.allocateIdentity(journal.toString(), kind)) {
-                "Rust identity allocation or durable journaling failed"
+            if (configuration.nativeCaptureEnabled) {
+                checkNotNull(NativeRuntime.allocateIdentity(journal.toString(), kind)) {
+                    "Rust identity allocation or durable journaling failed"
+                }
+            } else {
+                ManagedIdentityStore(journal).allocate(kind)
             }
         } catch (error: LinkageError) {
             if (!alreadyOwned && !Files.exists(journal)) quota.release(journal)
@@ -4015,6 +4246,8 @@ internal class DefaultTraceboxHandle(
         val POLICY_REPAIR_MARKER_BYTES = byteArrayOf(0x54, 0x42, 0x50, 0x52)
         const val REQUESTED_PROFILE_FILE = "requested-profile-v1"
         const val REQUESTED_PROFILE_BYTES = 2L
+        const val REQUESTED_POLICY_FILE = "requested-policy-v2"
+        const val REQUESTED_POLICY_BYTES = 36L
         const val ACTIVE_DENY_FILE = "active-deny-v1"
         const val PENDING_DENY_FILE = "pending-deny-v1"
         const val DIRECT_BOOT_DENY_BYTES = 32L
@@ -4025,8 +4258,14 @@ internal class DefaultTraceboxHandle(
         const val VOLATILE_CRASH_CAPACITY = 8
         const val BREADCRUMB_MASK = 4L
         const val HANDLED_ERROR_MASK = 8L
+        const val MANAGED_CRASH_MASK = 16L
+        const val RUST_PANIC_MASK = 32L
+        const val ANR_MASK = 64L
         const val ANR_NON_FATAL_REASON = 0x54424152
         const val OS_EXIT_CATEGORY = 128L
+        const val LOG_RECORD_MASK = 256L
+        const val EXCEPTION_RECORD_MASK = 512L
+        const val ANR_TRACE_MASK = 1_024L
         const val EXIT_HISTORY_LIMIT = 32
         const val EXIT_RAW_IMPORT_LIMIT = 2 * 1024 * 1024
         const val EXIT_TOMBSTONE_LIMIT = 1024
@@ -4041,6 +4280,7 @@ internal class DefaultTraceboxHandle(
         const val NATIVE_POLICY_RETRY_ATTEMPTS = 3
         const val POLICY_COORDINATION_TIMEOUT_MILLIS = 2_000
         const val IDENTITY_JOURNAL_FILE = "identity-lifecycle-v1"
+        const val MANAGED_IDENTITY_JOURNAL_FILE = "identity-lifecycle-managed-v1"
         const val NATIVE_HANDLER_DIRECTORY = "native-handler"
         const val HANDOFF_DIRECTORY = "tracebox-handler-handoff"
         const val CRASHPAD_DATABASE_DIRECTORY = "crashpad-db"
@@ -4179,6 +4419,92 @@ internal fun resolveRequestedProfile(
         configuration.initialProfile
     }
 
+internal fun resolveRequestedPolicy(
+    configuration: TraceboxConfiguration,
+    persistedPolicy: TraceboxPolicy?,
+): TraceboxPolicy =
+    if (configuration.persistRequestedProfile) {
+        persistedPolicy ?: configuration.initialPolicy
+    } else {
+        configuration.initialPolicy
+    }
+
+internal fun legacyPolicy(profile: DiagnosticsProfile): TraceboxPolicy = when (profile) {
+    DiagnosticsProfile.DISABLED -> TraceboxPolicy.disabled()
+    DiagnosticsProfile.MINIMAL_CRASH -> TraceboxPolicy(
+        minimumLogLevel = LogLevel.OFF,
+        captures = CaptureKind.entries.toSet() - CaptureKind.HANDLED_EXCEPTION,
+    )
+    DiagnosticsProfile.STANDARD_DIAGNOSTICS -> TraceboxPolicy.standard()
+    DiagnosticsProfile.ENHANCED_DIAGNOSTIC_SESSION -> TraceboxPolicy.debug()
+}
+
+internal fun profileFor(policy: TraceboxPolicy): DiagnosticsProfile = when {
+    !policy.enabled -> DiagnosticsProfile.DISABLED
+    policy.minimumLogLevel == LogLevel.OFF &&
+        CaptureKind.HANDLED_EXCEPTION !in policy.captures &&
+        !policy.performanceLoggingEnabled -> DiagnosticsProfile.MINIMAL_CRASH
+    policy.minimumLogLevel.ordinal <= LogLevel.DEBUG.ordinal ||
+        policy.mirrorToLogcat || policy.performanceLoggingEnabled ->
+        DiagnosticsProfile.ENHANCED_DIAGNOSTIC_SESSION
+    else -> DiagnosticsProfile.STANDARD_DIAGNOSTICS
+}
+
+internal fun runtimePolicySnapshot(policy: TraceboxPolicy, epoch: Long): PolicySnapshot {
+    if (!policy.enabled) return PolicySnapshot(epoch, Long.MAX_VALUE, disabled = true)
+    var denyMask = 0L
+    if (CaptureKind.NATIVE_CRASH !in policy.captures) denyMask = denyMask or 1L or 2L
+    if (policy.minimumLogLevel == LogLevel.OFF) {
+        denyMask = denyMask or 4L or 256L
+    }
+    if (CaptureKind.HANDLED_EXCEPTION !in policy.captures) denyMask = denyMask or 8L
+    if (CaptureKind.JVM_CRASH !in policy.captures) denyMask = denyMask or 16L
+    if (CaptureKind.RUST_PANIC !in policy.captures) denyMask = denyMask or 32L
+    if (CaptureKind.ANR !in policy.captures) denyMask = denyMask or 64L or 1_024L
+    if (CaptureKind.OS_EXIT !in policy.captures) denyMask = denyMask or 128L
+    if (CaptureKind.JVM_CRASH !in policy.captures &&
+        CaptureKind.HANDLED_EXCEPTION !in policy.captures
+    ) {
+        denyMask = denyMask or 512L
+    }
+    denyMask = denyMask or POLICY_METADATA_PRESENT
+    denyMask = denyMask or (policy.minimumLogLevel.ordinal.toLong() shl POLICY_LOG_LEVEL_SHIFT)
+    if (policy.performanceLoggingEnabled) denyMask = denyMask or POLICY_PERFORMANCE_ENABLED
+    if (policy.mirrorToLogcat) denyMask = denyMask or POLICY_LOGCAT_ENABLED
+    return PolicySnapshot(epoch, denyMask)
+}
+
+internal fun runtimePolicyForSnapshot(snapshot: PolicySnapshot): TraceboxPolicy {
+    if (snapshot.disabled) return TraceboxPolicy.disabled()
+    if (snapshot.denyMask and POLICY_METADATA_PRESENT == 0L) {
+        return if (snapshot.denyMask == 12L) {
+            legacyPolicy(DiagnosticsProfile.MINIMAL_CRASH)
+        } else {
+            legacyPolicy(DiagnosticsProfile.STANDARD_DIAGNOSTICS)
+        }
+    }
+    val levelOrdinal = ((snapshot.denyMask ushr POLICY_LOG_LEVEL_SHIFT) and 0x7L).toInt()
+    val captures = buildSet {
+        if (snapshot.denyMask and 3L == 0L) add(CaptureKind.NATIVE_CRASH)
+        if (snapshot.denyMask and 8L == 0L) add(CaptureKind.HANDLED_EXCEPTION)
+        if (snapshot.denyMask and 16L == 0L) add(CaptureKind.JVM_CRASH)
+        if (snapshot.denyMask and 32L == 0L) add(CaptureKind.RUST_PANIC)
+        if (snapshot.denyMask and (64L or 1_024L) == 0L) add(CaptureKind.ANR)
+        if (snapshot.denyMask and 128L == 0L) add(CaptureKind.OS_EXIT)
+    }
+    return TraceboxPolicy(
+        minimumLogLevel = LogLevel.entries.getOrElse(levelOrdinal) { LogLevel.OFF },
+        mirrorToLogcat = snapshot.denyMask and POLICY_LOGCAT_ENABLED != 0L,
+        performanceLoggingEnabled = snapshot.denyMask and POLICY_PERFORMANCE_ENABLED != 0L,
+        captures = captures,
+    )
+}
+
+private const val POLICY_LOG_LEVEL_SHIFT = 48
+private const val POLICY_PERFORMANCE_ENABLED = 1L shl 51
+private const val POLICY_LOGCAT_ENABLED = 1L shl 52
+private const val POLICY_METADATA_PRESENT = 1L shl 53
+
 internal fun classifyCredentialProtectedStorage(path: OwnedStoragePath): UidBucket? {
     if (path.rootId != "ce" || !isSafeOwnedRelative(path.relativePath)) return null
     val relative = path.relativePath
@@ -4190,7 +4516,10 @@ internal fun classifyCredentialProtectedStorage(path: OwnedStoragePath): UidBuck
             relative == "policy-native-transition-v1-b" ||
             relative == "requested-profile-v1" ||
             relative == "requested-profile-v1.new" ||
+            relative == "requested-policy-v2" ||
+            relative == "requested-policy-v2.new" ||
             relative == "identity-lifecycle-v1" ||
+            relative == "identity-lifecycle-managed-v1" ||
             relative == "exit-tombstones-v1" ||
             relative == "exit-tombstones-v1.new" ->
             UidBucket.METADATA
@@ -4737,6 +5066,96 @@ class TraceboxPackageDisclosureActivity : Activity() {
     }
 }
 
+internal class ManagedIdentityStore(
+    private val path: Path,
+) {
+    fun allocate(kind: Int): ByteArray {
+        require(kind in 1..6)
+        Files.createDirectories(path.parent)
+        val created = !Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+        val allocated = FileChannel.open(
+            path,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.READ,
+            StandardOpenOption.WRITE,
+            LinkOption.NOFOLLOW_LINKS,
+        ).use { channel ->
+            channel.lock().use {
+                val completeBytes = channel.size() - (channel.size() % RECORD_BYTES)
+                if (completeBytes != channel.size()) channel.truncate(completeBytes)
+                require(completeBytes + RECORD_BYTES <= MAXIMUM_BYTES) {
+                    "managed identity journal is full"
+                }
+                val existing = hashSetOf<String>()
+                var sequence = 1
+                var offset = 0L
+                while (offset < completeBytes) {
+                    val encoded = ByteArray(RECORD_BYTES)
+                    val target = ByteBuffer.wrap(encoded)
+                    channel.position(offset)
+                    while (target.hasRemaining()) {
+                        if (channel.read(target) < 0) throw IOException("truncated identity journal")
+                    }
+                    val expected = ByteBuffer.wrap(encoded, PAYLOAD_BYTES, Int.SIZE_BYTES).int
+                    val actual = CRC32().apply { update(encoded, 0, PAYLOAD_BYTES) }.value.toInt()
+                    val source = ByteBuffer.wrap(encoded)
+                    if (source.int != MAGIC || source.short.toInt() != VERSION ||
+                        source.short.toInt() !in 1..6 || source.int != sequence ||
+                        expected != actual
+                    ) {
+                        throw IOException("invalid managed identity journal")
+                    }
+                    val identity = ByteArray(IDENTITY_BYTES)
+                    source.get(identity)
+                    existing += Base64.getEncoder().encodeToString(identity)
+                    sequence += 1
+                    offset += RECORD_BYTES
+                }
+                var identity: ByteArray
+                do {
+                    identity = ByteArray(IDENTITY_BYTES).also(SecureRandom()::nextBytes)
+                } while (identity.all { it == 0.toByte() } ||
+                    Base64.getEncoder().encodeToString(identity) in existing
+                )
+                val encoded = ByteArray(RECORD_BYTES)
+                ByteBuffer.wrap(encoded).apply {
+                    putInt(MAGIC)
+                    putShort(VERSION.toShort())
+                    putShort(kind.toShort())
+                    putInt(sequence)
+                    put(identity)
+                    val crc = CRC32().apply { update(encoded, 0, PAYLOAD_BYTES) }.value.toInt()
+                    putInt(crc)
+                }
+                channel.position(completeBytes)
+                val source = ByteBuffer.wrap(encoded)
+                while (source.hasRemaining()) channel.write(source)
+                channel.force(true)
+                identity
+            }
+        }
+        if (created) {
+            try {
+                FileChannel.open(path.parent, StandardOpenOption.READ).use { it.force(true) }
+            } catch (_: IOException) {
+                // The newly created journal itself is already forced.
+            } catch (_: UnsupportedOperationException) {
+                // Some host providers cannot open directory channels.
+            }
+        }
+        return allocated
+    }
+
+    private companion object {
+        const val MAGIC = 0x54424d49
+        const val VERSION = 1
+        const val IDENTITY_BYTES = 32
+        const val PAYLOAD_BYTES = 44
+        const val RECORD_BYTES = 48
+        const val MAXIMUM_BYTES = 64L * 1024L
+    }
+}
+
 private class ProfileStore(
     private val path: Path,
 ) {
@@ -4800,5 +5219,113 @@ private class ProfileStore(
         } catch (_: SecurityException) {
             // A later exact read still fails closed.
         }
+    }
+}
+
+internal class RuntimePolicyStore(
+    private val path: Path,
+) {
+    fun read(): TraceboxPolicy? {
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) return null
+        val encoded = try {
+            FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { channel ->
+                if (channel.size() != ENCODED_BYTES.toLong()) return null
+                ByteArray(ENCODED_BYTES).also { bytes ->
+                    val target = ByteBuffer.wrap(bytes)
+                    while (target.hasRemaining()) {
+                        if (channel.read(target) < 0) return null
+                    }
+                }
+            }
+        } catch (_: IOException) {
+            return null
+        }
+        val expectedCrc = ByteBuffer.wrap(encoded, PAYLOAD_BYTES, Int.SIZE_BYTES).int
+        val actualCrc = CRC32().apply { update(encoded, 0, PAYLOAD_BYTES) }.value.toInt()
+        if (expectedCrc != actualCrc) return null
+        val source = ByteBuffer.wrap(encoded)
+        if (source.int != MAGIC || source.int != VERSION) return null
+        val flags = source.int
+        val level = LogLevel.entries.getOrNull(source.int) ?: return null
+        val captureMask = source.long
+        val durationNanos = source.long
+        val knownCaptureMask = (1L shl CaptureKind.entries.size) - 1L
+        if (captureMask and knownCaptureMask.inv() != 0L || durationNanos < 0L) return null
+        val captures = CaptureKind.entries.filterTo(linkedSetOf()) { kind ->
+            captureMask and (1L shl kind.ordinal) != 0L
+        }
+        return runCatching {
+            TraceboxPolicy(
+                enabled = flags and FLAG_ENABLED != 0,
+                minimumLogLevel = level,
+                mirrorToLogcat = flags and FLAG_LOGCAT != 0,
+                performanceLoggingEnabled = flags and FLAG_PERFORMANCE != 0,
+                minimumPerformanceDurationNanos = durationNanos,
+                captures = captures,
+            )
+        }.getOrNull()
+    }
+
+    fun write(policy: TraceboxPolicy) {
+        Files.createDirectories(path.parent)
+        var flags = 0
+        if (policy.enabled) flags = flags or FLAG_ENABLED
+        if (policy.mirrorToLogcat) flags = flags or FLAG_LOGCAT
+        if (policy.performanceLoggingEnabled) flags = flags or FLAG_PERFORMANCE
+        val captureMask = policy.captures.fold(0L) { mask, kind ->
+            mask or (1L shl kind.ordinal)
+        }
+        val encoded = ByteArray(ENCODED_BYTES)
+        ByteBuffer.wrap(encoded).apply {
+            putInt(MAGIC)
+            putInt(VERSION)
+            putInt(flags)
+            putInt(policy.minimumLogLevel.ordinal)
+            putLong(captureMask)
+            putLong(policy.minimumPerformanceDurationNanos)
+            val crc = CRC32().apply { update(encoded, 0, PAYLOAD_BYTES) }.value.toInt()
+            putInt(crc)
+        }
+        val temporary = path.resolveSibling("${path.fileName}.new")
+        FileChannel.open(
+            temporary,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.WRITE,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            LinkOption.NOFOLLOW_LINKS,
+        ).use { channel ->
+            val source = ByteBuffer.wrap(encoded)
+            while (source.hasRemaining()) channel.write(source)
+            channel.force(true)
+        }
+        try {
+            Files.move(
+                temporary,
+                path,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(temporary, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+        try {
+            FileChannel.open(path.parent, StandardOpenOption.READ).use { it.force(true) }
+        } catch (_: IOException) {
+            // The policy file itself is already forced.
+        } catch (_: UnsupportedOperationException) {
+            // Some host providers cannot open directory channels.
+        } catch (_: SecurityException) {
+            // A later exact read still fails closed.
+        }
+    }
+
+    private companion object {
+        const val MAGIC = 0x54425032
+        const val VERSION = 1
+        const val FLAG_ENABLED = 1
+        const val FLAG_LOGCAT = 2
+        const val FLAG_PERFORMANCE = 4
+        const val PAYLOAD_BYTES = 32
+        const val ENCODED_BYTES = 36
     }
 }

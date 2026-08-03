@@ -21,6 +21,12 @@ typedef enum {
   TB_STATUS_INVALID_ARGUMENT = 4,
 } tb_status_v1;
 
+/* Borrowed UTF-8 input. Generated APIs validate the explicit byte bound before use. */
+typedef struct {
+  const uint8_t* data;
+  uint32_t length;
+} tb_utf8_view_v1;
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

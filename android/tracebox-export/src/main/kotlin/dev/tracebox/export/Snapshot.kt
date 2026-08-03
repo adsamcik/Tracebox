@@ -359,8 +359,11 @@ class SnapshotPreparer(private val accounting: UidAccounting, private val stagin
                     throw SnapshotFailure.CorruptInput("event ${record.eventId} is not Standard-package eligible")
                 }
                 val transforms = GeneratedExportMetadata.transforms(record.eventId)
-                if (transforms.any { it != "none" }) {
-                    throw SnapshotFailure.SchemaTransform(record.eventId, transforms.first { it != "none" })
+                val unsupported = transforms.firstOrNull {
+                    it != "none" && it != "parameter_redaction"
+                }
+                if (unsupported != null) {
+                    throw SnapshotFailure.SchemaTransform(record.eventId, unsupported)
                 }
                 val recordLocal = nextRecordId++
                 val artifactLocal = record.artifactIdentity?.let { checkNotNull(artifactIds[it]) } ?: 0

@@ -20,6 +20,16 @@ pub struct HeaderV1 {
     pub abi_version: u32,
 }
 
+/// Borrowed UTF-8 bytes used by generated native logging records.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Utf8ViewV1 {
+    /// UTF-8 byte pointer, null only when length is zero.
+    pub data: *const u8,
+    /// Number of bytes available at [`Self::data`].
+    pub length: u32,
+}
+
 /// Raw typed native status values.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

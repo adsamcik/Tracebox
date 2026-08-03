@@ -27,6 +27,7 @@ include(
     ":android:tracebox-storage",
     ":android:tracebox-export",
     ":android:tracebox-export-ui",
+    ":android:tracebox-ui-compose",
     ":android:tracebox-directboot",
     ":android:tracebox",
     ":benchmarks:phase0-benchmark",

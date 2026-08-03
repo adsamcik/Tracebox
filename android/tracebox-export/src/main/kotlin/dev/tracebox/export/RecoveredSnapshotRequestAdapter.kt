@@ -97,5 +97,9 @@ class RecoveredSnapshotRequestAdapter {
         GeneratedEventId.MANAGEDCRASH,
         GeneratedEventId.RUSTPANIC
         -> PackagePrivacyClass.C1
+
+        GeneratedEventId.LOGRECORD -> PackagePrivacyClass.C2
+        GeneratedEventId.EXCEPTIONRECORD,
+        GeneratedEventId.ANRTRACE -> PackagePrivacyClass.C1
     }
 }

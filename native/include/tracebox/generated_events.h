@@ -17,6 +17,9 @@ typedef enum {
   TB_EVENT_RUSTPANIC = 6,
   TB_EVENT_ANRCANDIDATE = 7,
   TB_EVENT_OSEXIT = 8,
+  TB_EVENT_LOGRECORD = 9,
+  TB_EVENT_EXCEPTIONRECORD = 10,
+  TB_EVENT_ANRTRACE = 11,
 } tb_event_id_v1;
 
 typedef struct {
@@ -92,6 +95,39 @@ typedef struct {
   uint32_t artifact_state; /* C0, max encoded 5 */
 } tb_generated_osexit_v1;
 tb_status_v1 tb_record_generated_osexit_v1(const tb_generated_osexit_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t level; /* C0, max encoded 5 */
+  uint32_t category; /* C0, max encoded 5 */
+  uint64_t template_fingerprint; /* C1, max encoded 10 */
+  tb_utf8_view_v1 rendered_message; /* C2, max encoded 1026 */
+  uint32_t privacy_flags; /* C0, max encoded 5 */
+  uint64_t monotonic_time_ns; /* C1, max encoded 10 */
+  uint64_t duration_ns; /* C0, max encoded 10 */
+  uint32_t outcome; /* C0, max encoded 5 */
+} tb_generated_logrecord_v1;
+tb_status_v1 tb_record_generated_logrecord_v1(const tb_generated_logrecord_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t kind; /* C0, max encoded 5 */
+  tb_utf8_view_v1 exception_type; /* C1, max encoded 258 */
+  uint16_t frame_count; /* C0, max encoded 3 */
+  uint64_t stack_fingerprint; /* C1, max encoded 10 */
+  tb_utf8_view_v1 stack_trace; /* C1, max encoded 2050 */
+  uint64_t monotonic_time_ns; /* C1, max encoded 10 */
+} tb_generated_exceptionrecord_v1;
+tb_status_v1 tb_record_generated_exceptionrecord_v1(const tb_generated_exceptionrecord_v1* value, uint32_t recorder_ready);
+
+typedef struct {
+  tb_header_v1 header;
+  uint32_t elapsed_millis; /* C0, max encoded 5 */
+  uint16_t frame_count; /* C0, max encoded 3 */
+  uint64_t stack_fingerprint; /* C1, max encoded 10 */
+  tb_utf8_view_v1 stack_trace; /* C1, max encoded 2050 */
+} tb_generated_anrtrace_v1;
+tb_status_v1 tb_record_generated_anrtrace_v1(const tb_generated_anrtrace_v1* value, uint32_t recorder_ready);
 
 #ifdef __cplusplus
 }
