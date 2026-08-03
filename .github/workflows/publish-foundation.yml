@@ -2,7 +2,7 @@ name: Publish Tracebox foundation artifact
 
 on:
   push:
-    branches: ["copilot/tracebox-foundation"]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -13,9 +13,6 @@ on:
 permissions:
   contents: read
   packages: write
-
-env:
-  TRACEBOX_VERSION: 0.1.0-foundation.1
 
 jobs:
   publish:
@@ -35,11 +32,28 @@ jobs:
       - name: Build capture-only Crashpad libraries
         shell: pwsh
         run: tools\crashpad\Build-Crashpad.ps1
+      - name: Resolve immutable Maven version
+        id: version
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          $version = $env:REQUESTED_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            if ($env:GITHUB_REF_TYPE -ne "tag" -or -not $env:GITHUB_REF_NAME.StartsWith("v")) {
+              throw "Publishing requires a v-prefixed tag or an explicit workflow version."
+            }
+            $version = $env:GITHUB_REF_NAME.Substring(1)
+          }
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid immutable Maven version: $version"
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
       - name: Publish immutable Maven artifacts
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >
           .\gradlew.bat --no-daemon --console=plain --stacktrace publishFoundation
-          -PtraceboxVersion="${{ inputs.version || env.TRACEBOX_VERSION }}"
+          -PtraceboxVersion="${{ steps.version.outputs.value }}"
           -PtraceboxGitHubRepository="${{ github.repository }}"
