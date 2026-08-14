@@ -25,6 +25,31 @@ $readelf = Join-Path $ndk 'toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-read
 $strings = Join-Path $ndk 'toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-strings.exe'
 $strip = Join-Path $ndk 'toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-strip.exe'
 
+function Assert-ElfLoadAlignment {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Abi
+    )
+
+    $programHeaders = @(& $readelf -lW $Path)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to inspect ELF program headers: $Abi $Path"
+    }
+    $loadSegments = @($programHeaders | Where-Object { $_ -match '^\s*LOAD\s' })
+    if ($loadSegments.Count -eq 0) {
+        throw "ELF has no load segments: $Abi $Path"
+    }
+    foreach ($segment in $loadSegments) {
+        if ($segment -notmatch '(0x[0-9a-fA-F]+)\s*$') {
+            throw "Unable to decode ELF load alignment: $Abi $segment"
+        }
+        $alignment = [Convert]::ToUInt64($Matches[1].Substring(2), 16)
+        if ($alignment -lt 0x4000) {
+            throw "ELF load segment is not 16 KiB aligned: $Abi $Path $segment"
+        }
+    }
+}
+
 & (Join-Path $PSScriptRoot 'Acquire-Crashpad.ps1')
 
 New-Item -ItemType Directory -Force $bootstrap | Out-Null
@@ -88,29 +113,41 @@ Copy-Item (Join-Path $root 'native\include\tracebox\signal_stack.h') `
 
 $env:PATH = 'C:\Program Files\Git\usr\bin;' + $env:PATH
 $targets = @(
-    @{ cpu = 'x64'; abi = 'x86_64' },
-    @{ cpu = 'arm64'; abi = 'arm64-v8a' }
+    @{
+        cpu = 'x86'
+        abi = 'x86'
+        rust_target = 'i686-linux-android'
+        linker = 'i686-linux-android23-clang.cmd'
+        linker_variable = 'CARGO_TARGET_I686_LINUX_ANDROID_LINKER'
+    },
+    @{
+        cpu = 'x64'
+        abi = 'x86_64'
+        rust_target = 'x86_64-linux-android'
+        linker = 'x86_64-linux-android23-clang.cmd'
+        linker_variable = 'CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER'
+    },
+    @{
+        cpu = 'arm'
+        abi = 'armeabi-v7a'
+        rust_target = 'armv7-linux-androideabi'
+        linker = 'armv7a-linux-androideabi23-clang.cmd'
+        linker_variable = 'CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER'
+    },
+    @{
+        cpu = 'arm64'
+        abi = 'arm64-v8a'
+        rust_target = 'aarch64-linux-android'
+        linker = 'aarch64-linux-android23-clang.cmd'
+        linker_variable = 'CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER'
+    }
 )
 $results = @()
 Set-Location $checkout
 foreach ($target in $targets) {
-    $rustTarget = if ($target.cpu -eq 'x64') {
-        'x86_64-linux-android'
-    } else {
-        'aarch64-linux-android'
-    }
-    $linkerName = if ($target.cpu -eq 'x64') {
-        'x86_64-linux-android23-clang.cmd'
-    } else {
-        'aarch64-linux-android23-clang.cmd'
-    }
-    $linkerVariable = if ($target.cpu -eq 'x64') {
-        'CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER'
-    } else {
-        'CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER'
-    }
-    $linker = Join-Path $ndk "toolchains\llvm\prebuilt\windows-x86_64\bin\$linkerName"
-    Set-Item -Path "Env:$linkerVariable" -Value $linker
+    $rustTarget = $target.rust_target
+    $linker = Join-Path $ndk "toolchains\llvm\prebuilt\windows-x86_64\bin\$($target.linker)"
+    Set-Item -Path "Env:$($target.linker_variable)" -Value $linker
     & cargo build -p tracebox-android-bridge --release --target $rustTarget --locked --offline `
         --manifest-path (Join-Path $root 'Cargo.toml')
     if ($LASTEXITCODE -ne 0) { throw "Rust Android bridge build failed: $($target.abi)" }
@@ -139,10 +176,8 @@ foreach ($target in $targets) {
     New-Item -ItemType Directory -Force $jniDirectory | Out-Null
     Copy-Item $library (Join-Path $jniDirectory 'libtracebox_crashpad.so') -Force
 
-    $programHeaders = (& $readelf -lW $library) -join "`n"
-    if ($programHeaders -notmatch '0x4000') {
-        throw "Missing 16 KiB ELF alignment: $($target.abi)"
-    }
+    Assert-ElfLoadAlignment -Path $library -Abi $target.abi
+    Assert-ElfLoadAlignment -Path $handler -Abi $target.abi
     $dynamicSymbols = (& $readelf --dyn-syms --wide $library) -join "`n"
     if ($LASTEXITCODE -ne 0) {
         throw "Unable to inspect final dynamic symbols: $($target.abi)"

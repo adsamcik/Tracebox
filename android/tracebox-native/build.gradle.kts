@@ -12,7 +12,7 @@ android {
     }
     defaultConfig {
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
     }
 }
@@ -29,7 +29,9 @@ apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
 val verifyCrashpadPrebuilt = tasks.register("verifyCrashpadPrebuilt") {
     val required = listOf(
+        file("src/main/jniLibs/armeabi-v7a/libtracebox_crashpad.so"),
         file("src/main/jniLibs/arm64-v8a/libtracebox_crashpad.so"),
+        file("src/main/jniLibs/x86/libtracebox_crashpad.so"),
         file("src/main/jniLibs/x86_64/libtracebox_crashpad.so"),
     )
     inputs.files(required)

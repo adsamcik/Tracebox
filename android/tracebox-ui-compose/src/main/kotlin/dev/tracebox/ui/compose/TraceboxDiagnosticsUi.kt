@@ -195,9 +195,9 @@ sealed interface TraceboxUploadResult {
 /**
  * Application-owned transport for approved diagnostic packages.
  *
- * Implementations may use OkHttp, Ktor, a platform service, or any native stack already present in
- * the host. Tracebox deliberately supplies no network client, endpoint, authentication, or retry
- * worker. The request should be consumed during this call rather than retained.
+ * Implementations use a transport already owned and governed by the host. Tracebox deliberately
+ * supplies no network client, endpoint, authentication, or retry worker. The request should be
+ * consumed during this call rather than retained.
  */
 fun interface TraceboxDiagnosticUploader {
     suspend fun upload(request: TraceboxUploadRequest): TraceboxUploadResult

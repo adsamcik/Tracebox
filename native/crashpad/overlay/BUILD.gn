@@ -18,10 +18,14 @@ loadable_module("tracebox_crashpad") {
   public_configs = [ "//:crashpad_config" ]
   if (target_cpu == "x64") {
     lib_dirs = [ "//tracebox_overlay/rust/x86_64" ]
+  } else if (target_cpu == "x86") {
+    lib_dirs = [ "//tracebox_overlay/rust/x86" ]
   } else if (target_cpu == "arm64") {
     lib_dirs = [ "//tracebox_overlay/rust/arm64-v8a" ]
+  } else if (target_cpu == "arm") {
+    lib_dirs = [ "//tracebox_overlay/rust/armeabi-v7a" ]
   } else {
-    assert(false, "Tracebox supports only x64 and arm64 Android")
+    assert(false, "Unsupported Tracebox Android CPU")
   }
   deps = [
     "//client",

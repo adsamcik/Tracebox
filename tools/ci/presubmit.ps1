@@ -20,6 +20,10 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & cargo build -p tracebox-phase0 --target aarch64-linux-android --locked --offline
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & cargo build -p tracebox-phase0 --target armv7-linux-androideabi --locked --offline
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & cargo build -p tracebox-phase0 --target i686-linux-android --locked --offline
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & cargo build -p tracebox-phase0 --target x86_64-linux-android --locked --offline
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {

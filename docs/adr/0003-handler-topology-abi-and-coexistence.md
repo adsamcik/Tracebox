@@ -8,7 +8,9 @@ Accepted by implementation assignment
 
 This ADR freezes section-27 decisions 3, 4, and 5.
 
-- Production ABIs are `arm64-v8a` and `x86_64`.
+- Production artifacts cover `armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64`. Host builds and
+  ELF checks qualify every ABI; representative runtime qualification remains on the required
+  arm64 device and x86_64 emulator lanes.
 - One non-exported Android service runs in `:tracebox_handler`. After minimal service bootstrap it enters the native handler loop and initializes no ordinary recorder or watchdog.
 - Crashpad transport and a separate bounded control channel use private same-UID local Unix sockets. Messages are fixed-size or length-prefixed with a 64 KiB hard maximum, peer credentials are verified, and queues are finite.
 - Startup timeout is 2 seconds. Control operations time out after 500 ms. Nonfatal capture has a 2-second overall deadline and a 100 ms target-process-pause ceiling.

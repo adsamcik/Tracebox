@@ -5,3 +5,4 @@
 0004-tracebox-overlay-entrypoint.patch
 0005-android-capture-only-minidump-profile.patch
 0006-android-api23-system-properties.patch
+0007-android-arm-clang-prefix.patch

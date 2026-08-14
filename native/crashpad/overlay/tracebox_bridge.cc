@@ -731,9 +731,15 @@ void ExtractControlAddresses(void* context,
 #if defined(__aarch64__)
   *instruction_address = native_context->uc_mcontext.pc;
   *link_address = native_context->uc_mcontext.regs[30];
+#elif defined(__arm__)
+  *instruction_address = native_context->uc_mcontext.arm_pc;
+  *link_address = native_context->uc_mcontext.arm_lr;
 #elif defined(__x86_64__)
   *instruction_address =
       static_cast<uint64_t>(native_context->uc_mcontext.gregs[REG_RIP]);
+#elif defined(__i386__)
+  *instruction_address =
+      static_cast<uint64_t>(native_context->uc_mcontext.gregs[REG_EIP]);
 #endif
 }
 

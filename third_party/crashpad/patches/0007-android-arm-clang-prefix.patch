@@ -1,0 +1,13 @@
+diff --git a/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn b/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
+--- a/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
++++ b/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
+@@ -475,8 +475,6 @@
+                               ])
+ 
+-    if (target_cpu == "arm") {
+-      tool_prefix = "arm-linux-androideabi"
+-    } else if (target_cpu == "arm64") {
++    if (target_cpu == "arm64") {
+       tool_prefix = "aarch64-linux-android"
+     } else if (target_cpu == "x86") {
+       tool_prefix = "i686-linux-android"

@@ -143,6 +143,26 @@ tasks.register("verifyPublishedArtifacts") {
                 }
             }
         }
+
+        val nativeAar = file(
+            "android/tracebox-native/build/outputs/aar/tracebox-native-release.aar",
+        )
+        val expectedNativeEntries = setOf(
+            "jni/armeabi-v7a/libtracebox_crashpad.so",
+            "jni/arm64-v8a/libtracebox_crashpad.so",
+            "jni/x86/libtracebox_crashpad.so",
+            "jni/x86_64/libtracebox_crashpad.so",
+        )
+        ZipFile(nativeAar).use { archive ->
+            val packagedNativeEntries = archive.entries().asSequence()
+                .map { it.name }
+                .filter { it.startsWith("jni/") && it.endsWith(".so") }
+                .toSet()
+            check(packagedNativeEntries == expectedNativeEntries) {
+                "Unexpected native payload in ${nativeAar.relativeTo(rootDir)}: " +
+                    "expected $expectedNativeEntries, found $packagedNativeEntries"
+            }
+        }
     }
 }
 

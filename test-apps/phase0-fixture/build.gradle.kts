@@ -14,7 +14,9 @@ val fixtureRustProbeJniLibs =
     layout.buildDirectory.dir("generated/fixtureRustPanicProbe/jniLibs")
 val fixtureRustProbeLibraryName = "libtracebox_fixture_panic_probe.so"
 val rustAndroidTargets = listOf(
+    Triple("x86", "i686-linux-android", "X86"),
     Triple("x86_64", "x86_64-linux-android", "X86_64"),
+    Triple("armeabi-v7a", "armv7-linux-androideabi", "ArmeabiV7a"),
     Triple("arm64-v8a", "aarch64-linux-android", "Aarch64"),
 )
 val androidSdkRoot = providers.environmentVariable("ANDROID_HOME")
@@ -36,10 +38,12 @@ val packageFixtureRustProbeTasks = rustAndroidTargets.map { (abi, rustTarget, ta
         "target/$rustTarget/fixture-panic-probe/$fixtureRustProbeLibraryName",
     )
     val linkerPrefix =
-        if (rustTarget == "x86_64-linux-android") {
-            "x86_64-linux-android23-clang"
-        } else {
-            "aarch64-linux-android23-clang"
+        when (rustTarget) {
+            "i686-linux-android" -> "i686-linux-android23-clang"
+            "x86_64-linux-android" -> "x86_64-linux-android23-clang"
+            "armv7-linux-androideabi" -> "armv7a-linux-androideabi23-clang"
+            "aarch64-linux-android" -> "aarch64-linux-android23-clang"
+            else -> error("Unsupported Rust Android target: $rustTarget")
         }
     val linker = androidSdkRoot.map { sdkRoot ->
         file(
