@@ -171,7 +171,7 @@ enum class SaveFailure { OUTPUT_UNAVAILABLE, WRITE_FAILED }
 enum class SharePackageResult { NOT_STARTED, CHOOSER_OPENED, DELIVERY_UNKNOWN }
 
 /** A package created from exact user-approved bytes. Tracebox never uploads it automatically. */
-interface DiagnosticPackage {
+interface DiagnosticPackage : Closeable {
     val plaintextDigestSha256: ByteArray
     val sizeBytes: Long
     val receipt: StateFlow<SharePackageResult>
@@ -196,6 +196,14 @@ interface DiagnosticPackage {
 
     /** Deletes Tracebox-owned staging for this package; it cannot delete the OS-owned destination. */
     fun deleteStaging(): Boolean
+
+    /**
+     * Retires this in-process capability, wipes its owned package bytes, and deletes staging.
+     * OS-owned save/share destinations remain outside Tracebox's control.
+     */
+    override fun close() {
+        deleteStaging()
+    }
 }
 
 /** The generated-only public Tracebox recording handle. */

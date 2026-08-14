@@ -77,6 +77,16 @@ class PrivacyConfiguration private constructor(
         }
     }
 
+    /**
+     * Returns whether two configurations are provably identical for process-install reuse.
+     *
+     * Empty configurations are structurally equivalent. Custom renderers can contain arbitrary
+     * application state, so Tracebox fails closed and accepts them only when the exact immutable
+     * [PrivacyConfiguration] instance is reused.
+     */
+    fun isEquivalentForInstallation(other: PrivacyConfiguration): Boolean =
+        this === other || (adapters.isEmpty() && other.adapters.isEmpty())
+
     @Suppress("UNCHECKED_CAST")
     private fun renderValue(value: Any?, adapter: Adapter<*>?): String {
         val renderer = adapter?.renderer

@@ -112,22 +112,44 @@ class RuntimePackageRegistryTest {
     fun createdPackageCapabilitiesCannotRunAfterTheirGenerationIsInvalidated() {
         val fence = RuntimePackageCapabilityFence()
         var clearCalls = 0
-        val created = assertNotNull(fence.bind { byteArrayOf(1, 2, 3) })
+        val created = assertNotNull(
+            fence.bind(
+                acquire = { byteArrayOf(1, 2, 3) },
+                retire = { it.fill(0) },
+            ),
+        )
 
         assertContentEquals(
             byteArrayOf(1, 2, 3),
-            fence.use(created.generation) { created.value.copyOf() },
+            fence.use(created.generation, created.token) { created.value.copyOf() },
         )
         fence.invalidate { clearCalls++ }
 
         assertEquals(1, clearCalls)
-        assertNull(fence.use(created.generation) { created.value.copyOf() })
-        val replacement = assertNotNull(fence.bind { byteArrayOf(4) })
+        assertContentEquals(byteArrayOf(0, 0, 0), created.value)
+        assertNull(fence.use(created.generation, created.token) { created.value.copyOf() })
+        val replacement = assertNotNull(fence.bind(acquire = { byteArrayOf(4) }))
         assertTrue(replacement.generation != created.generation)
         assertContentEquals(
             byteArrayOf(4),
-            fence.use(replacement.generation) { replacement.value.copyOf() },
+            fence.use(replacement.generation, replacement.token) { replacement.value.copyOf() },
         )
+    }
+
+    @Test
+    fun explicitly_retired_package_is_wiped_and_cannot_be_used_again() {
+        val fence = RuntimePackageCapabilityFence()
+        val created = assertNotNull(
+            fence.bind(
+                acquire = { byteArrayOf(7, 8, 9) },
+                retire = { it.fill(0) },
+            ),
+        )
+
+        fence.retire(created.token)
+
+        assertContentEquals(byteArrayOf(0, 0, 0), created.value)
+        assertNull(fence.use(created.generation, created.token) { created.value.copyOf() })
     }
 
     @Test

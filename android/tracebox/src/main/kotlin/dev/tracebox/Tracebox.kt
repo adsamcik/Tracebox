@@ -238,6 +238,11 @@ class TraceboxConfiguration private constructor(
             privacyConfiguration = PrivacyConfiguration.Builder().apply(configure).build()
         }
 
+        /** Reuses an immutable privacy configuration, including for idempotent process install. */
+        fun setPrivacyConfiguration(value: PrivacyConfiguration) = apply {
+            privacyConfiguration = value
+        }
+
         /** Enables capture supplied by the separately declared tracebox-native artifact. */
         fun setNativeCaptureEnabled(value: Boolean) = apply {
             nativeCaptureEnabled = value
@@ -272,6 +277,7 @@ class TraceboxConfiguration private constructor(
         processRole == other.processRole &&
             initialProfile == other.initialProfile &&
             initialPolicy == other.initialPolicy &&
+            privacyConfiguration.isEquivalentForInstallation(other.privacyConfiguration) &&
             nativeCaptureEnabled == other.nativeCaptureEnabled &&
             persistRequestedProfile == other.persistRequestedProfile &&
             directBootC0Enabled == other.directBootC0Enabled &&
@@ -3982,12 +3988,17 @@ internal class DefaultTraceboxHandle(
     internal fun consumeApproval(
         approval: ApprovalToken,
     ): RuntimePackageCapability<ByteArray>? =
-        packageCapabilityFence.bind {
-            RuntimePackageRegistry.take(approval.opaqueBytes())
-        }
+        packageCapabilityFence.bind(
+            acquire = { RuntimePackageRegistry.take(approval.opaqueBytes()) },
+            retire = { it.fill(0) },
+        )
 
-    internal fun stagePackage(bytes: ByteArray, capabilityGeneration: Long): Path? =
-        withPackageCapability(capabilityGeneration) {
+    internal fun stagePackage(
+        bytes: ByteArray,
+        capabilityGeneration: Long,
+        capabilityToken: Long,
+    ): Path? =
+        withPackageCapability(capabilityGeneration, capabilityToken) {
             stagePackageWithCurrentCapability(bytes)
         }
 
@@ -4046,8 +4057,13 @@ internal class DefaultTraceboxHandle(
 
     internal fun <T> withPackageCapability(
         capabilityGeneration: Long,
+        capabilityToken: Long,
         action: () -> T,
-    ): T? = packageCapabilityFence.use(capabilityGeneration, action)
+    ): T? = packageCapabilityFence.use(capabilityGeneration, capabilityToken, action)
+
+    internal fun retirePackageCapability(capabilityToken: Long) {
+        packageCapabilityFence.retire(capabilityToken)
+    }
 
     private fun invalidateRuntimePackageCapabilities() {
         packageCapabilityFence.invalidate(RuntimePackageRegistry::clear)
@@ -4639,6 +4655,7 @@ internal enum class BoundedManagedCrashOffer {
 internal data class RuntimePackageCapability<T>(
     val value: T,
     val generation: Long,
+    val token: Long,
 )
 
 /**
@@ -4650,17 +4667,29 @@ internal data class RuntimePackageCapability<T>(
  */
 internal class RuntimePackageCapabilityFence {
     private var generation = 0L
+    private var nextToken = 1L
+    private val retirements = linkedMapOf<Long, () -> Unit>()
 
     @Synchronized
     fun invalidate(clear: () -> Unit) {
         generation = if (generation == Long.MAX_VALUE) Long.MIN_VALUE else generation + 1L
+        val callbacks = retirements.values.toList()
+        retirements.clear()
+        callbacks.forEach { callback -> runCatching(callback) }
         invalidatePackageCapabilitiesForPolicyChange(clear)
     }
 
     @Synchronized
-    fun <T> bind(acquire: () -> T?): RuntimePackageCapability<T>? {
+    fun <T> bind(
+        acquire: () -> T?,
+        retire: (T) -> Unit = {},
+    ): RuntimePackageCapability<T>? {
         val value = acquire() ?: return null
-        return RuntimePackageCapability(value, generation)
+        val token = nextToken
+        nextToken = if (nextToken == Long.MAX_VALUE) 1L else nextToken + 1L
+        check(token !in retirements) { "package capability token space exhausted" }
+        retirements[token] = { retire(value) }
+        return RuntimePackageCapability(value, generation, token)
     }
 
     /**
@@ -4681,9 +4710,14 @@ internal class RuntimePackageCapabilityFence {
     }
 
     @Synchronized
-    fun <T> use(expectedGeneration: Long, action: () -> T): T? {
-        if (expectedGeneration != generation) return null
+    fun <T> use(expectedGeneration: Long, token: Long, action: () -> T): T? {
+        if (expectedGeneration != generation || token !in retirements) return null
         return action()
+    }
+
+    @Synchronized
+    fun retire(token: Long) {
+        retirements.remove(token)?.let { callback -> runCatching(callback) }
     }
 }
 
@@ -4868,11 +4902,13 @@ private class RuntimeDiagnosticPackage(
     private val runtime: DefaultTraceboxHandle,
     capability: RuntimePackageCapability<ByteArray>,
 ) : DiagnosticPackage {
-    private val bytes = capability.value.copyOf()
+    private val bytes = capability.value
     private val capabilityGeneration = capability.generation
+    private val capabilityToken = capability.token
     private val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
     private val mutableReceipt = MutableStateFlow(SharePackageResult.NOT_STARTED)
     private val staged = linkedSetOf<Path>()
+    private val closed = AtomicBoolean(false)
 
     override val plaintextDigestSha256: ByteArray
         get() = digest.copyOf()
@@ -4881,7 +4917,7 @@ private class RuntimeDiagnosticPackage(
     override val receipt: StateFlow<SharePackageResult> = mutableReceipt.asStateFlow()
 
     override fun shareIntent(context: Context): Intent? =
-        runtime.withPackageCapability(capabilityGeneration) {
+        runtime.withPackageCapability(capabilityGeneration, capabilityToken) {
             val path = synchronized(staged) { stage() }
                 ?: return@withPackageCapability null
             val uri = TraceboxFileProvider.uriForFile(context, path)
@@ -4900,7 +4936,7 @@ private class RuntimeDiagnosticPackage(
         .putExtra(Intent.EXTRA_TITLE, "tracebox.tbdiag")
 
     override fun save(context: Context, destination: Uri, isCancelled: () -> Boolean): SavePackageResult {
-        return runtime.withPackageCapability(capabilityGeneration) {
+        return runtime.withPackageCapability(capabilityGeneration, capabilityToken) {
             savePackageBytes(
                 bytes = bytes,
                 openOutput = { context.contentResolver.openOutputStream(destination) },
@@ -4910,9 +4946,16 @@ private class RuntimeDiagnosticPackage(
     }
 
     override fun <T> useInputStream(block: (java.io.InputStream) -> T): T? =
-        runtime.withPackageCapability(capabilityGeneration) {
+        runtime.withPackageCapability(capabilityGeneration, capabilityToken) {
             bytes.inputStream().use(block)
         }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        deleteStaging()
+        runtime.retirePackageCapability(capabilityToken)
+        digest.fill(0)
+    }
 
     override fun deleteStaging(): Boolean = synchronized(staged) {
         val paths = staged.toList()
@@ -4928,7 +4971,7 @@ private class RuntimeDiagnosticPackage(
     }
 
     private fun stage(): Path? {
-        val path = runtime.stagePackage(bytes, capabilityGeneration) ?: return null
+        val path = runtime.stagePackage(bytes, capabilityGeneration, capabilityToken) ?: return null
         return try {
             staged.add(path)
             path

@@ -2,6 +2,8 @@ package dev.tracebox
 
 import dev.tracebox.api.DiagnosticsProfile
 import dev.tracebox.api.PolicyUpdateResult
+import dev.tracebox.api.Privacy
+import dev.tracebox.api.PrivacyConfiguration
 import dev.tracebox.anr.ExitPolicyToken
 import dev.tracebox.core.PolicySnapshot
 import dev.tracebox.directboot.DenyState
@@ -68,6 +70,30 @@ class TraceboxStorageLifecycleTest {
         assertContentEquals(expected, configuration.generatedSchemaFingerprint)
         assertTrue(expected.any { it != 0.toByte() })
         assertTrue(configuration.equivalentTo(TraceboxConfiguration.Builder().build()))
+    }
+
+    @Test
+    fun installation_equivalence_includes_the_exact_custom_privacy_configuration() {
+        val privacy = PrivacyConfiguration.Builder()
+            .register(String::class.java, Privacy.PII)
+            .build()
+        val first = TraceboxConfiguration.Builder()
+            .setPrivacyConfiguration(privacy)
+            .build()
+        val reused = TraceboxConfiguration.Builder()
+            .setPrivacyConfiguration(privacy)
+            .build()
+        val independentlyBuilt = TraceboxConfiguration.Builder()
+            .privacy { register(String::class.java, Privacy.PII) }
+            .build()
+
+        assertTrue(first.equivalentTo(reused))
+        assertFalse(first.equivalentTo(independentlyBuilt))
+        assertTrue(
+            TraceboxConfiguration.Builder().build().equivalentTo(
+                TraceboxConfiguration.Builder().build(),
+            ),
+        )
     }
 
     @Test
