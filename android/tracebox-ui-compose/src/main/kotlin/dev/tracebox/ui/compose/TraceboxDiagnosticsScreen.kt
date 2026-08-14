@@ -27,6 +27,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,7 +117,11 @@ fun TraceboxDiagnosticsScreen(
         return when (withContext(Dispatchers.IO) {
             transport.upload(TraceboxUploadRequest(diagnosticPackage))
         }) {
-            is TraceboxUploadResult.Uploaded -> strings.uploadSuccess
+            is TraceboxUploadResult.Uploaded -> {
+                diagnosticPackage.close()
+                if (currentPackage === diagnosticPackage) currentPackage = null
+                strings.uploadSuccess
+            }
             TraceboxUploadResult.RetryableFailure -> strings.uploadRetryableFailure
             TraceboxUploadResult.Rejected -> strings.uploadRejected
             TraceboxUploadResult.Failed -> strings.uploadFailure
@@ -124,15 +129,13 @@ fun TraceboxDiagnosticsScreen(
     }
 
     fun applyPolicy(next: TraceboxPolicy) = runOperation {
-        currentPackage?.deleteStaging()
+        currentPackage?.close()
         currentPackage = null
         when (withContext(Dispatchers.IO) { handle.updatePolicy(next) }) {
-            PolicyUpdateResult.SUCCESS -> "Runtime controls updated."
-            PolicyUpdateResult.LOCAL_ONLY_RESTRICTED ->
-                "Restrictions are durable locally; another process is still stopping."
-            PolicyUpdateResult.PARTIAL ->
-                "The policy is durable, but one runtime participant is degraded."
-            PolicyUpdateResult.FAILED -> "The policy was not changed."
+            PolicyUpdateResult.SUCCESS -> strings.policyUpdated
+            PolicyUpdateResult.LOCAL_ONLY_RESTRICTED -> strings.policyRestrictedLocally
+            PolicyUpdateResult.PARTIAL -> strings.policyPartiallyApplied
+            PolicyUpdateResult.FAILED -> strings.policyFailed
         }
     }
 
@@ -145,21 +148,21 @@ fun TraceboxDiagnosticsScreen(
             val token = result.data
                 .takeIf { result.resultCode == Activity.RESULT_OK }
                 ?.let(ApprovalToken::fromActivityResult)
-                ?: return@runOperation "Package review was cancelled."
+                ?: return@runOperation strings.packageReviewCancelled
             val diagnosticPackage = when (val created = withContext(Dispatchers.IO) {
                 handle.packages.create(PackageRequest.STANDARD, token)
             }) {
                 is PackageResult.Created -> created.diagnosticPackage
-                PackageResult.NotReady -> return@runOperation "Diagnostics are not ready for packaging."
-                PackageResult.Rejected -> return@runOperation "The approval did not match the reviewed package."
+                PackageResult.NotReady -> return@runOperation strings.diagnosticsNotReady
+                PackageResult.Rejected -> return@runOperation strings.packageApprovalMismatch
             }
-            currentPackage?.deleteStaging()
+            currentPackage?.close()
             currentPackage = diagnosticPackage
             when (delivery) {
                 ResolvedPrimaryAction.UPLOAD -> uploadPackage(diagnosticPackage)
                 ResolvedPrimaryAction.SHARE -> {
                     val intent = diagnosticPackage.shareIntent(context)
-                        ?: return@runOperation "The package could not be shared."
+                        ?: return@runOperation strings.packageShareFailed
                     context.startActivity(intent)
                     strings.packageReady
                 }
@@ -174,13 +177,13 @@ fun TraceboxDiagnosticsScreen(
         }) {
             is PackagePreparationResult.Ready -> {
                 val intent = handle.packages.approvalIntent(context, prepared.preview)
-                    ?: return@runOperation "The review activity is unavailable."
+                    ?: return@runOperation strings.reviewUnavailable
                 pendingPrimaryAction = delivery
                 approvalLauncher.launch(intent)
                 strings.privacyNotice
             }
-            PackagePreparationResult.NotReady -> "Diagnostics are not ready for packaging."
-            PackagePreparationResult.Rejected -> "Package preparation was rejected."
+            PackagePreparationResult.NotReady -> strings.diagnosticsNotReady
+            PackagePreparationResult.Rejected -> strings.packagePreparationRejected
         }
     }
 
@@ -189,18 +192,25 @@ fun TraceboxDiagnosticsScreen(
     ) { result ->
         val destination = result.data?.data
         if (destination == null) {
-            message = "Save was cancelled."
+            message = strings.saveCancelled
         } else {
             runOperation {
                 val diagnosticPackage = currentPackage
-                    ?: return@runOperation "Review diagnostics first."
+                    ?: return@runOperation strings.reviewFirst
                 when (val saved = withContext(Dispatchers.IO) {
                     diagnosticPackage.save(context, destination)
                 }) {
-                    is SavePackageResult.Complete -> "Saved ${saved.bytesWritten} bytes."
-                    is SavePackageResult.PartialCopyWarning ->
-                        "The destination retained ${saved.bytesWritten} bytes from a partial copy."
-                    is SavePackageResult.Failed -> "Saving the package failed."
+                    is SavePackageResult.Complete -> {
+                        diagnosticPackage.close()
+                        if (currentPackage === diagnosticPackage) currentPackage = null
+                        format(strings.savedBytes, saved.bytesWritten)
+                    }
+                    is SavePackageResult.PartialCopyWarning -> {
+                        diagnosticPackage.close()
+                        if (currentPackage === diagnosticPackage) currentPackage = null
+                        format(strings.partialCopyBytes, saved.bytesWritten)
+                    }
+                    is SavePackageResult.Failed -> strings.saveFailed
                 }
             }
         }
@@ -252,6 +262,9 @@ fun TraceboxDiagnosticsScreen(
         }
 
         currentPackage?.let { diagnosticPackage ->
+            DisposableEffect(diagnosticPackage) {
+                onDispose { diagnosticPackage.close() }
+            }
             if ((actions.upload && uploader != null) || actions.share || actions.save) {
                 ControlCard(strings.moreSharingOptions) {
                     if (actions.upload && uploader != null) {
@@ -266,7 +279,7 @@ fun TraceboxDiagnosticsScreen(
                             onClick = {
                                 val intent = diagnosticPackage.shareIntent(context)
                                 if (intent == null) {
-                                    message = "The package could not be shared."
+                                    message = strings.packageShareFailed
                                 } else {
                                     context.startActivity(intent)
                                 }
@@ -298,9 +311,10 @@ fun TraceboxDiagnosticsScreen(
                     if (advanced.statusDetails) {
                         StatusCard(
                             title = strings.statusTitle,
-                            readiness = readiness.name.lowercase(Locale.ROOT),
-                            health = health.name.lowercase(Locale.ROOT),
+                            readiness = readinessLabel(readiness, strings),
+                            health = healthLabel(health, strings),
                             count = summary.recordedValueCount,
+                            strings = strings,
                         )
                     }
                     if (advanced.hasRuntimeControls()) {
@@ -313,7 +327,7 @@ fun TraceboxDiagnosticsScreen(
                             if (advanced.logLevels.isNotEmpty()) {
                                 CycleRow(
                                     label = strings.minimumLogLevel,
-                                    value = policy.minimumLogLevel.name,
+                                    value = logLevelLabel(policy.minimumLogLevel, strings),
                                     enabled = !busy && policy.enabled,
                                 ) {
                                     applyPolicy(policy.copy(
@@ -340,7 +354,10 @@ fun TraceboxDiagnosticsScreen(
                                 if (advanced.performanceThresholdsNanos.isNotEmpty()) {
                                     CycleRow(
                                         label = strings.minimumPerformanceDuration,
-                                        value = formatDuration(policy.minimumPerformanceDurationNanos),
+                                        value = formatDuration(
+                                            policy.minimumPerformanceDurationNanos,
+                                            strings,
+                                        ),
                                         enabled = !busy && policy.enabled &&
                                             policy.performanceLoggingEnabled,
                                     ) {
@@ -361,7 +378,7 @@ fun TraceboxDiagnosticsScreen(
                                 .filter(advanced.captureKinds::contains)
                                 .forEach { kind ->
                                     ToggleRow(
-                                        captureLabel(kind),
+                                        captureLabel(kind, strings),
                                         kind in policy.captures,
                                         !busy && policy.enabled,
                                     ) { enabled ->
@@ -411,15 +428,14 @@ fun TraceboxDiagnosticsScreen(
                 TextButton(onClick = {
                     showDeleteConfirmation = false
                     runOperation {
-                        currentPackage?.deleteStaging()
+                        currentPackage?.close()
                         currentPackage = null
                         when (withContext(Dispatchers.IO) {
                             handle.delete(DeleteRequest.ALL_TRACEBOX_DATA)
                         }) {
-                            DeleteReport.COMPLETE -> "All diagnostic data was deleted."
-                            DeleteReport.PENDING_FAILURE ->
-                                "Some handler-owned data remains and will be retried."
-                            DeleteReport.REJECTED -> "Deletion could not start."
+                            DeleteReport.COMPLETE -> strings.deleteComplete
+                            DeleteReport.PENDING_FAILURE -> strings.deletePending
+                            DeleteReport.REJECTED -> strings.deleteRejected
                         }
                     }
                 }) { Text(strings.deleteConfirm) }
@@ -452,11 +468,17 @@ private fun CasualStatusCard(
 }
 
 @Composable
-private fun StatusCard(title: String, readiness: String, health: String, count: Long) {
+private fun StatusCard(
+    title: String,
+    readiness: String,
+    health: String,
+    count: Long,
+    strings: TraceboxDiagnosticsUiStrings,
+) {
     ControlCard(title) {
-        Text("Readiness: $readiness")
-        Text("Health: $health")
-        Text("Recorded in this process session: $count")
+        Text(format(strings.readinessValue, readiness))
+        Text(format(strings.healthValue, health))
+        Text(format(strings.recordedCount, count))
     }
 }
 
@@ -516,17 +538,53 @@ private fun <T> nextValue(current: T, values: List<T>): T {
     return values[if (currentIndex < 0) 0 else (currentIndex + 1) % values.size]
 }
 
-private fun captureLabel(kind: CaptureKind): String = when (kind) {
-    CaptureKind.JVM_CRASH -> "JVM crashes"
-    CaptureKind.HANDLED_EXCEPTION -> "Handled exceptions"
-    CaptureKind.ANR -> "ANR watchdog"
-    CaptureKind.OS_EXIT -> "Android exit history"
-    CaptureKind.NATIVE_CRASH -> "Native crashes (optional module)"
-    CaptureKind.RUST_PANIC -> "Rust panics (optional module)"
+private fun readinessLabel(
+    readiness: Readiness,
+    strings: TraceboxDiagnosticsUiStrings,
+): String = when (readiness) {
+    Readiness.VOLATILE_CAPTURE -> strings.readinessVolatileCapture
+    Readiness.DURABLE -> strings.readinessDurable
+    Readiness.DEGRADED -> strings.readinessDegraded
+    Readiness.CLOSED -> strings.readinessClosed
 }
 
-private fun formatDuration(nanos: Long): String = when (nanos) {
-    0L -> "Any duration"
-    in 1 until 1_000_000L -> "$nanos ns"
-    else -> "${nanos / 1_000_000L} ms"
+private fun healthLabel(
+    health: TraceboxHealth,
+    strings: TraceboxDiagnosticsUiStrings,
+): String = when (health) {
+    TraceboxHealth.DISABLED -> strings.healthDisabled
+    TraceboxHealth.INITIALIZING -> strings.healthInitializing
+    TraceboxHealth.READY -> strings.healthReady
+    TraceboxHealth.DEGRADED -> strings.healthDegraded
+    TraceboxHealth.DELETING -> strings.healthDeleting
+    TraceboxHealth.CLOSED -> strings.healthClosed
 }
+
+private fun logLevelLabel(level: LogLevel, strings: TraceboxDiagnosticsUiStrings): String =
+    when (level) {
+        LogLevel.VERBOSE -> strings.logLevelVerbose
+        LogLevel.DEBUG -> strings.logLevelDebug
+        LogLevel.INFO -> strings.logLevelInfo
+        LogLevel.WARN -> strings.logLevelWarn
+        LogLevel.ERROR -> strings.logLevelError
+        LogLevel.OFF -> strings.logLevelOff
+    }
+
+private fun captureLabel(kind: CaptureKind, strings: TraceboxDiagnosticsUiStrings): String =
+    when (kind) {
+        CaptureKind.JVM_CRASH -> strings.captureJvmCrash
+        CaptureKind.HANDLED_EXCEPTION -> strings.captureHandledException
+        CaptureKind.ANR -> strings.captureAnr
+        CaptureKind.OS_EXIT -> strings.captureOsExit
+        CaptureKind.NATIVE_CRASH -> strings.captureNativeCrash
+        CaptureKind.RUST_PANIC -> strings.captureRustPanic
+    }
+
+private fun formatDuration(nanos: Long, strings: TraceboxDiagnosticsUiStrings): String = when (nanos) {
+    0L -> strings.durationAny
+    in 1 until 1_000_000L -> format(strings.durationNanos, nanos)
+    else -> format(strings.durationMillis, nanos / 1_000_000L)
+}
+
+private fun format(template: String, vararg arguments: Any): String =
+    String.format(Locale.getDefault(), template, *arguments)

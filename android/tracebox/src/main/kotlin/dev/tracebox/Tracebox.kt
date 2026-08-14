@@ -4925,9 +4925,12 @@ private class RuntimeDiagnosticPackage(
                 .setType("application/zip")
                 .putExtra(Intent.EXTRA_STREAM, uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            send.clipData = android.content.ClipData.newRawUri("Tracebox package", uri)
+            send.clipData = android.content.ClipData.newRawUri(
+                context.getString(R.string.tracebox_package_clip_label),
+                uri,
+            )
             mutableReceipt.value = SharePackageResult.CHOOSER_OPENED
-            Intent.createChooser(send, "Share Tracebox package")
+            Intent.createChooser(send, context.getString(R.string.tracebox_package_share_title))
         }
 
     override fun createSaveIntent(): Intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
@@ -5084,36 +5087,52 @@ class TraceboxPackageDisclosureActivity : Activity() {
         }
         val disclosure = preview.disclosure
         val technicalDetails = buildString {
-            append("Included values: ").append(disclosure.includedValueCount).append('\n')
-            append("Included bytes: ").append(disclosure.includedBytes).append('\n')
-            append("Privacy classes: ").append(disclosure.privacyClasses).append('\n')
-            append("Transformations: ").append(disclosure.transformations).append('\n')
-            append("Omissions: ").append(disclosure.omissionReasons).append('\n')
-            append("Source time range: ").append(disclosure.sourceTimeRangeMillis).append('\n')
-            append("Source processes: ").append(disclosure.sourceProcessCount).append('\n')
-            append("Raw artifacts: ").append(disclosure.rawArtifactCount).append('\n')
-            append("Warnings: ").append(disclosure.warnings).append('\n')
-            append("SHA-256: ").append(disclosure.plaintextDigestSha256.joinToString("") { "%02x".format(it) })
+            append(getString(R.string.tracebox_disclosure_included_values, disclosure.includedValueCount)).append('\n')
+            append(getString(R.string.tracebox_disclosure_included_bytes, disclosure.includedBytes)).append('\n')
+            append(getString(R.string.tracebox_disclosure_privacy_classes, disclosure.privacyClasses)).append('\n')
+            append(getString(R.string.tracebox_disclosure_transformations, disclosure.transformations)).append('\n')
+            append(getString(R.string.tracebox_disclosure_omissions, disclosure.omissionReasons)).append('\n')
+            append(getString(R.string.tracebox_disclosure_source_range, disclosure.sourceTimeRangeMillis)).append('\n')
+            append(getString(R.string.tracebox_disclosure_source_processes, disclosure.sourceProcessCount)).append('\n')
+            append(getString(R.string.tracebox_disclosure_raw_artifacts, disclosure.rawArtifactCount)).append('\n')
+            append(getString(R.string.tracebox_disclosure_warnings, disclosure.warnings)).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_disclosure_digest,
+                    disclosure.plaintextDigestSha256.joinToString("") { "%02x".format(it) },
+                ),
+            )
         }
         val spacing = (16 * resources.displayMetrics.density).toInt()
         val content = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(spacing, spacing, spacing, spacing)
             addView(android.widget.TextView(this@TraceboxPackageDisclosureActivity).apply {
-                text = "Review diagnostic package"
+                text = getString(R.string.tracebox_disclosure_title)
                 textSize = 24f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
             })
             addView(android.widget.TextView(this@TraceboxPackageDisclosureActivity).apply {
-                text = "Nothing leaves this device until you approve this exact package."
+                text = getString(R.string.tracebox_disclosure_privacy_notice)
                 textSize = 16f
                 setPadding(0, spacing / 2, 0, spacing)
             })
             addView(android.widget.TextView(this@TraceboxPackageDisclosureActivity).apply {
                 text = buildString {
-                    append(disclosure.includedValueCount).append(" diagnostic items\n")
-                    append(formatPackageSize(disclosure.includedBytes)).append(" total\n\n")
-                    append("Raw crash artifacts are excluded. Privacy transformations are already applied.")
+                    append(
+                        resources.getQuantityString(
+                            R.plurals.tracebox_disclosure_item_count,
+                            disclosure.includedValueCount,
+                            disclosure.includedValueCount,
+                        ),
+                    ).append('\n')
+                    append(
+                        getString(
+                            R.string.tracebox_disclosure_total_size,
+                            formatPackageSizeForDisplay(disclosure.includedBytes),
+                        ),
+                    ).append("\n\n")
+                    append(getString(R.string.tracebox_disclosure_summary))
                 }
                 textSize = 18f
                 setPadding(spacing, spacing, spacing, spacing)
@@ -5130,16 +5149,22 @@ class TraceboxPackageDisclosureActivity : Activity() {
                 setPadding(0, spacing / 2, 0, spacing / 2)
             }
             addView(android.widget.Button(this@TraceboxPackageDisclosureActivity).apply {
-                text = "Show technical details"
+                text = getString(R.string.tracebox_disclosure_show_details)
                 setOnClickListener {
                     val showing = detailsView.visibility == android.view.View.VISIBLE
                     detailsView.visibility = if (showing) android.view.View.GONE else android.view.View.VISIBLE
-                    text = if (showing) "Show technical details" else "Hide technical details"
+                    text = getString(
+                        if (showing) {
+                            R.string.tracebox_disclosure_show_details
+                        } else {
+                            R.string.tracebox_disclosure_hide_details
+                        },
+                    )
                 }
             })
             addView(detailsView)
             addView(android.widget.Button(this@TraceboxPackageDisclosureActivity).apply {
-                text = "Approve and continue"
+                text = getString(R.string.tracebox_disclosure_approve)
                 setOnClickListener {
                     val nonce = RuntimePackageRegistry.approve(checkNotNull(digest)) ?: return@setOnClickListener
                     setResult(RESULT_OK, ApprovalToken.resultIntent(nonce))
@@ -5147,7 +5172,7 @@ class TraceboxPackageDisclosureActivity : Activity() {
                 }
             })
             addView(android.widget.Button(this@TraceboxPackageDisclosureActivity).apply {
-                text = "Cancel"
+                text = getString(R.string.tracebox_disclosure_cancel)
                 setOnClickListener {
                     setResult(RESULT_CANCELED)
                     finish()
@@ -5164,6 +5189,14 @@ class TraceboxPackageDisclosureActivity : Activity() {
         } else {
             0xffeeeeee.toInt()
         }
+    }
+
+    private fun formatPackageSizeForDisplay(bytes: Long): String = when {
+        bytes < 1_024L -> getString(R.string.tracebox_package_size_bytes, bytes)
+        bytes < 1_048_576L ->
+            getString(R.string.tracebox_package_size_kilobytes, (bytes + 512L) / 1_024L)
+        else ->
+            getString(R.string.tracebox_package_size_megabytes, (bytes + 524_288L) / 1_048_576L)
     }
 
     companion object {
