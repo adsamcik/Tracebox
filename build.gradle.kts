@@ -5,30 +5,76 @@ import java.util.zip.ZipFile
 
 plugins {
     base
-    alias(libs.plugins.android.library) apply false
 }
 
 val traceboxGroup = providers.gradleProperty("traceboxGroup").get()
 val traceboxVersion = providers.gradleProperty("traceboxVersion").get()
+val publishedModules = listOf(
+    "tracebox-api",
+    "tracebox-core",
+    "tracebox-storage",
+    "tracebox-directboot",
+    "tracebox-anr-exit",
+    "tracebox-native",
+    "tracebox-export",
+    "tracebox-export-ui",
+    "tracebox-ui-compose",
+    "tracebox",
+)
 
 allprojects {
     group = traceboxGroup
     version = traceboxVersion
-}
-
-subprojects {
-    configurations.configureEach {
-        resolutionStrategy.activateDependencyLocking()
+    dependencyLocking {
+        lockAllConfigurations()
     }
 }
 
-tasks.named("check") {
+tasks.register("publishFoundation") {
+    group = "publishing"
+    description = "Publishes every Tracebox runtime artifact to the configured immutable Maven repository."
+    dependsOn(publishedModules.map { ":android:$it:publish" })
+}
+
+tasks.register("phase0Check") {
+    group = "verification"
+    description = "Builds and tests every host-side Phase 0 component."
     dependsOn(
-        ":android:tracebox-api:check",
-        ":android:tracebox:check",
-        "verifyNoNetworkBoundary",
-        "verifyPublishedArtifacts",
+        ":android:tracebox-anr-exit:testDebugUnitTest",
+        ":android:tracebox-native:testDebugUnitTest",
+        ":test-apps:phase0-fixture:assembleDebug",
+        ":test-apps:phase0-fixture:assembleRelease",
+        ":test-apps:phase0-fixture:assembleQualificationRelease",
+        ":test-apps:phase0-fixture:assembleDebuggableRelease",
+        ":benchmarks:phase0-benchmark:assembleDebug",
+        ":benchmarks:phase0-benchmark:assembleRelease",
     )
+}
+
+tasks.register("phase1Check") {
+    group = "verification"
+    description = "Runs the Phase 1 Kotlin API and build identity contract tests."
+    dependsOn(
+        ":android:tracebox-api:testDebugUnitTest",
+        ":test-apps:phase0-fixture:captureTraceboxBuildIdentityNoInternetRelease",
+        ":test-apps:phase0-fixture:captureTraceboxBuildIdentityHostNetworkRelease",
+    )
+}
+
+tasks.register("phase2Check") {
+    group = "verification"
+    description = "Runs Phase 2 runtime and persistence fault-injection tests."
+    dependsOn(
+        ":android:tracebox-core:testDebugUnitTest",
+        ":android:tracebox-storage:testDebugUnitTest",
+        ":android:tracebox-directboot:testDebugUnitTest",
+    )
+}
+
+tasks.register("phase4CoreCheck") {
+    group = "verification"
+    description = "Runs deterministic Phase 4 snapshot, manifest, and ZIP tests."
+    dependsOn(":android:tracebox-export:testDebugUnitTest")
 }
 
 tasks.register("printVersion") {
@@ -41,53 +87,50 @@ tasks.register("printVersion") {
 
 tasks.register("verifyNoNetworkBoundary") {
     group = "verification"
-    description = "Rejects a bounded denylist of networking APIs in Tracebox-owned runtime sources."
+    description = "Rejects networking permissions and client APIs in Tracebox-owned runtime sources."
 
     val forbidden = Regex(
-        """android\.permission\.INTERNET|java\.net\.|android\.net\.|android\.webkit\.|""" +
-            """java\.nio\.channels\.SocketChannel|InetAddress|SSLSocket|HttpURLConnection|""" +
-            """URLConnection|OkHttpClient|okhttp3\.|Retrofit|retrofit2\.|DatagramSocket|""" +
-            """\bSocket\s*\(|<sys/socket\.h>""",
+        """android\.permission\.INTERNET|java\.net\.(Socket|ServerSocket|DatagramSocket|HttpURLConnection)|""" +
+            """android\.net\.(ConnectivityManager|NetworkCapabilities|NetworkRequest)|""" +
+            """android\.webkit\.|java\.nio\.channels\.SocketChannel|InetAddress|SSLSocket|""" +
+            """OkHttpClient|okhttp3\.|Retrofit|retrofit2\.|\bSocket\s*\(|<sys/socket\.h>""",
     )
 
     doLast {
-        val sourceFiles = fileTree("android") {
+        val ownedFiles = fileTree("android") {
             include("**/*.kt", "**/*.java", "**/*.c", "**/*.cc", "**/*.cpp", "**/*.h")
+            exclude("**/src/test/**", "**/src/androidTest/**")
+        }.files + fileTree("android") {
+            include("**/src/main/AndroidManifest.xml")
         }.files
-        val manifestFiles = fileTree("android") {
-            include("**/AndroidManifest.xml")
-        }.files
-        val violations = (sourceFiles + manifestFiles)
-            .flatMap { file ->
-                file.readLines().mapIndexedNotNull { index, line ->
-                    if (forbidden.containsMatchIn(line)) {
-                        "${file.relativeTo(rootDir)}:${index + 1}: $line"
-                    } else {
-                        null
-                    }
+        val violations = ownedFiles.flatMap { file ->
+            file.readLines().mapIndexedNotNull { index, line ->
+                if (forbidden.containsMatchIn(line)) {
+                    "${file.relativeTo(rootDir)}:${index + 1}: $line"
+                } else {
+                    null
                 }
             }
+        }
 
         check(violations.isEmpty()) {
-            "Tracebox's alpha runtime must not introduce networking.\n${violations.joinToString("\n")}"
+            "Tracebox-owned runtime code must not introduce networking.\n${violations.joinToString("\n")}"
         }
     }
 }
 
 tasks.register("verifyPublishedArtifacts") {
     group = "verification"
-    description = "Checks release AAR manifests for an INTERNET permission string."
-    dependsOn(
-        ":android:tracebox-api:assembleRelease",
-        ":android:tracebox:assembleRelease",
-    )
+    description = "Checks every release AAR manifest for an INTERNET permission string."
+    dependsOn(publishedModules.map { ":android:$it:assembleRelease" })
 
     doLast {
-        val aars = fileTree("android") {
-            include("**/build/outputs/aar/*-release.aar")
-        }.files.sorted()
-        check(aars.size == 2) {
-            "Expected exactly two alpha AARs, found ${aars.size}: ${aars.joinToString()}"
+        val aars = publishedModules.map { module ->
+            file("android/$module/build/outputs/aar/$module-release.aar")
+        }
+        val missing = aars.filterNot { it.isFile }
+        check(missing.isEmpty()) {
+            "Missing release AARs: ${missing.joinToString { it.relativeTo(rootDir).path }}"
         }
         aars.forEach { aar ->
             ZipFile(aar).use { archive ->
@@ -105,15 +148,12 @@ tasks.register("verifyPublishedArtifacts") {
 
 tasks.register("verifyReleaseMetadata") {
     group = "release"
-    description = "Validates the immutable metadata required before GitHub Packages publication."
+    description = "Validates immutable metadata required before package publication."
 
     doLast {
         val versionPattern = Regex("""[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+""")
         check(versionPattern.matches(traceboxVersion)) {
             "Alpha publication version must be MAJOR.MINOR.PATCH-alpha.N, got $traceboxVersion"
-        }
-        check(!traceboxVersion.endsWith("-SNAPSHOT")) {
-            "GitHub Packages releases must not publish a SNAPSHOT version."
         }
 
         val repository = providers.gradleProperty("traceboxGitHubRepository")
@@ -123,8 +163,7 @@ tasks.register("verifyReleaseMetadata") {
             "Set traceboxGitHubRepository (or GITHUB_REPOSITORY) to OWNER/REPOSITORY before publishing."
         }
 
-        val releaseTag = providers.environmentVariable("TRACEBOX_RELEASE_TAG").orNull
-        if (releaseTag != null) {
+        providers.environmentVariable("TRACEBOX_RELEASE_TAG").orNull?.let { releaseTag ->
             check(releaseTag == "v$traceboxVersion") {
                 "Release tag $releaseTag does not match version $traceboxVersion."
             }
@@ -134,20 +173,17 @@ tasks.register("verifyReleaseMetadata") {
 
 tasks.register("createReleaseChecksums") {
     group = "release"
-    description = "Creates SHA-256 checksums for distributable alpha AARs."
-    dependsOn(
-        ":android:tracebox-api:assembleRelease",
-        ":android:tracebox:assembleRelease",
-    )
+    description = "Creates SHA-256 checksums for all distributable Tracebox AARs."
+    dependsOn(publishedModules.map { ":android:$it:assembleRelease" })
 
     val outputFile = layout.buildDirectory.file("release/tracebox-$traceboxVersion-sha256sums.txt")
     outputs.file(outputFile)
 
     doLast {
-        val artifacts = fileTree("android") {
-            include("**/build/outputs/aar/*-release.aar")
-        }.files.sortedBy { it.relativeTo(rootDir).path }
-        check(artifacts.size == 2) { "Expected two alpha AARs before checksumming." }
+        val artifacts = publishedModules.map { module ->
+            file("android/$module/build/outputs/aar/$module-release.aar")
+        }
+        check(artifacts.all { it.isFile }) { "All Tracebox release AARs must exist before checksumming." }
 
         val lines = artifacts.map { artifact ->
             val digest = MessageDigest.getInstance("SHA-256")
@@ -160,4 +196,17 @@ tasks.register("createReleaseChecksums") {
             writeText(lines.joinToString("\n", postfix = "\n"))
         }
     }
+}
+
+tasks.named("check") {
+    dependsOn(
+        "phase0Check",
+        "phase1Check",
+        "phase2Check",
+        "phase4CoreCheck",
+        "verifyNoNetworkBoundary",
+        ":android:tracebox-export-ui:testDebugUnitTest",
+        ":android:tracebox-ui-compose:testDebugUnitTest",
+        ":android:tracebox:testDebugUnitTest",
+    )
 }

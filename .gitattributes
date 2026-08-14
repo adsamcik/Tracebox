@@ -1,10 +1,10 @@
 * text=auto eol=lf
-
+*.aar binary
+*.zip binary
 *.png binary
 *.jpg binary
 *.jpeg binary
 *.gif binary
-*.jar binary
-*.aar binary
-*.zip binary
-
+*.webp binary
+third_party/crashpad/patches/*.patch text eol=lf whitespace=-blank-at-eol
+third_party/crashpad/archives/*.tar.gz binary

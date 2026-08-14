@@ -11,7 +11,7 @@ This is an implementation assignment, not a request for another design, research
 MISSION
 ======================================================================
 
-Build Tracebox as a production-quality offline Android diagnostics recorder and user-controlled export system for Android API 30-37.
+Build Tracebox as a production-quality offline Android diagnostics recorder and user-controlled export system for Android API 23-37.
 
 The mandatory foundation includes:
 
@@ -41,6 +41,8 @@ Read these files completely before changing code:
 1. docs/adr/0001-foundation-architecture.md
 2. docs/architecture/tracebox-design.md
 3. docs/implementation-plan.md
+4. docs/adr/0009-api-23-single-emulator-qualification.md
+5. docs/adr/0010-personal-project-release-scope.md
 
 For this assignment, the current revisions of these three documents are the accepted implementation baseline even if their front matter still says Proposed. Baseline their exact contents by Git commit before implementation.
 
@@ -54,6 +56,18 @@ Precedence:
 6. Existing code and comments.
 
 A later instruction overrides a non-negotiable requirement only when it explicitly names that requirement and states that it is being superseded.
+
+The explicit user decision recorded in ADR-0009 supersedes every contrary
+minimum-SDK and platform-matrix statement in this assignment. The active
+contract is `minSdk 23`, `compileSdk 37`, `targetSdk 37`, with the existing API
+36 x86_64 4 KiB emulator as the sole required runtime qualification lane.
+
+The explicit user decision recorded in ADR-0010 supersedes contrary fixture
+topology, physical-device/OEM certification, percentile performance,
+byte-identical full-APK reproducibility, exhaustive sentence-level
+traceability, phase-by-phase review, and enterprise completion terminology.
+Correctness, privacy, offline operation, hard bounds, capture capabilities, and
+the single required emulator lane remain mandatory.
 
 If two documents genuinely conflict:
 
@@ -81,21 +95,21 @@ Do not rewrite the approved architecture merely because implementation is diffic
 DELIVERY SCOPE
 ======================================================================
 
-Implement all foundation work through Phase 5 and foundation certification:
+Implement all foundation work through Phase 5 and personal release readiness:
 
 - Phase 0: decisions, toolchain setup, and feasibility gates;
 - Phase 1: contracts and schema generation;
 - Phase 2: runtime and persistence;
 - Phase 3: Crashpad, emergency, JVM, Rust, ANR, and exit capture;
 - Phase 4: exact package and user workflow;
-- Phase 5: offline tooling, no-network conformance, performance qualification, and release certification.
+- Phase 5: offline tooling, no-network conformance, one-emulator resource qualification, and personal release readiness.
 
-Phase 6 is outside foundation certification and does not block the foundation terminal state.
+Phase 6 is outside the personal release and does not block its terminal state.
 
 - Do not expose a production encryption capability that has not passed its gates.
 - Keep any age module isolated, disabled, and outside production dependency graphs.
 - C1/C2 application-layer at-rest encryption requires a separately authorized milestone after the Keystore reliability and migration gates pass.
-- Production age X25519 requires a separately authorized milestone plus interoperability, fuzzing, API 30-37 qualification, and external independent cryptographic review.
+- Production age X25519 requires a separately authorized milestone plus interoperability, fuzzing, qualification on the ADR-0009 required lane, and external independent cryptographic review.
 - Never claim independent cryptographic review was completed by an AI agent.
 - Metrics, traces, profiling, desktop UI, and remote services are outside this assignment.
 
@@ -105,8 +119,8 @@ If an at-rest protection milestone is later authorized, key, nonce, migration, e
 NON-NEGOTIABLE PRODUCT CONSTRAINTS
 ======================================================================
 
-1. minSdk 30 and compileSdk 37.
-2. Foundation certification uses a host targetSdk of 37. Other targetSdk values may build but are outside the certified matrix.
+1. minSdk 23 and compileSdk 37.
+2. Personal release validation uses a host targetSdk of 37. Other targetSdk values may build but are outside the observed lane.
 3. No Tracebox-owned INTERNET permission.
 4. No network client, uploader, remote transport/export component, remote configuration, remote key, remote schema, remote symbol service, remote decoder, or activation service. Local user-initiated package creation, file save, and Sharesheet handoff are required.
 5. No remote/network transport abstraction hidden behind an interface for future use. Typed local IPC is allowed.
@@ -252,20 +266,27 @@ Use provisional contracts only for feasibility spikes, then freeze measured prod
 
 Separate Phase 0 outcomes:
 
-- ENGINEERING_FEASIBILITY_PASS permits implementation to continue after Crashpad, handler, emergency, and ANR behavior works in the required API 30/37 x86_64 emulator endpoints and all available representative arm64 hardware.
-- CERTIFICATION_FEASIBILITY_PASS additionally requires the complete declared physical-device, OEM, ABI, and page-size evidence.
+- ENGINEERING_FEASIBILITY_PASS permits implementation to continue after Crashpad, handler, emergency, and ANR behavior works on the required existing API 36 x86_64 4 KiB emulator.
+- PERSONAL_RELEASE_FEASIBILITY_PASS requires the same single-emulator lane plus
+  mandatory privacy, architectural resource-invariant, and no-network smoke
+  evidence.
 
-Broad implementation requires ENGINEERING_FEASIBILITY_PASS. Missing external hardware may leave certification cells UNAVAILABLE_EXTERNAL without preventing reversible implementation, but it prevents FOUNDATION_CERTIFIED. A functional failure on available required hardware is FAIL and blocks dependent implementation.
+Broad implementation requires ENGINEERING_FEASIBILITY_PASS. Missing advisory
+hardware does not prevent `PERSONAL_RELEASE_READY` and need not be scheduled.
+A functional failure on the required existing emulator is `FAIL` and blocks
+dependent implementation.
 
-Before collecting feasibility or qualification measurements, freeze immutable finite pass/fail thresholds, workloads, and statistical protocols for:
+Before collecting feasibility or qualification measurements, freeze finite
+functional workloads and structural pass/fail invariants for:
 
-- ANR healthy CPU, wakeups, false-positive rate, capture rate, and maximum target pause;
-- handler healthy CPU/wakeups and memory;
+- ANR eligibility, false-confirmation behavior, capture rate, timeout, and
+  bounded target pause;
+- absence of handler polling/idle loops and a recorded memory/CPU baseline;
 - startup and time-to-Durable;
 - crash-to-durable-artifact latency;
 - storage and package working-memory bounds;
 - fuzz durations, corpus retention, and generated truncation/corruption case budgets;
-- presubmit, nightly, and certification matrices.
+- presubmit, review, and the one required emulator smoke suite.
 
 Results cannot retroactively change their own pass criteria. A threshold or protocol change requires explicit user acceptance and a fresh complete measurement run.
 
@@ -282,10 +303,9 @@ Mandatory feasibility gates:
    - one private handler process;
    - multiple app-process clients;
    - handler startup, death, restart, hang, and crash loop;
-   - 4 KiB and 16 KiB pages;
-   - API 30 and API 37 early endpoints;
-   - emulator x86_64 for the engineering gate;
-   - physical arm64 for every available representative cell and for certification;
+   - the required emulator's 4 KiB page size;
+   - the existing API 36 x86_64 emulator;
+   - additional API, ABI, page-size, physical-device, and OEM lanes as advisory only;
    - no polling or uploader.
 
 3. Emergency feasibility:
@@ -486,7 +506,9 @@ Crashpad handler:
 - exact handler death notifications;
 - explicit coexistence modes: Exclusive, BestEffortChain, DisableOnConflict.
 
-DisableOnConflict is always degraded and non-certifying. It never satisfies the mandatory Crashpad gate. Test every coexistence mode and prove exactly one intended capture/fallback outcome without duplicate chaining.
+DisableOnConflict is always degraded and never satisfies the mandatory
+Crashpad gate. Test every coexistence mode and prove exactly one intended
+capture/fallback outcome without duplicate chaining.
 
 Raw artifacts:
 
@@ -675,7 +697,7 @@ SAF:
 - no claim that external providers are atomic or offline.
 
 ======================================================================
-PHASE 5: OFFLINE TOOLING, SYMBOLS, NETWORK PROOF, AND CERTIFICATION
+PHASE 5: OFFLINE TOOLING, SYMBOLS, NETWORK PROOF, AND PERSONAL RELEASE
 ======================================================================
 
 Rust CLI commands:
@@ -710,7 +732,7 @@ Gradle plugin:
 - dependency lock verification;
 - merged manifest inspection;
 - forbidden permission/dependency checks;
-- release certification tasks.
+- personal-release verification tasks.
 
 Symbolication:
 
@@ -739,7 +761,7 @@ No-network proof:
 
 The final claim must remain:
 
-"Tracebox-owned runtime and tooling artifacts introduce no network permission, networking dependency, uploader, exporter, remote configuration, or observed runtime network attempt in certified paths."
+"Tracebox-owned runtime and tooling artifacts introduce no network permission, networking dependency, uploader, exporter, remote configuration, or observed runtime network attempt in personal-release paths."
 
 In that claim, exporter means a remote/network transport exporter; it does not prohibit the required local user-initiated file export.
 
@@ -749,31 +771,33 @@ Do not claim the host app, share target, or SAF provider is offline.
 TEST REQUIREMENTS
 ======================================================================
 
-Create and use these fixture applications:
+Implement these logical fixture scenarios:
 
-- no-internet;
-- host-with-internet;
+- no-internet and host-with-internet;
 - multiprocess;
-- crash-lab;
-- handler-conflict;
-- anr-lab;
-- responsive-main-anr;
-- direct-boot;
-- deletion-lab;
-- release-r8;
-- malicious-package.
+- managed, C++, Rust, recursive, OOM, and stack-overflow crashes;
+- handler conflict, death, restart, and timeout;
+- ANR and responsive-main-looper OS-ANR cases;
+- Direct Boot;
+- crash-recoverable deletion;
+- release R8/symbol identity; and
+- malicious package, archive, and symbol corpora.
+
+ADR-0010 permits one configurable `tracebox-lab` application with network and
+release-R8 build variants plus host-side malicious corpora. Do not create
+separate applications merely to preserve the old eleven-app topology. Preserve
+stable scenario identifiers and individual pass/fail evidence.
 
 Platform matrix:
 
-- API 30, 31, 32, 33, 34, 35, 36, and 37;
-- API 37.1 advisory preview lane;
-- x86_64 emulator coverage for every required API level;
-- arm64-v8a physical coverage for every required API level from 30 through 37;
-- 4 KiB and 16 KiB page qualification on supported representative cells;
-- Pixel and at least two materially different OEM families using a Phase 0 accepted pairwise matrix;
+- required: the existing API 36 x86_64 4 KiB emulator;
+- advisory: other API 23-37 levels, API 37.1 previews, arm64-v8a,
+  physical devices, 16 KiB pages, Pixel devices, and other OEM families;
 - debug, minified release, and debuggable release fixtures.
 
-API 37.1 is advisory: failure or unavailability does not block foundation certification and is reported separately.
+Advisory platform failures or unavailability do not block
+`PERSONAL_RELEASE_READY` and are reported only when those lanes are actually
+run.
 
 Fault injection:
 
@@ -792,9 +816,14 @@ Fault injection:
 - equal-timestamp, reordered, paginated, and late-visible ApplicationExitInfo rows;
 - parser fuzzing with persistent regression corpora.
 
-Create an invariant traceability table containing every architecture invariant, its source section, classification as automated or external, test identifier, required matrix, and result. A non-automatable classification requires a written rationale.
+Maintain work-package-level traceability plus a checklist for critical privacy,
+storage, capture, package, symbol, and no-network invariants. Include source,
+test/evidence, required lane, and result. ADR-0010 does not require a separate
+row for every sentence in the architecture or this prompt.
 
-Do not disable, quarantine, or skip a failing test in an available required lane merely to achieve green status. Tests requiring unavailable external hardware remain UNAVAILABLE_EXTERNAL with an explicit reason and are never counted as passing.
+Do not disable, quarantine, or skip a failing test in the host suite or required
+emulator lane merely to achieve green status. Physical/OEM lanes are advisory
+and need no unavailable-state bookkeeping when they are not attempted.
 
 ======================================================================
 PERFORMANCE AND RESOURCE QUALIFICATION
@@ -811,30 +840,23 @@ Architectural invariants:
 - no heartbeat without an observable eligible component;
 - hard role and UID-wide storage bounds.
 
-Measure separately:
+On the required emulator, record one repeatable smoke baseline for the app
+process, handler process, and aggregate UID:
 
-- each app process;
-- handler process;
-- aggregate UID.
-
-Measure:
-
-- PSS/RSS/private dirty;
-- CPU and scheduling wakeups;
-- allocations and retained heap;
-- I/O and fsync latency;
-- app startup;
-- time to Durable;
-- heartbeat cost;
-- candidate capture cost and target pause;
+- PSS/RSS or the closest trustworthy emulator memory measure;
+- idle CPU and scheduling wakeups;
+- app startup and time to Durable;
+- heartbeat behavior while eligible and ineligible;
+- candidate-capture cost and target pause;
 - crash-to-durable-artifact latency;
-- package throughput and working memory;
-- native compressed size per ABI;
-- battery/energy in foreground, background, idle, and crash-loop scenarios.
+- package throughput and working memory; and
+- APK/AAR and native artifact size.
 
-Report p50/p95/p99 by API, ABI, page size, vendor, and state.
-
-Use the design's current budgets as thresholds until Phase 0 freezes measured certification thresholds. Measurements may justify a Proposed ADR, but the agent cannot relax an accepted threshold. Architectural invariants are never relaxable through measurement.
+ADR-0010 makes the design's numerical budgets engineering targets rather than
+personal-release blockers. Investigate large regressions and record the
+observed values, but do not require p50/p95/p99 distributions across APIs,
+ABIs, vendors, or physical devices. Architectural invariants and configured
+hard bounds remain mandatory.
 
 ======================================================================
 CODE QUALITY RULES
@@ -856,27 +878,35 @@ CODE QUALITY RULES
 REVIEW AND QUALITY GATES
 ======================================================================
 
-At the end of every phase:
+Run targeted tests, builds, static checks, and fuzz smoke tests at every
+dependency gate. ADR-0010 requires four SHA-bound review scopes rather than a
+separate external review after every small phase:
 
-1. Run targeted tests, builds, static checks, fuzz smoke tests, and benchmarks.
-2. Create a coherent candidate commit for the completed dependency gate.
-3. Review that immutable commit SHA and its complete diff with GPT-5.6 Sol.
-4. Fix every blocker, critical, and major finding in additional commits; never amend reviewed history.
-5. Re-run verification.
-6. Review the new immutable HEAD until explicitly APPROVED.
-7. Preserve the external SHA-bound review artifact in session-persistent storage. Do not modify the reviewed commit or in-tree statuses merely to record approval.
+1. storage, policy, quota, Direct Boot, and deletion;
+2. handler, Crashpad, emergency, JVM/Rust capture, ANR, and exit import;
+3. package, tooling, symbols, and no-network conformance; and
+4. the complete baseline-to-final-HEAD scope.
+
+For each scope, create a coherent candidate commit, review its immutable SHA and
+complete diff with GPT-5.6 Sol, fix blocker/critical/major findings in additional
+commits, rerun verification, and review the resulting HEAD until explicitly
+APPROVED. Preserve the external SHA-bound review artifact outside the reviewed
+tree.
 
 After three unsuccessful review/fix cycles, perform blocker analysis and report the repeated findings, but continue fixing and re-reviewing while a concrete safe fix remains. Stop only when the blocker-handling stop conditions apply or the user explicitly decides.
 
 Before final handoff:
 
-- run the full available test matrix;
+- run the full host suite and required single-emulator suite;
 - run all architecture/privacy/no-network fitness functions;
-- run release builds for every supported ABI;
+- run release builds for the required x86_64 lane and compile the configured
+  production ABI artifacts;
 - run CLI tests and parser fuzz smoke suites;
-- verify generated artifacts are reproducible;
+- verify generated schema and `.tbdiag` artifacts are deterministic; rebuild
+  release artifacts twice on the pinned toolchain and record hashes without
+  requiring byte-identical full APKs;
 - verify documentation matches behavior;
-- review the complete baseline-to-final-HEAD diff, final tree, generated artifacts, and certification evidence with GPT-5.6 Sol;
+- review the complete baseline-to-final-HEAD diff, final tree, generated artifacts, and personal-release evidence with GPT-5.6 Sol;
 - obtain an explicit APPROVED verdict for that complete final scope.
 - after final approval, do not modify code, repository documentation, generated artifacts, or other reviewed-tree content;
 - store the final approval attestation outside the reviewed tree and reference it in the handoff.
@@ -897,10 +927,13 @@ When blocked:
 4. Reconcile actual system state before retrying side-effecting operations.
 5. Do not blindly retry after timeouts or ambiguous errors.
 6. Do not weaken mandatory requirements without a product decision.
-7. If external physical devices, OEM access, or independent cryptographic review are unavailable:
+7. If advisory physical devices or OEM access are unavailable:
+   - report those lanes as advisory and continue;
+   - do not claim they were independently tested.
+8. If a separately authorized cryptographic milestone requires independent review and it is unavailable:
    - complete all code, harnesses, and automated gates possible;
-   - mark the unsupported certification item UNAVAILABLE_EXTERNAL;
-   - do not claim foundation certification or production crypto approval.
+   - mark the crypto approval item UNAVAILABLE_EXTERNAL;
+   - do not claim production crypto approval.
 
 Stop and escalate with evidence when:
 
@@ -922,50 +955,49 @@ DEFINITION OF DONE
 
 Terminal states:
 
-- FOUNDATION_CERTIFIED: implementation, automated qualification, required device/OEM matrix, and all external foundation certification are complete.
-- IMPLEMENTATION_COMPLETE_CERTIFICATION_BLOCKED: implementation and all available automated qualification are complete, but one or more named external certification lanes are UNAVAILABLE_EXTERNAL.
+- IMPLEMENTATION_COMPLETE: every foundation implementation item and available
+  host/static automated gate passes; the required emulator lane may still be
+  pending.
+- PERSONAL_RELEASE_READY: IMPLEMENTATION_COMPLETE, the ADR-0009 single-emulator
+  suite passes, documentation matches the observed scope, and final review is
+  approved.
 - PRODUCT_DECISION_BLOCKED: dependent work cannot proceed without an explicit user decision.
-- INCOMPLETE: mandatory implementation or an available required certification lane remains failing after the required investigation and retry process, or the user explicitly stops the work.
+- INCOMPLETE: mandatory implementation or an available required host/emulator
+  gate remains failing after the required investigation and retry process, or
+  the user explicitly stops the work.
 
-Only FOUNDATION_CERTIFIED may be described as certified, release-ready, or complete without qualification.
+Only PERSONAL_RELEASE_READY may be described as ready for this personal
+project without qualification. Do not describe it as independently certified
+or validated on physical/OEM devices.
 
 INCOMPLETE is not an early-exit option. The agent may use it only after exhausting ready work and the blocker-handling process, or after an explicit user stop.
 
-External certification lanes use:
+Required gates use `PASS`, `FAIL`, `NOT_STARTED`, and the existing implementation
+states. Advisory physical/OEM lanes need no status when not attempted and never
+block the personal release.
 
-- PASS: executed successfully with complete evidence;
-- FAIL: executed on available infrastructure and failed;
-- UNAVAILABLE_EXTERNAL: cannot execute because specifically named hardware, OEM access, or independent external reviewer is unavailable.
-
-NOT_STARTED, pending scheduling, missing harnesses, tool failures, and ordinary environment setup problems are not UNAVAILABLE_EXTERNAL. An available external certification failure is FAIL/INCOMPLETE, not CERTIFICATION_BLOCKED; fix it and rerun it when feasible.
-
-FOUNDATION_CERTIFIED requires:
+PERSONAL_RELEASE_READY requires:
 
 - all foundation work packages are implemented, not stubbed;
-- Crashpad separate-process capture passes the declared supported matrix;
+- Crashpad separate-process capture passes the single required emulator lane;
 - emergency fallback works when Crashpad does not;
 - JVM and Rust fault paths are complete;
-- live ANR monitoring meets overhead and false-positive gates;
+- live ANR monitoring passes functional, bounded-work, lifecycle, and
+  false-confirmation checks; numerical percentile targets are advisory;
 - ApplicationExitInfo reconciliation is idempotent and policy-safe;
 - privacy, identity, quota, deletion, and policy barriers pass fault injection;
 - .tbdiag preview bytes equal approved package bytes;
 - raw artifacts cannot enter Standard packages;
 - the Tracebox-owned approval flow is enforced;
 - offline validation/retrace/symbolication work with exact artifact matching;
-- all no-network gates pass;
-- performance measurements are recorded;
-- every applicable frozen performance and resource threshold passes with recorded evidence;
+- all host-static no-network gates and the required emulator smoke paths pass;
+- the ADR-0010 one-emulator resource baseline is recorded and architectural
+  invariants pass;
 - all required documentation and ADRs are current;
 - the final review result is APPROVED;
-- the branch is clean and ready for human review.
-
-IMPLEMENTATION_COMPLETE_CERTIFICATION_BLOCKED requires every implementation item above to pass, every available automated and external lane to pass, and every remaining external lane to be named UNAVAILABLE_EXTERNAL with the exact missing evidence and owner needed to run it. It is not foundation certification.
-
-If an external certification item remains unavailable, clearly separate:
-
-- implementation complete;
-- automated verification complete;
-- external certification blocked.
+- the branch is clean and ready for human review; and
+- unsupported environments are documented without physical-device, OEM,
+  broad-matrix, or independent-certification claims.
 
 Never label the whole assignment complete while a mandatory implementation requirement remains missing.
 
@@ -985,7 +1017,7 @@ Provide:
 6. Resource measurements.
 7. Privacy and no-network evidence.
 8. Review history, immutable reviewed commit SHAs, and final approval state.
-9. Remaining externally blocked certification items.
+9. Remaining advisory validation or external-review items.
 10. Any Proposed ADRs or deliberate deviations awaiting user acceptance, with reasons.
 
 Do not provide a generic recap. Provide evidence and exact paths/commands.

@@ -1,0 +1,23 @@
+Required cell: API 37 x86_64, 16 KiB
+Image: google/sdk_gphone16k_x86_64/emu64xa16k:17/CE2A.260420.019/15611780:userdebug/dev-keys
+Image package revision: 6
+Emulator: 37.1.9, SHA-256 181f0083096cd257784a5a896a5964bb2d58be5254f6ae5b62c0998b79016285
+
+Observed crash-buffer excerpt:
+
+Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE) in tid RegionSampling, pid surfaceflinger
+Page size: 16384 bytes
+Executable: /system/bin/surfaceflinger
+Abort message: 'Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma'
+#03 /vendor/lib64/hw/mapper.ranchu.so GoldfishMapper::readFromHost
+#09 /system/bin/surfaceflinger android::RegionSamplingThread::threadMain
+
+Consequences observed after recurring crashes:
+
+- SurfaceFlinger PID changed repeatedly during 30- and 60-second stability probes.
+- package/activity services returned "Broken pipe" or "Can't find service".
+- an installed manifest-declared MainActivity intermittently returned Activity class does not exist.
+- framework restart cycles prevented a trustworthy Tracebox qualification run.
+
+Materially different commands and outcomes are recorded in
+API37-x86_64-16384-environment-failure.json.

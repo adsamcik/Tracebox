@@ -1,0 +1,40 @@
+{
+  "requirement_id": "PHASE0-NO-NETWORK-STATIC",
+  "command": "AAPT permissions; GN/Ninja graph scan; native strings scan",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "reviewed_implementation_commit": "c0271e90e338e112aca34cbf0fcdc11e4024e9b9",
+  "tool_versions": {
+    "aapt": "37.0.0",
+    "ndk": "28.2.13676358"
+  },
+  "start_time_utc": "2026-07-18T17:24:03.2657871Z",
+  "end_time_utc": "2026-07-18T17:24:03.8070093Z",
+  "timeout_seconds": 120,
+  "exit_status": 0,
+  "expected_assertions": [
+    "no Tracebox INTERNET permission",
+    "no Crashpad uploader/network implementation objects",
+    "no uploader command strings in native library"
+  ],
+  "actual_assertions": {
+    "permission_dumps": {
+      "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk": "package: dev.tracebox.phase0.benchmark",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\qualificationRelease\\phase0-fixture-qualificationRelease.apk": "package: dev.tracebox.phase0",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk": "package: dev.tracebox.phase0",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk": "package: dev.tracebox.phase0",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk": "package: dev.tracebox.phase0",
+      "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk": "package: dev.tracebox.phase0.benchmark"
+    },
+    "forbidden_build_graph_matches": [
+      "tracebox-x64:crash_report_upload_thread",
+      "tracebox-x64:http_transport_socket",
+      "tracebox-x64:obj/util/libnet.a",
+      "tracebox-arm64:crash_report_upload_thread",
+      "tracebox-arm64:http_transport_socket",
+      "tracebox-arm64:obj/util/libnet.a"
+    ],
+    "forbidden_native_string_matches": []
+  },
+  "matrix_cell": "HOST_STATIC_ALL_VARIANTS_BOTH_ABIS",
+  "result": "FAIL"
+}

@@ -1,0 +1,2 @@
+build	build-one	schema	dev.tracebox	1	1.0	release	-	-	-	-	-
+native	libtracebox.so	identity	x86_64	1	symbol

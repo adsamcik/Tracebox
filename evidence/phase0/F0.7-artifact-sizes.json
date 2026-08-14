@@ -1,0 +1,64 @@
+{
+  "requirement_id": "F0.7-ARTIFACT-SIZE",
+  "command": "Get-Item and Get-FileHash for final artifacts",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "reviewed_implementation_commit": "c0271e90e338e112aca34cbf0fcdc11e4024e9b9",
+  "tool_version": "7.6.3",
+  "start_time_utc": "2026-07-18T17:21:07.3411006Z",
+  "end_time_utc": "2026-07-18T17:21:07.4521307Z",
+  "timeout_seconds": 30,
+  "exit_status": 0,
+  "expected_assertions": [
+    "both production ABIs built",
+    "native binary <= 4 MiB per ABI",
+    "debug, debuggable release, signed qualification, and unsigned minified release fixtures exist"
+  ],
+  "actual_assertions": {
+    "artifacts": [
+      {
+        "path": "android\\tracebox-native\\src\\main\\jniLibs\\x86_64\\libtracebox_crashpad.so",
+        "bytes": 1335752,
+        "sha256": "ed11f49c1f63e81d5751702c9d1497f038c7c1a3b4db7ff72cbe14f71ca1d2e0"
+      },
+      {
+        "path": "android\\tracebox-native\\src\\main\\jniLibs\\arm64-v8a\\libtracebox_crashpad.so",
+        "bytes": 1343568,
+        "sha256": "a930fe4ffce7786a12254e36e53d9ceecfe13f6b47070da0d8389792515fec34"
+      },
+      {
+        "path": "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk",
+        "bytes": 5271295,
+        "sha256": "a8dd4e178ba37b6dfba9ee7099274ddfc6113770dce239ba9041a85715b833e7"
+      },
+      {
+        "path": "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk",
+        "bytes": 2809367,
+        "sha256": "a4f5b5f673273e900419bca09b1cb8dd7bef316a3a1a5276aaf14510a44aa580"
+      },
+      {
+        "path": "test-apps\\phase0-fixture\\build\\outputs\\apk\\qualificationRelease\\phase0-fixture-qualificationRelease.apk",
+        "bytes": 2764369,
+        "sha256": "d8e76ba4786f6c199dc8212f7772e1fad59f9f4ecf7f23401c10f6570cf7391d"
+      },
+      {
+        "path": "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk",
+        "bytes": 2760273,
+        "sha256": "ee4623c5d817329dcbb7eefaea656740d8a591c8bc1bdd52e02befda1ec2e826"
+      },
+      {
+        "path": "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk",
+        "bytes": 5238287,
+        "sha256": "08051faf4bb49a16993283a4578657f8ead9305a7ed846fed9858359d1339810"
+      },
+      {
+        "path": "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk",
+        "bytes": 2727273,
+        "sha256": "2a31e1f4327160a4db94dbd5c5bf6e5cdf082cf4f2cf245d3f04c09c6d41bd66"
+      }
+    ],
+    "native_size_threshold_bytes": 4194304,
+    "native_sizes_pass": true
+  },
+  "matrix_cell": "HOST_ARTIFACTS_X86_64_ARM64_V8A",
+  "result": "PASS"
+}

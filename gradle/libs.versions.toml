@@ -1,14 +1,19 @@
-# SPDX-License-Identifier: Apache-2.0
-
 [versions]
-agp = "9.3.1"
-coroutines = "1.11.0"
-junit4 = "4.13.2"
-
-[libraries]
-kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
-junit4 = { module = "junit:junit", version.ref = "junit4" }
+agp = "9.2.0"
+kotlin = "2.2.10"
+compileSdk = "37"
+minSdk = "23"
+targetSdk = "37"
+ndk = "28.2.13676358"
+cmake = "4.1.2"
+jdk = "21"
+rust = "1.93.1"
+crashpad = "efdc820b087c20eec9e32cb5e5b1a63dcf73a724"
+desugarJdkLibsNio = "2.1.5"
 
 [plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 
+[libraries]
+desugar-jdk-libs-nio = { module = "com.android.tools:desugar_jdk_libs_nio", version.ref = "desugarJdkLibsNio" }

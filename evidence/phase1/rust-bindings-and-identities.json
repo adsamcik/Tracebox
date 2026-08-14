@@ -1,0 +1,27 @@
+{
+  "requirement_ids": [
+    "C1.5",
+    "C1.6"
+  ],
+  "scope": "exported C ABI unwind containment and opaque persist-before-use identities",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "end_time_utc": "2026-07-18T21:56:00Z",
+  "commands": [
+    {
+      "command": "cargo test -p tracebox-sys -p tracebox -p tracebox-identity",
+      "exit_status": 0,
+      "actual_assertions": [
+        "7 unit tests passed; exported_c_abi_boundary_contains_bridge_panic returned Dropped; identity persistence, deterministic summary, and reuse tests passed"
+      ]
+    },
+    {
+      "command": "cargo clippy -p tracebox-sys -p tracebox -p tracebox-identity --all-targets -- -D warnings",
+      "exit_status": 0,
+      "actual_assertions": [
+        "no diagnostics"
+      ]
+    }
+  ],
+  "matrix_cell": "HOST_UNIT_STATIC",
+  "result": "PASS"
+}

@@ -1,0 +1,23 @@
+{
+  "requirement_ids": ["X3.3", "X3.6", "X3.9", "X3.10"],
+  "command": ".\\gradlew.bat :android:tracebox-storage:testDebugUnitTest :android:tracebox-anr-exit:testDebugUnitTest :android:tracebox-core:testDebugUnitTest --no-daemon",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "tool_version": "Gradle 9.6.1",
+  "timeout_seconds": 180,
+  "exit_status": 0,
+  "matrix_cell": "HOST_UNIT_STATIC",
+  "expected_assertions": [
+    "Capture journal is durable before capture bytes and raw-store participates in R2.8 deletion.",
+    "Orphan raw bytes without a valid journal are deleted without summary parsing.",
+    "Native dispatch decision preserves a prior action and re-raises it once.",
+    "Android watchdog decision state gates nonfatal snapshot requests.",
+    "Exit source tombstones are idempotent and never evicted on exhaustion."
+  ],
+  "actual_assertions": "Targeted storage, ANR/exit, and core tests passed.",
+  "result": "PASS",
+  "limitations": [
+    "No live Android Crashpad capture was run.",
+    "No Android device measurement was run.",
+    "ApplicationExitInfo and API 37 AnrInfo adapters remain untested."
+  ]
+}

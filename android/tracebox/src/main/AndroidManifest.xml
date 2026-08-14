@@ -1,4 +1,9 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-<manifest />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-sdk android:minSdkVersion="23" />
 
+    <application>
+        <activity
+            android:name=".TraceboxPackageDisclosureActivity"
+            android:exported="false" />
+    </application>
+</manifest>

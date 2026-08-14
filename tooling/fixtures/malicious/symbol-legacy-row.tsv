@@ -1,0 +1,3 @@
+# tracebox-symbol-catalog-v2
+build	build-one	schema	dev.tracebox	1	1.0	release	-	-	-	-	-
+libtracebox.so	identity	1	symbol

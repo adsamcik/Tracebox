@@ -1,0 +1,27 @@
+{
+  "requirement_ids": [
+    "C1.3",
+    "C1.6"
+  ],
+  "scope": "schema-generated Kotlin recording API and Gradle build-identity catalog capture",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "end_time_utc": "2026-07-18T21:56:00Z",
+  "commands": [
+    {
+      "command": "gradlew.bat :android:tracebox-api:testDebugUnitTest --no-daemon --no-configuration-cache",
+      "exit_status": 0,
+      "actual_assertions": [
+        "generated diagnostics only record after enablement"
+      ]
+    },
+    {
+      "command": "gradlew.bat :tooling:tracebox-gradle-plugin:identityCaptureTest --no-daemon --no-configuration-cache",
+      "exit_status": 0,
+      "actual_assertions": [
+        "functional fixture applied dev.tracebox.identity and produced build/tracebox/build-identity.json from schema and applying-project provenance"
+      ]
+    }
+  ],
+  "matrix_cell": "HOST_UNIT_STATIC",
+  "result": "PASS"
+}

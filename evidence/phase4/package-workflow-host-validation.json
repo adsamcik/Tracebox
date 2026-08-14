@@ -1,0 +1,29 @@
+{
+  "phase": "Phase 4 exact package and user workflow",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "baseline_commit": "7e2b9a562895195200cd26e674b2ba36690ee061",
+  "commands": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-export:test :android:tracebox-export-ui:test --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL; PackagePipelineTest: 8 passed; ExportWorkflowTest: 5 passed."
+    },
+    {
+      "command": "$env:PATH = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;' + $env:PATH; & $env:ComSpec /c \"call \\\"\\\"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\\\"\\\" >nul && cd /d G:\\Github\\Tracebox-worktrees\\tracebox-foundation && cargo test -p tbdiag-format --offline 2>&1\"",
+      "exit_status": 0,
+      "actual": "1 Rust unit test passed; 0 failed."
+    }
+  ],
+  "assertions": [
+    "The real P4.1 -> P4.2 -> P4.3 pipeline produces byte-identical preview and approved-generation digests.",
+    "A real pipeline failure produces a receipt without approved or output digests and with NOT_STARTED handoff.",
+    "The disclosure decoder reads exact finalized ZIP bytes and verifies manifest entry hashes; restored activity state has no approval until a fresh gesture.",
+    "Staging cleanup uses an injectable clock and removes an expired narrow-directory lease.",
+    "SAF cancellation returns PartialCopyWarning and cannot create a complete or delivered receipt.",
+    "Receipt handoff states cannot represent successful delivery; changed source data cannot silently regenerate under an existing approval."
+  ],
+  "result": "PASS",
+  "limitations": [
+    "Validation is intentionally host-level only; no Android emulator or AVD was created, booted, or provisioned."
+  ]
+}

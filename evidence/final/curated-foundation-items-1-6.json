@@ -1,0 +1,29 @@
+{
+  "scope": "curated foundation items 1-6 (partial)",
+  "timestamp": "2026-07-19T14:51:51.666+02:00",
+  "commands": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-anr-exit:test :android:tracebox-storage:test :android:tracebox-export-ui:test --no-daemon",
+      "tool": "Gradle 9.6.1",
+      "exit_status": 0,
+      "test_count": 40,
+      "coverage": ["1", "2", "3", "4", "5"]
+    },
+    {
+      "command": "cargo test -p tbdiag-cli",
+      "tool": "cargo 1.93.1 (083ac5135 2025-12-15)",
+      "exit_status": 0,
+      "test_count": 13,
+      "coverage": ["6A"]
+    },
+    {
+      "command": "git diff --exit-code 21e5bef79987814ecd34c2a416caafd8fe39f79a HEAD -- native/crashpad/overlay/tracebox_bridge.cc native/emergency/tracebox_emergency.c",
+      "exit_status": 0,
+      "coverage": ["protected native files"]
+    }
+  ],
+  "limitations": [
+    "Items 6B and 7-11 were not implemented in this bounded pass.",
+    "No Android emulator or AVD was started, created, booted, or provisioned."
+  ]
+}

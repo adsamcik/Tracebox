@@ -1,0 +1,38 @@
+{
+  "requirement_id": "PHASE0-REPRODUCIBILITY-FINAL",
+  "command": "gradlew.bat clean phase0Check --dependency-verification strict --no-daemon",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "reviewed_implementation_commit": "c0271e90e338e112aca34cbf0fcdc11e4024e9b9",
+  "start_time_utc": "2026-07-18T17:18:54.3598742Z",
+  "end_time_utc": "2026-07-18T17:19:58.1229653Z",
+  "timeout_seconds": 600,
+  "exit_status": 0,
+  "expected_assertions": [
+    "five publishable/debug APKs rebuild byte-identically"
+  ],
+  "actual_assertions": {
+    "artifacts": 5,
+    "differences": [
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk",
+      "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk"
+    ],
+    "before_sha256": {
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk": "ea5604a04f375b92a299f8682cfabe705a36e1d355755ef6168dcb255d3b6f28",
+      "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk": "210f839021dffc155b50b8df94fe7a1aa5135a2afa8e21ba99c7da0d0d22c472",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk": "3344283639b3248dc8b6a685e75aaed332094c255ddac2b2572d05937581e049",
+      "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk": "2a31e1f4327160a4db94dbd5c5bf6e5cdf082cf4f2cf245d3f04c09c6d41bd66",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk": "ee4623c5d817329dcbb7eefaea656740d8a591c8bc1bdd52e02befda1ec2e826"
+    },
+    "after_sha256": {
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk": "a4f5b5f673273e900419bca09b1cb8dd7bef316a3a1a5276aaf14510a44aa580",
+      "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk": "08051faf4bb49a16993283a4578657f8ead9305a7ed846fed9858359d1339810",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk": "a8dd4e178ba37b6dfba9ee7099274ddfc6113770dce239ba9041a85715b833e7",
+      "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk": "2a31e1f4327160a4db94dbd5c5bf6e5cdf082cf4f2cf245d3f04c09c6d41bd66",
+      "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk": "ee4623c5d817329dcbb7eefaea656740d8a591c8bc1bdd52e02befda1ec2e826"
+    },
+    "qualification_release_excluded": "APK signing block is intentionally outside the publishable reproducibility claim"
+  },
+  "matrix_cell": "HOST_REPRODUCIBLE_BUILD",
+  "result": "FAIL"
+}

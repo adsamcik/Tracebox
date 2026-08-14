@@ -1,0 +1,28 @@
+{
+  "requirement_ids": [
+    "C1.1",
+    "C1.2",
+    "C1.3"
+  ],
+  "scope": "schema-driven Kotlin, C, Rust, protobuf, metadata, labels, and docs contracts",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "end_time_utc": "2026-07-18T21:56:00Z",
+  "commands": [
+    {
+      "command": "python tooling\\schema-compiler\\compile_schema.py",
+      "exit_status": 0,
+      "actual_assertions": [
+        "schema output regenerated from events.json"
+      ]
+    },
+    {
+      "command": "python -m unittest tooling\\schema-compiler\\tests\\test_compiler.py -v",
+      "exit_status": 0,
+      "actual_assertions": [
+        "5 tests passed including field-name/type propagation through Kotlin, C, Rust, and protobuf goldens"
+      ]
+    }
+  ],
+  "matrix_cell": "HOST_UNIT_STATIC",
+  "result": "PASS"
+}

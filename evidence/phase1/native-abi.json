@@ -1,0 +1,18 @@
+{
+  "requirement_id": "C1.4",
+  "scope": "size-prefixed generated C ABI and raw emergency-record public view",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "end_time_utc": "2026-07-18T21:56:00Z",
+  "commands": [
+    {
+      "command": "cmake -S native -B native\\build-review -G \"Visual Studio 17 2022\" -A x64",
+      "exit_status": 1,
+      "actual_assertions": [
+        "not run: this worktree host has no Visual Studio instance or alternate C compiler; no CMake/CTest PASS claim is made"
+      ]
+    }
+  ],
+  "matrix_cell": "HOST_UNIT_STATIC",
+  "result": "IN_PROGRESS",
+  "superseded_by": "evidence/phase1/native-abi-regression-fix.json records the actual successful MSVC build/CTest run once a compiler became available, including two real defects that run surfaced and their fixes."
+}

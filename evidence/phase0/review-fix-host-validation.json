@@ -1,0 +1,94 @@
+{
+  "requirement_id": "PHASE0-REVIEW-FIX-HOST",
+  "scope": "targeted host/native/Rust structural regression; not Phase 0 certification",
+  "phase0_state": "INCOMPLETE",
+  "reviewed_implementation_commit": "4e7959b70097426b253dda3671eef4a8b16ae1d9",
+  "start_time_utc": "2026-07-18T18:58:16.1585704Z",
+  "end_time_utc": "2026-07-18T19:02:02.9664443Z",
+  "duration_ms": 226808.0,
+  "exit_status": 0,
+  "matrix_cell": "HOST_WINDOWS_NT_TARGETED_REVIEW_FIX",
+  "tools": {
+    "powershell": "7.6.3",
+    "git": "git version 2.49.0.windows.1",
+    "java": "openjdk version \"21.0.8\" 2025-07-15 LTS",
+    "cargo": "cargo 1.93.1 (083ac5135 2025-12-15)",
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)"
+  },
+  "commands": [
+    {
+      "command": "PowerShell parser: qualification/acquisition/tamper scripts",
+      "duration_ms": 33.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "duration_ms": 1188.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "cargo clippy -p tracebox-phase0 -p tbdiag-phase0 --all-targets --locked --offline -- -D warnings",
+      "duration_ms": 508.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "cargo test -p tracebox-phase0 -p tbdiag-phase0 --locked --offline",
+      "duration_ms": 510.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "tools\\crashpad\\Test-AcquireCrashpadTamper.ps1",
+      "duration_ms": 30519.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "tools\\crashpad\\Build-Crashpad.ps1",
+      "duration_ms": 167560.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "gradlew.bat :test-apps:phase0-fixture:assembleQualificationRelease --dependency-verification strict --no-daemon",
+      "duration_ms": 23707.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "tools\\traceability\\Initialize-Traceability.ps1; tools\\verify\\Verify-FoundationSpecs.ps1",
+      "duration_ms": 2745.0,
+      "exit_status": 0,
+      "status": "PASS"
+    }
+  ],
+  "assertions": {
+    "rust_tests": "12 passed; 0 failed",
+    "crashpad_tamper_rejected": true,
+    "crashpad_original_sha256": "7c7b56bb58f7e1adc102be6a3b257d0c8535b3da737a02fb1fa07140a33e1658",
+    "crashpad_tampered_sha256": "988a8c78bce7ca7281e53ec9fe2cbf3084477df21d7eff508317d85779a76d77",
+    "crashpad_restored_sha256": "7c7b56bb58f7e1adc102be6a3b257d0c8535b3da737a02fb1fa07140a33e1658",
+    "mutable_manifest_post_patch_sha256": "148a67dd5afc8cda55dd85bf6ebaacaa1140a4f2d7f521c8f0866ae8cdc974ca",
+    "tracked_post_patch_sha256": "ea5cf61e876f04b45cc98778efb6c84209eac68138fd6b5c54e70a6c12ca40e0",
+    "native_x86_64_sha256": "a8445379659ee28f76585a45fc2ed8f6e8da1194a86a8fffb77232de942630e4",
+    "native_arm64_sha256": "09026f133e47c1ee0f3d2747db6ef28bddf9401e935c6f50cdce3db90f804af9",
+    "qualification_apk_sha256": "0ff404403dea4b73c5a4ea50cdc903b1589f308bbaadd393312d04f3e76411a4",
+    "static_signal_and_deadline_checks": {
+      "emergency_signal_path_has_no_memset_or_memcpy": true,
+      "bridge_has_no_realtime_deadline": true,
+      "registration_receive_is_nonblocking": true,
+      "summary_seed_count_is_computed": true
+    },
+    "foundation_specs": {
+      "accepted_adrs": 6,
+      "open_decisions": 12,
+      "traceability_rows": 1571,
+      "emergency_record_bytes": 256,
+      "result": "PASS"
+    }
+  },
+  "result": "PASS"
+}

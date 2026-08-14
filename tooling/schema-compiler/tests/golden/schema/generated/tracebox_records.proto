@@ -1,0 +1,77 @@
+// Generated protobuf-compatible definitions. No free-form values.
+syntax = "proto3";
+package tracebox.generated;
+message StructuralSummary {
+  uint32 stream_count = 1; // max encoded size 5; privacy C0
+  uint32 thread_count = 2; // max encoded size 5; privacy C0
+  uint32 module_count = 3; // max encoded size 5; privacy C0
+  uint32 exception_code = 4; // max encoded size 5; privacy C0
+  uint32 processor_architecture = 5; // max encoded size 3; privacy C0
+}
+message EmergencyRecord {
+  uint64 slot_sequence = 1; // max encoded size 10; privacy C0
+  uint64 policy_epoch = 2; // max encoded size 10; privacy C0
+  int32 signal_number = 3; // max encoded size 5; privacy C0
+  int32 signal_code = 4; // max encoded size 5; privacy C0
+  uint32 process_role = 5; // max encoded size 5; privacy C0
+  uint32 thread_role = 6; // max encoded size 5; privacy C0
+  uint64 flags = 7; // max encoded size 10; privacy C0
+}
+message Breadcrumb {
+  uint32 code = 1; // max encoded size 5; privacy C1
+  uint64 monotonic_time_ns = 2; // max encoded size 10; privacy C1
+}
+message HandledError {
+  uint32 kind = 1; // max encoded size 5; privacy C1
+  uint32 frame_count = 2; // max encoded size 3; privacy C1
+}
+message ManagedCrash {
+  fixed32 primary_exception_code = 1; // max encoded size 5; privacy C1
+  uint32 cause_count = 2; // max encoded size 3; privacy C0
+  uint32 frame_count = 3; // max encoded size 3; privacy C0
+  uint32 flags = 4; // max encoded size 5; privacy C0
+}
+message RustPanic {
+  uint32 payload_class = 1; // max encoded size 5; privacy C0
+  uint32 thread_role = 2; // max encoded size 5; privacy C0
+  fixed32 location_code = 3; // max encoded size 5; privacy C1
+  uint32 flags = 4; // max encoded size 5; privacy C0
+}
+message AnrCandidate {
+  uint32 elapsed_millis = 1; // max encoded size 5; privacy C0
+  uint32 sample_count = 2; // max encoded size 3; privacy C0
+  uint32 frame_count = 3; // max encoded size 3; privacy C0
+  uint32 nonfatal_result = 4; // max encoded size 5; privacy C0
+  uint32 flags = 5; // max encoded size 5; privacy C0
+}
+message OsExit {
+  int32 reason = 1; // max encoded size 5; privacy C0
+  int32 status = 2; // max encoded size 5; privacy C0
+  int32 importance = 3; // max encoded size 5; privacy C0
+  uint32 link_confidence = 4; // max encoded size 5; privacy C0
+  uint32 artifact_state = 5; // max encoded size 5; privacy C0
+}
+message LogRecord {
+  uint32 level = 1; // max encoded size 5; privacy C0
+  uint32 category = 2; // max encoded size 5; privacy C0
+  uint64 template_fingerprint = 3; // max encoded size 10; privacy C1
+  string rendered_message = 4; // max encoded size 1026; privacy C2
+  uint32 privacy_flags = 5; // max encoded size 5; privacy C0
+  uint64 monotonic_time_ns = 6; // max encoded size 10; privacy C1
+  uint64 duration_ns = 7; // max encoded size 10; privacy C0
+  uint32 outcome = 8; // max encoded size 5; privacy C0
+}
+message ExceptionRecord {
+  uint32 kind = 1; // max encoded size 5; privacy C0
+  string exception_type = 2; // max encoded size 258; privacy C1
+  uint32 frame_count = 3; // max encoded size 3; privacy C0
+  uint64 stack_fingerprint = 4; // max encoded size 10; privacy C1
+  string stack_trace = 5; // max encoded size 2050; privacy C1
+  uint64 monotonic_time_ns = 6; // max encoded size 10; privacy C1
+}
+message AnrTrace {
+  uint32 elapsed_millis = 1; // max encoded size 5; privacy C0
+  uint32 frame_count = 2; // max encoded size 3; privacy C0
+  uint64 stack_fingerprint = 3; // max encoded size 10; privacy C1
+  string stack_trace = 4; // max encoded size 2050; privacy C1
+}

@@ -1,28 +1,32 @@
-# Gradle
 .gradle/
-build/
-**/build/
-
-# Android Studio and IntelliJ IDEA
 .idea/
-*.iml
-local.properties
+.kotlin/
 .cxx/
 .externalNativeBuild/
+build/
+**/build/
+native/build-personal-host*/
+local.properties
+*.iml
 
-# Native and Rust build outputs
+target/
+__pycache__/
+*.pyc
+.bootstrap/
+third_party/crashpad/checkout/
+android/tracebox-native/src/main/jniLibs/
+tracebox.local.properties
+
 *.so
 *.dylib
 *.dll
-native/.cxx/
-rust/target/
 
-# Local publishing credentials and release overrides
-tracebox.local.properties
 *.keystore
 *.jks
+*.log
+*.tmp
 
-# Operating-system noise
+captures/
+evidence/runtime/
 .DS_Store
 Thumbs.db
-

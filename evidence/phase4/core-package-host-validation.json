@@ -1,0 +1,65 @@
+{
+  "phase": "Phase 4 exact package core",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "baseline_commit": "21e5bef79987814ecd34c2a416caafd8fe39f79a",
+  "started_at": "2026-07-19T10:30:18.533+02:00",
+  "completed_at": "2026-07-19T10:44:26.2249465+02:00",
+  "tool_versions": {
+    "gradle_wrapper": "9.6.1",
+    "android_gradle_plugin": "9.2.0",
+    "kotlin": "2.2.10",
+    "compile_sdk": 37,
+    "min_sdk": 30,
+    "rustc": "1.93.1",
+    "cargo": "1.93.1"
+  },
+  "commands": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-export:testDebugUnitTest --no-daemon",
+      "timeout_seconds": 180,
+      "exit_status": 0,
+      "expected": "Snapshot, canonical CBOR, deterministic ZIP, malicious-input, quota, and identity-leak host tests pass.",
+      "actual": "BUILD SUCCESSFUL; 7 PackagePipelineTest tests passed."
+    },
+    {
+      "command": "python -m unittest tooling.schema-compiler.tests.test_compiler",
+      "timeout_seconds": 120,
+      "exit_status": 0,
+      "expected": "Generated export metadata remains byte-identical to schema compiler goldens.",
+      "actual": "Ran 5 tests; OK."
+    },
+    {
+      "command": "cargo check -p tbdiag-format",
+      "timeout_seconds": 120,
+      "exit_status": 0,
+      "expected": "Rust canonical-CBOR vector crate compiles.",
+      "actual": "Finished dev profile successfully."
+    },
+    {
+      "command": "$env:PATH = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;' + $env:PATH; & $env:ComSpec /c \"call \\\"\\\"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\\\"\\\" >nul && cd /d G:\\Github\\Tracebox-worktrees\\tracebox-foundation && cargo test -p tbdiag-format --offline 2>&1\"",
+      "timeout_seconds": 180,
+      "exit_status": 0,
+      "expected": "Execute Rust golden-vector test.",
+      "actual": "1 test passed: canonical_cbor_golden_vector_is_stable."
+    }
+  ],
+  "assertions": [
+    "StandardSnapshotRequest has no raw-artifact source variant; Standard package preparation structurally cannot select raw Crashpad bytes.",
+    "Snapshot preparation freezes policy epoch and per-segment sequence cutoffs, allocates deterministic process/segment/artifact/record-local numbers, emits deterministic corruption omissions, charges UidBucket.SNAPSHOTS, and rejects binary, hexadecimal, URL-safe Base64, and standard Base64 identity encodings.",
+    "Manifest CBOR is derived from materialized entry bodies and hashes and uses RFC 8949 deterministic map-key ordering with no indefinite forms.",
+    "The ZIP writer uses only STORED entries, fixed DOS timestamps, stable path order, no extras/comments/descriptors/ZIP64, and a SHA-256 over final bytes.",
+    "Path traversal, absolute and backslash paths, duplicates, nested archives, 129 entries, hard-limit overflow, and ZIP64-sized candidates receive typed construction failures."
+  ],
+  "artifact_paths": [
+    "android/tracebox-export/src/main/kotlin/dev/tracebox/export/Snapshot.kt",
+    "android/tracebox-export/src/main/kotlin/dev/tracebox/export/CanonicalCbor.kt",
+    "android/tracebox-export/src/main/kotlin/dev/tracebox/export/DeterministicZip.kt",
+    "android/tracebox-export/src/test/kotlin/dev/tracebox/export/PackagePipelineTest.kt",
+    "rust/tbdiag-format/src/lib.rs"
+  ],
+  "result": "IN_PROGRESS",
+  "limitations": [
+    "The snapshot source model is host-tested and quota-backed but is not yet connected to Phase 2 recovered-segment and Phase 3 capture-store selection.",
+    "P4.4-P4.7 disclosure, approval, FileProvider/Sharesheet, SAF, and receipt integration are not implemented in this core dependency-gate commit."
+  ]
+}

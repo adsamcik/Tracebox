@@ -1,0 +1,75 @@
+diff --git a/minidump/BUILD.gn b/minidump/BUILD.gn
+index 5b235aa..6c4c952 100644
+--- a/minidump/BUILD.gn
++++ b/minidump/BUILD.gn
+@@ -81,6 +81,10 @@ crashpad_static_library("minidump") {
+    "../util",
+  ]
+ 
++  if (crashpad_is_android) {
++    defines = [ "CRASHPAD_TRACEBOX_CAPTURE_ONLY=1" ]
++  }
++
+  if (crashpad_is_win) {
+    cflags = [
+      "/wd4201",  # nonstandard extension used : nameless struct/union
+diff --git a/minidump/minidump_file_writer.cc b/minidump/minidump_file_writer.cc
+index 35d226b..ea8a07e 100644
+--- a/minidump/minidump_file_writer.cc
++++ b/minidump/minidump_file_writer.cc
+@@ -98,6 +98,7 @@ void MinidumpFileWriter::InitializeFromSnapshot(
+  add_stream_result = AddStream(std::move(thread_list));
+  DCHECK(add_stream_result);
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+  bool has_thread_name = false;
+  for (const ThreadSnapshot* thread_snapshot : process_snapshot->Threads()) {
+    if (!thread_snapshot->ThreadName().empty()) {
+@@ -112,6 +113,7 @@ void MinidumpFileWriter::InitializeFromSnapshot(
+    add_stream_result = AddStream(std::move(thread_name_list));
+    DCHECK(add_stream_result);
+  }
++#endif
+ 
+  const ExceptionSnapshot* exception_snapshot = process_snapshot->Exception();
+  if (exception_snapshot) {
+@@ -144,6 +146,7 @@ void MinidumpFileWriter::InitializeFromSnapshot(
+    DCHECK(add_stream_result);
+  }
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+  auto crashpad_info = std::make_unique<MinidumpCrashpadInfoWriter>();
+  crashpad_info->InitializeFromSnapshot(process_snapshot);
+ 
+@@ -162,6 +165,7 @@ void MinidumpFileWriter::InitializeFromSnapshot(
+    add_stream_result = AddStream(std::move(memory_info_list));
+    DCHECK(add_stream_result);
+  }
++#endif
+ 
+  std::vector<HandleSnapshot> handles_snapshot = process_snapshot->Handles();
+  if (!handles_snapshot.empty()) {
+@@ -171,10 +175,12 @@ void MinidumpFileWriter::InitializeFromSnapshot(
+    DCHECK(add_stream_result);
+  }
+ 
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+  memory_list->AddFromSnapshot(process_snapshot->ExtraMemory());
+  if (exception_snapshot) {
+    memory_list->AddFromSnapshot(exception_snapshot->ExtraMemory());
+  }
++#endif
+ 
+  // These user streams must be added last. Otherwise, a user stream with the
+  // same type as a well-known stream could preempt the well-known stream. As it
+@@ -201,8 +207,10 @@ void MinidumpFileWriter::InitializeFromSnapshot(
+  // will not have to ride at the end of the file. Thread stack memory, for
+  // example, exists as a children of threads, and appears alongside them in the
+  // file, despite also being mentioned by the memory list stream.
++#if !defined(CRASHPAD_TRACEBOX_CAPTURE_ONLY)
+  add_stream_result = AddStream(std::move(memory_list));
+  DCHECK(add_stream_result);
++#endif
+ }
+ 
+ void MinidumpFileWriter::SetTimestamp(time_t timestamp) {
