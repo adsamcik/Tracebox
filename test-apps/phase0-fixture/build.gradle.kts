@@ -19,8 +19,6 @@ val rustAndroidTargets = listOf(
     Triple("armeabi-v7a", "armv7-linux-androideabi", "ArmeabiV7a"),
     Triple("arm64-v8a", "aarch64-linux-android", "Aarch64"),
 )
-val androidSdkRoot = providers.environmentVariable("ANDROID_HOME")
-    .orElse(providers.environmentVariable("ANDROID_SDK_ROOT"))
 val rustAndroidHostTag = when {
     System.getProperty("os.name").startsWith("Windows", ignoreCase = true) ->
         "windows-x86_64"
@@ -45,11 +43,11 @@ val packageFixtureRustProbeTasks = rustAndroidTargets.map { (abi, rustTarget, ta
             "aarch64-linux-android" -> "aarch64-linux-android23-clang"
             else -> error("Unsupported Rust Android target: $rustTarget")
         }
-    val linker = androidSdkRoot.map { sdkRoot ->
-        file(
-            "$sdkRoot/ndk/28.2.13676358/toolchains/llvm/prebuilt/" +
+    val linker = androidComponents.sdkComponents.sdkDirectory.map { sdkRoot ->
+        sdkRoot.file(
+            "ndk/28.2.13676358/toolchains/llvm/prebuilt/" +
                 "$rustAndroidHostTag/bin/$linkerPrefix$rustAndroidCommandSuffix",
-        )
+        ).asFile
     }
     val compileTask = tasks.register<Exec>("compile${taskSegment}FixtureRustPanicProbe") {
         group = "build"

@@ -446,6 +446,8 @@ class LabScenarioTest {
         assertTrue(probeSource.contains("take_panic_record_v1"))
         assertTrue(fixtureBuild.contains("buildFixtureRustPanicProbe"))
         assertTrue(fixtureBuild.contains("verifyFixtureRustPanicProbeIsolation"))
+        assertTrue(fixtureBuild.contains("androidComponents.sdkComponents.sdkDirectory"))
+        assertFalse(fixtureBuild.contains("environmentVariable(\"ANDROID_HOME\")"))
         assertTrue(fixtureBuild.contains("ZipInputStream"))
         assertTrue(fixtureBuild.contains("negativeNestedName"))
         assertTrue(fixtureBuild.contains("negativeNestedContent"))
