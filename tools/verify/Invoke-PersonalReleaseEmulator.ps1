@@ -798,6 +798,20 @@ function Get-UiHierarchy {
     return (Invoke-Adb shell cat /sdcard/tracebox-window.xml) -join ''
 }
 
+function Test-UiTextPresent {
+    param(
+        [string] $Xml,
+        [string[]] $Text
+    )
+    foreach ($candidate in $Text) {
+        $escaped = [Security.SecurityElement]::Escape($candidate)
+        if ($Xml -match ('(?:text|content-desc)="' + [regex]::Escape($escaped) + '"')) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Invoke-UiText {
     param(
         [string] $Xml,
@@ -901,7 +915,9 @@ function Invoke-PackageUi {
         [string] $Scenario,
         [switch] $Approve
     )
-    $approveLabels = @('Approve package', 'APPROVE PACKAGE')
+    $approveLabels = @('Approve and continue', 'APPROVE AND CONTINUE')
+    $showDetailsLabels = @('Show technical details', 'SHOW TECHNICAL DETAILS')
+    $hideDetailsLabels = @('Hide technical details', 'HIDE TECHNICAL DETAILS')
     Reset-And-Launch -ClearData
     Clear-DeviceLog
     Invoke-Adb shell am start '-W' `
@@ -912,28 +928,61 @@ function Invoke-PackageUi {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $xml = ''
     $approveVisible = $false
+    $showDetailsVisible = $false
     do {
         $xml = Get-UiHierarchy
-        $approveVisible = [bool](
-            $approveLabels |
-                Where-Object {
-                    $escaped = [Security.SecurityElement]::Escape($_)
-                    $xml -match (
-                        '(?:text|content-desc)="' +
-                        [regex]::Escape($escaped) +
-                        '"'
-                    )
-                } |
-                Select-Object -First 1
-        )
-        if ($approveVisible) { break }
+        $approveVisible = Test-UiTextPresent $xml $approveLabels
+        $showDetailsVisible = Test-UiTextPresent $xml $showDetailsLabels
+        if ($approveVisible -and $showDetailsVisible) { break }
+        Start-Sleep -Milliseconds 250
+    } while ($timer.Elapsed.TotalSeconds -lt 15)
+    if (-not $approveVisible) {
+        throw 'Tracebox approval action was not visible in the disclosure UI'
+    }
+    if (-not $showDetailsVisible) {
+        throw 'Tracebox technical-disclosure action was not visible in the disclosure UI'
+    }
+    foreach ($summaryMarker in @('diagnostic item', 'total', 'Raw crash artifacts are excluded.')) {
+        if (-not $xml.Contains($summaryMarker)) {
+            throw "Simple disclosure summary was missing: $summaryMarker"
+        }
+    }
+    if ($xml.Contains('Included values:') -or $xml.Contains('SHA-256:')) {
+        throw 'Technical disclosure facts were visible before explicit expansion'
+    }
+
+    Invoke-UiText $xml $showDetailsLabels
+    $timer.Restart()
+    do {
+        $xml = Get-UiHierarchy
+        if (
+            $xml.Contains('Included values:') -and
+            $xml.Contains('SHA-256:') -and
+            (Test-UiTextPresent $xml $hideDetailsLabels)
+        ) {
+            break
+        }
         Start-Sleep -Milliseconds 250
     } while ($timer.Elapsed.TotalSeconds -lt 15)
     if (-not $xml.Contains('Included values:') -or -not $xml.Contains('SHA-256:')) {
-        throw 'Exact disclosure facts were not visible in the Tracebox-owned UI'
+        throw 'Exact disclosure facts were not visible after explicit expansion'
     }
+    Invoke-UiText $xml $hideDetailsLabels
+    $timer.Restart()
+    do {
+        $xml = Get-UiHierarchy
+        $approveVisible = Test-UiTextPresent $xml $approveLabels
+        if (
+            $approveVisible -and
+            -not $xml.Contains('Included values:') -and
+            -not $xml.Contains('SHA-256:')
+        ) {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    } while ($timer.Elapsed.TotalSeconds -lt 15)
     if (-not $approveVisible) {
-        throw 'Tracebox approval action was not visible in the disclosure UI'
+        throw 'Tracebox approval action was not restored after collapsing technical details'
     }
 
     if (-not $Approve) {
