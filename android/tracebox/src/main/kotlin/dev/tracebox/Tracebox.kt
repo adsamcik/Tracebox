@@ -2578,6 +2578,15 @@ internal class DefaultTraceboxHandle(
         val nativeDirectory = nativeHandlerDirectory()
         check(
             ensureQuotaReservation(
+                nativeDirectory.resolve(CRASHPAD_DATABASE_DIRECTORY).resolve(CRASHPAD_SETTINGS_FILE),
+                UidBucket.METADATA,
+                CRASHPAD_SETTINGS_RESERVATION_BYTES,
+            ),
+        ) {
+            "Tracebox Crashpad settings quota exhausted"
+        }
+        check(
+            ensureQuotaReservation(
                 nativeDirectory.resolve("tracebox-emergency-$processRole.bin"),
                 UidBucket.EMERGENCY,
                 NATIVE_EMERGENCY_SLOT_BYTES,
@@ -4333,6 +4342,8 @@ internal class DefaultTraceboxHandle(
         const val HANDOFF_DIRECTORY = "tracebox-handler-handoff"
         const val CRASHPAD_DATABASE_DIRECTORY = "crashpad-db"
         const val CRASHPAD_PENDING_DIRECTORY = "pending"
+        const val CRASHPAD_SETTINGS_FILE = "settings.dat"
+        const val CRASHPAD_SETTINGS_RESERVATION_BYTES = 4L * 1024
         const val CLIENT_LIFECYCLE_DIRECTORY = "tracebox-handler-clients"
         const val CLIENT_LIFECYCLE_JOURNAL_BYTES = 384L
         const val SUMMARY_SPOOL_DIRECTORY = "summary-spool"
@@ -4556,6 +4567,7 @@ private const val POLICY_METADATA_PRESENT = 1L shl 53
 internal fun classifyCredentialProtectedStorage(path: OwnedStoragePath): UidBucket? {
     if (path.rootId != "ce" || !isSafeOwnedRelative(path.relativePath)) return null
     val relative = path.relativePath
+    val crashpadDatabaseBucket = classifyBoundedCrashpadDatabaseFile(relative)
     return when {
         relative == "policy-control-v1" ||
             relative == ".tracebox-primary.lock" ||
@@ -4587,7 +4599,7 @@ internal fun classifyCredentialProtectedStorage(path: OwnedStoragePath): UidBuck
         NATIVE_CLIENT_JOURNAL_PATH.matches(relative) -> UidBucket.METADATA
         NATIVE_HANDLER_START_PERMIT_PATH.matches(relative) -> UidBucket.METADATA
         NATIVE_HANDOFF_PATH.matches(relative) -> UidBucket.RAW_ARTIFACTS
-        isBoundedCrashpadDatabaseFile(relative) -> UidBucket.RAW_ARTIFACTS
+        crashpadDatabaseBucket != null -> crashpadDatabaseBucket
         else -> null
     }
 }
@@ -4866,12 +4878,18 @@ private fun isSafeOwnedRelative(relative: String): Boolean =
         '\\' !in relative &&
         relative.split('/').all { it.isNotBlank() && it != "." && it != ".." }
 
-private fun isBoundedCrashpadDatabaseFile(relative: String): Boolean {
+private fun classifyBoundedCrashpadDatabaseFile(relative: String): UidBucket? {
     val prefix = "native-handler/crashpad-db/"
-    if (!relative.startsWith(prefix)) return false
+    if (!relative.startsWith(prefix)) return null
     val components = relative.removePrefix(prefix).split('/')
-    return components.size in 1..4 &&
-        components.all { CRASHPAD_COMPONENT.matches(it) }
+    if (components.size !in 1..4 || components.any { !CRASHPAD_COMPONENT.matches(it) }) {
+        return null
+    }
+    return if (components.last().endsWith(".dmp")) {
+        UidBucket.RAW_ARTIFACTS
+    } else {
+        UidBucket.METADATA
+    }
 }
 
 private const val CANONICAL_ID_PATTERN = "[A-Za-z0-9_-]{43}"

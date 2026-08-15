@@ -13,6 +13,8 @@ import dev.tracebox.directboot.DirectBootWriteResult
 import dev.tracebox.nativecapture.TraceboxHandlerService
 import dev.tracebox.storage.OwnedStoragePath
 import dev.tracebox.storage.UidBucket
+import dev.tracebox.storage.UidQuota
+import dev.tracebox.storage.UidWideQuotaCoordinator
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -147,7 +149,9 @@ class TraceboxStorageLifecycleTest {
             "native-handler/tracebox-handler-start-permit-v1.new" to UidBucket.METADATA,
             "native-handler/tracebox-handler-handoff/$rawHex.dmp" to UidBucket.RAW_ARTIFACTS,
             "native-handler/crashpad-db/pending/report.dmp" to UidBucket.RAW_ARTIFACTS,
-            "native-handler/crashpad-db/pending/report.meta" to UidBucket.RAW_ARTIFACTS,
+            "native-handler/crashpad-db/pending/report.meta" to UidBucket.METADATA,
+            "native-handler/crashpad-db/pending/report.lock" to UidBucket.METADATA,
+            "native-handler/crashpad-db/settings.dat" to UidBucket.METADATA,
         )
 
         accepted.forEach { (relative, bucket) ->
@@ -168,6 +172,32 @@ class TraceboxStorageLifecycleTest {
             assertNull(classifyCredentialProtectedStorage(owned("ce", relative)), relative)
         }
         assertNull(classifyCredentialProtectedStorage(owned("de", "policy-control-v1")))
+    }
+
+    @Test
+    fun crashpad_database_metadata_does_not_consume_the_raw_capture_reserve() {
+        val root = Files.createTempDirectory("tracebox-crashpad-quota")
+        val rawLimit = 16L * 1024 * 1024
+        val coordinator = UidWideQuotaCoordinator(
+            root,
+            UidQuota(
+                UidBucket.entries.associateWith { bucket ->
+                    if (bucket == UidBucket.RAW_ARTIFACTS) rawLimit else 1024L * 1024
+                },
+            ),
+            UidBucket.entries.associateWith { 32 },
+        )
+        val settings = root.resolve("native-handler/crashpad-db/settings.dat")
+        val handoff = root.resolve("native-handler/tracebox-handler-handoff/${"a".repeat(64)}.dmp")
+        val settingsBucket = checkNotNull(
+            classifyCredentialProtectedStorage(
+                owned("ce", "native-handler/crashpad-db/settings.dat"),
+            ),
+        )
+
+        assertEquals(UidBucket.METADATA, settingsBucket)
+        assertTrue(coordinator.reserve(settings, settingsBucket, 4L * 1024))
+        assertTrue(coordinator.reserve(handoff, UidBucket.RAW_ARTIFACTS, rawLimit))
     }
 
     @Test
