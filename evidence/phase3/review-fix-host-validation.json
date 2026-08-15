@@ -1,0 +1,68 @@
+{
+  "phase": "Phase 3 review-fix",
+  "baseline_head": "d1ce738bc9a29a54884d1cae964c126fc3ae74fc",
+  "completed_at": "2026-07-19T10:17:35.273+02:00",
+  "commands": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-anr-exit:test :android:tracebox-core:test --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL in 1m 7s; 40 actionable tasks: 40 executed; configuration cache reused.",
+      "test_counts": {
+        "tracebox-anr-exit": 8,
+        "tracebox-core": 12,
+        "total": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "command": "cargo test --workspace --offline",
+      "exit_status": 0,
+      "actual": "All workspace unit and documentation tests passed; 24 unit tests passed, 0 failed.",
+      "test_counts": {
+        "tracebox": 3,
+        "tracebox-identity": 4,
+        "tracebox-phase0": 14,
+        "tracebox-sys": 3,
+        "total": 24,
+        "failures": 0
+      }
+    }
+  ],
+  "review_findings": [
+    {
+      "id": 1,
+      "disposition": "APPLIED",
+      "evidence": "native_panic_sink_makes_hook_metadata_retrievable_from_the_bounded_bridge_sink passes. NativePanicRecordSink records a bounded PanicRecordV1 and drain_panic_records_v1 returns the exact payload kind, location flag, line, and column from the fixed 64-entry process-local ring.",
+      "remaining_gap": "Android/JNI/native consumption of the Rust-side ring is not wired."
+    },
+    {
+      "id": 2,
+      "disposition": "APPLIED",
+      "evidence": "exact_source_key_is_durable_across_ledger_reconstruction_and_exhaustion_never_evicts passes: a fresh ExitTombstoneLedger instance reloads the first key and its persisted disabled state, returns ALREADY_IMPORTED for it, and rejects a new key. source_key_distinguishes_every_documented_exit_identity_field passes for package/process name, UID, PID, timestamp, reason, status, importance, summary digest, and artifact kind.",
+      "remaining_gap": "The live Android ApplicationExitInfo adapter and crash-safe raw-import journal are still unwired."
+    },
+    {
+      "id": 3,
+      "disposition": "APPLIED",
+      "evidence": "best_effort_plan_invokes_prior_once_then_forces_default_termination_if_it_returns passes. The read-only native reference is tracebox_bridge.cc lines 261-265: \"syscall(SYS_tgkill, getpid(), gettid(), signal_number); if (default_action != nullptr) { sigaction(signal_number, default_action, nullptr); syscall(SYS_tgkill, getpid(), gettid(), signal_number); }\". The Kotlin plan now represents one prior-handler invocation and conditional default termination.",
+      "remaining_gap": "A true JNI/native policy handoff remains pending."
+    },
+    {
+      "id": 4,
+      "disposition": "APPLIED",
+      "evidence": "recovered_is_serialized_after_an_inflight_candidate_transition passes using CountDownLatch gates: the candidate transition holds the state-machine monitor inside policy evaluation, recovery queues behind it, then the final state is HEALTHY after recovery.",
+      "remaining_gap": "No device-level watchdog measurement was run."
+    }
+  ],
+  "protected_paths": {
+    "native/crashpad/overlay/tracebox_bridge.cc": "zero diff",
+    "native/emergency/tracebox_emergency.c": "zero diff",
+    "evidence/phase0": "zero diff",
+    "evidence/phase1": "zero diff",
+    "evidence/phase2": "zero diff",
+    "docs/adr": "zero diff"
+  },
+  "result": "PASS_WITH_REMAINING_PHASE3_INTEGRATION_GAPS"
+}

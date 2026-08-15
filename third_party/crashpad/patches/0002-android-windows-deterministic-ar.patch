@@ -1,0 +1,47 @@
+diff --git a/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn b/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
+index f8e488f..80a22be 100644
+--- a/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
++++ b/third_party/mini_chromium/mini_chromium/build/config/BUILD.gn
+@@ -616,7 +616,14 @@ toolchain("gcc_like_toolchain") {
+     if (mini_chromium_is_mac || mini_chromium_is_ios) {
+       command = "libtool -static -no_warning_for_no_symbols {{arflags}}${extra_arflags} -o {{output}} {{inputs}}"
++    } else if (host_os == "win" && mini_chromium_is_android) {
++      android_ar = rebase_path("android_ar.py", root_build_dir)
++      command =
++          "python \"$android_ar\" \"$ar\" \"{{output}}\" " +
++          "{{arflags}}${extra_arflags} {{inputs}}"
+     } else {
+-      command = "rm -f {{output}}; $ar rcsD {{arflags}}${extra_arflags} {{output}} {{inputs}}"
++      command =
++          "rm -f {{output}}; $ar rcsD {{arflags}}${extra_arflags} " +
++          "{{output}} {{inputs}}"
+     }
+     description = "AR {{output}}"
+     default_output_dir = "{{target_out_dir}}"
+diff --git a/third_party/mini_chromium/mini_chromium/build/config/android_ar.py b/third_party/mini_chromium/mini_chromium/build/config/android_ar.py
+new file mode 100644
+index 0000000..c32d88d
+--- /dev/null
++++ b/third_party/mini_chromium/mini_chromium/build/config/android_ar.py
+@@ -0,0 +1,21 @@
++# Copyright 2026 The Tracebox Authors
++# Licensed under the Apache License, Version 2.0.
++
++import os
++import subprocess
++import sys
++
++
++def main() -> int:
++    if len(sys.argv) < 4:
++        return 2
++    archive_tool = sys.argv[1]
++    output = sys.argv[2]
++    if os.path.exists(output):
++        os.unlink(output)
++    subprocess.check_call([archive_tool, "rcsD", output, *sys.argv[3:]])
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

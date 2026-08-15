@@ -1,0 +1,10 @@
+{
+  "schema": "tracebox-malicious-archive-corpus-v1",
+  "cases": [
+    {"id":"ARCHIVE.EMPTY","command":"validate","kind":"hex","value":""},
+    {"id":"ARCHIVE.TRUNCATED_LOCAL_HEADER","command":"validate","kind":"hex","value":"504b0304"},
+    {"id":"ARCHIVE.PATH_TRAVERSAL","command":"validate","kind":"zip_entry","entry":"../escape","payload_base64":"eA=="},
+    {"id":"ARCHIVE.ABSOLUTE_PATH","command":"validate","kind":"zip_entry","entry":"/absolute","payload_base64":"eA=="},
+    {"id":"PACKAGE.TRUNCATED_RECORD","command":"decode","kind":"zip_entry","entry":"records/000001.tbr","payload_base64":"AA=="}
+  ]
+}

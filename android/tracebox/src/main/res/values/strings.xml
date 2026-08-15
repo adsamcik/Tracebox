@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tracebox_package_clip_label">Tracebox package</string>
+    <string name="tracebox_package_share_title">Share Tracebox package</string>
+    <string name="tracebox_disclosure_title">Review diagnostic package</string>
+    <string name="tracebox_disclosure_privacy_notice">Nothing leaves this device until you approve this exact package.</string>
+    <plurals name="tracebox_disclosure_item_count">
+        <item quantity="one">%1$d diagnostic item</item>
+        <item quantity="other">%1$d diagnostic items</item>
+    </plurals>
+    <string name="tracebox_disclosure_total_size">%1$s total</string>
+    <string name="tracebox_disclosure_summary">Raw crash artifacts are excluded. Privacy transformations are already applied.</string>
+    <string name="tracebox_disclosure_show_details">Show technical details</string>
+    <string name="tracebox_disclosure_hide_details">Hide technical details</string>
+    <string name="tracebox_disclosure_approve">Approve and continue</string>
+    <string name="tracebox_disclosure_cancel">Cancel</string>
+    <string name="tracebox_disclosure_included_values">Included values: %1$d</string>
+    <string name="tracebox_disclosure_included_bytes">Included bytes: %1$d</string>
+    <string name="tracebox_disclosure_privacy_classes">Privacy classes: %1$s</string>
+    <string name="tracebox_disclosure_transformations">Transformations: %1$s</string>
+    <string name="tracebox_disclosure_omissions">Omissions: %1$s</string>
+    <string name="tracebox_disclosure_source_range">Source time range: %1$s</string>
+    <string name="tracebox_disclosure_source_processes">Source processes: %1$d</string>
+    <string name="tracebox_disclosure_raw_artifacts">Raw artifacts: %1$d</string>
+    <string name="tracebox_disclosure_warnings">Warnings: %1$s</string>
+    <string name="tracebox_disclosure_digest">SHA-256: %1$s</string>
+    <string name="tracebox_package_size_bytes">%1$d bytes</string>
+    <string name="tracebox_package_size_kilobytes">%1$d KB</string>
+    <string name="tracebox_package_size_megabytes">%1$d MB</string>
+</resources>

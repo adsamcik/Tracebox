@@ -1,0 +1,814 @@
+{
+  "requirement_id": "F0.3-F0.7",
+  "command": "tools\\android\\Run-Phase0Qualification.ps1 -Serial emulator-5554 -ExpectedApi 30 -ExpectedPageSize 4096 -HealthyMinutes 1 -IneligibleMinutes 1",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "reviewed_implementation_commit": "c0271e90e338e112aca34cbf0fcdc11e4024e9b9",
+  "start_time_utc": "2026-07-18T16:42:57.5674096Z",
+  "end_time_utc": "2026-07-18T17:07:32.7632933Z",
+  "timeout_seconds": 7200,
+  "exit_status": 2,
+  "exit_status_correction": {
+    "correction_date": "2026-07-18",
+    "original_recorded_exit_status": 0,
+    "corrected_exit_status": 2,
+    "basis": "The preserved result is FAIL and Run-Phase0Qualification.ps1 exits 2 when any frozen check fails. This is a metadata-only correction; the API 30 measurements were not rerun or altered.",
+    "reviewed_head_before_correction": "ed7ae2190466fa0cf99098c52b63063fcfff98f9"
+  },
+  "endpoint": {
+    "serial": "emulator-5554",
+    "api": 30,
+    "abi": "x86_64",
+    "page_size": 4096
+  },
+  "process_topology": {
+    "app_pid": 19569,
+    "handler_pid": 19597,
+    "worker_pid": 19607
+  },
+  "startup": {
+    "samples": 30,
+    "volatile_us_p50": 14174,
+    "volatile_us_p95": 119915,
+    "volatile_us_p99": 194925,
+    "durable_ms_p50": 606,
+    "durable_ms_p95": 1905,
+    "durable_ms_p99": 2721,
+    "details": [
+      {
+        "iteration": 1,
+        "volatile_us": 51856,
+        "durable_ms": 1505
+      },
+      {
+        "iteration": 2,
+        "volatile_us": 3023,
+        "durable_ms": 785
+      },
+      {
+        "iteration": 3,
+        "volatile_us": 5029,
+        "durable_ms": 558
+      },
+      {
+        "iteration": 4,
+        "volatile_us": 1765,
+        "durable_ms": 437
+      },
+      {
+        "iteration": 5,
+        "volatile_us": 81396,
+        "durable_ms": 631
+      },
+      {
+        "iteration": 6,
+        "volatile_us": 3758,
+        "durable_ms": 466
+      },
+      {
+        "iteration": 7,
+        "volatile_us": 26268,
+        "durable_ms": 649
+      },
+      {
+        "iteration": 8,
+        "volatile_us": 1586,
+        "durable_ms": 694
+      },
+      {
+        "iteration": 9,
+        "volatile_us": 20195,
+        "durable_ms": 604
+      },
+      {
+        "iteration": 10,
+        "volatile_us": 14174,
+        "durable_ms": 529
+      },
+      {
+        "iteration": 11,
+        "volatile_us": 119915,
+        "durable_ms": 526
+      },
+      {
+        "iteration": 12,
+        "volatile_us": 27531,
+        "durable_ms": 1001
+      },
+      {
+        "iteration": 13,
+        "volatile_us": 12276,
+        "durable_ms": 533
+      },
+      {
+        "iteration": 14,
+        "volatile_us": 100206,
+        "durable_ms": 1905
+      },
+      {
+        "iteration": 15,
+        "volatile_us": 194925,
+        "durable_ms": 2721
+      },
+      {
+        "iteration": 16,
+        "volatile_us": 19525,
+        "durable_ms": 594
+      },
+      {
+        "iteration": 17,
+        "volatile_us": 86225,
+        "durable_ms": 698
+      },
+      {
+        "iteration": 18,
+        "volatile_us": 98303,
+        "durable_ms": 688
+      },
+      {
+        "iteration": 19,
+        "volatile_us": 2130,
+        "durable_ms": 1337
+      },
+      {
+        "iteration": 20,
+        "volatile_us": 5946,
+        "durable_ms": 606
+      },
+      {
+        "iteration": 21,
+        "volatile_us": 22037,
+        "durable_ms": 756
+      },
+      {
+        "iteration": 22,
+        "volatile_us": 34044,
+        "durable_ms": 606
+      },
+      {
+        "iteration": 23,
+        "volatile_us": 1521,
+        "durable_ms": 521
+      },
+      {
+        "iteration": 24,
+        "volatile_us": 9379,
+        "durable_ms": 356
+      },
+      {
+        "iteration": 25,
+        "volatile_us": 2180,
+        "durable_ms": 491
+      },
+      {
+        "iteration": 26,
+        "volatile_us": 38859,
+        "durable_ms": 362
+      },
+      {
+        "iteration": 27,
+        "volatile_us": 2126,
+        "durable_ms": 448
+      },
+      {
+        "iteration": 28,
+        "volatile_us": 3729,
+        "durable_ms": 646
+      },
+      {
+        "iteration": 29,
+        "volatile_us": 20174,
+        "durable_ms": 652
+      },
+      {
+        "iteration": 30,
+        "volatile_us": 11437,
+        "durable_ms": 275
+      }
+    ]
+  },
+  "healthy": {
+    "minutes": 1,
+    "false_candidates": 0,
+    "handler_cpu_percent": 0.11666666666666668,
+    "app_cpu_percent": 0.05,
+    "handler_context_switch_delta": 0,
+    "heartbeat_per_minute": 32,
+    "heartbeat_main_work_ns_p99": 807200,
+    "handler_pss_kib_samples": [
+      7221
+    ],
+    "handler_pss_kib_max": 7221.0
+  },
+  "ineligible": {
+    "minutes": 1,
+    "start": {
+      "posted": 96,
+      "acknowledged": 95,
+      "eligible": false,
+      "heartbeat_p99_ns": 807200
+    },
+    "end": {
+      "posted": 96,
+      "acknowledged": 95,
+      "eligible": false,
+      "heartbeat_p99_ns": 807200
+    },
+    "heartbeat_delta": 0
+  },
+  "nonfatal": {
+    "samples": 30,
+    "captured": 30,
+    "elapsed_us_p50": 209860,
+    "elapsed_us_p95": 522606,
+    "elapsed_us_p99": 622566,
+    "pause_us_p50": 172146,
+    "pause_us_p95": 431458,
+    "pause_us_p99": 477014,
+    "pause_us_max": 477014.0,
+    "details": [
+      {
+        "iteration": 1,
+        "captured": true,
+        "elapsed_us": 222075,
+        "main_pause_us": 23786
+      },
+      {
+        "iteration": 2,
+        "captured": true,
+        "elapsed_us": 212077,
+        "main_pause_us": 168028
+      },
+      {
+        "iteration": 3,
+        "captured": true,
+        "elapsed_us": 147943,
+        "main_pause_us": 132641
+      },
+      {
+        "iteration": 4,
+        "captured": true,
+        "elapsed_us": 93669,
+        "main_pause_us": 93045
+      },
+      {
+        "iteration": 5,
+        "captured": true,
+        "elapsed_us": 179303,
+        "main_pause_us": 168902
+      },
+      {
+        "iteration": 6,
+        "captured": true,
+        "elapsed_us": 205004,
+        "main_pause_us": 182166
+      },
+      {
+        "iteration": 7,
+        "captured": true,
+        "elapsed_us": 181087,
+        "main_pause_us": 106690
+      },
+      {
+        "iteration": 8,
+        "captured": true,
+        "elapsed_us": 160668,
+        "main_pause_us": 114300
+      },
+      {
+        "iteration": 9,
+        "captured": true,
+        "elapsed_us": 350223,
+        "main_pause_us": 340720
+      },
+      {
+        "iteration": 10,
+        "captured": true,
+        "elapsed_us": 236402,
+        "main_pause_us": 235053
+      },
+      {
+        "iteration": 11,
+        "captured": true,
+        "elapsed_us": 341180,
+        "main_pause_us": 326879
+      },
+      {
+        "iteration": 12,
+        "captured": true,
+        "elapsed_us": 248674,
+        "main_pause_us": 232516
+      },
+      {
+        "iteration": 13,
+        "captured": true,
+        "elapsed_us": 112699,
+        "main_pause_us": 11053
+      },
+      {
+        "iteration": 14,
+        "captured": true,
+        "elapsed_us": 129645,
+        "main_pause_us": 129296
+      },
+      {
+        "iteration": 15,
+        "captured": true,
+        "elapsed_us": 156035,
+        "main_pause_us": 22073
+      },
+      {
+        "iteration": 16,
+        "captured": true,
+        "elapsed_us": 123997,
+        "main_pause_us": 15399
+      },
+      {
+        "iteration": 17,
+        "captured": true,
+        "elapsed_us": 522606,
+        "main_pause_us": 396215
+      },
+      {
+        "iteration": 18,
+        "captured": true,
+        "elapsed_us": 207240,
+        "main_pause_us": 169792
+      },
+      {
+        "iteration": 19,
+        "captured": true,
+        "elapsed_us": 317723,
+        "main_pause_us": 317088
+      },
+      {
+        "iteration": 20,
+        "captured": true,
+        "elapsed_us": 438247,
+        "main_pause_us": 372041
+      },
+      {
+        "iteration": 21,
+        "captured": true,
+        "elapsed_us": 495028,
+        "main_pause_us": 431458
+      },
+      {
+        "iteration": 22,
+        "captured": true,
+        "elapsed_us": 622566,
+        "main_pause_us": 477014
+      },
+      {
+        "iteration": 23,
+        "captured": true,
+        "elapsed_us": 333299,
+        "main_pause_us": 203034
+      },
+      {
+        "iteration": 24,
+        "captured": true,
+        "elapsed_us": 190163,
+        "main_pause_us": 172146
+      },
+      {
+        "iteration": 25,
+        "captured": true,
+        "elapsed_us": 449267,
+        "main_pause_us": 382828
+      },
+      {
+        "iteration": 26,
+        "captured": true,
+        "elapsed_us": 323947,
+        "main_pause_us": 311603
+      },
+      {
+        "iteration": 27,
+        "captured": true,
+        "elapsed_us": 324214,
+        "main_pause_us": 257516
+      },
+      {
+        "iteration": 28,
+        "captured": true,
+        "elapsed_us": 209860,
+        "main_pause_us": 208499
+      },
+      {
+        "iteration": 29,
+        "captured": true,
+        "elapsed_us": 128838,
+        "main_pause_us": 119902
+      },
+      {
+        "iteration": 30,
+        "captured": true,
+        "elapsed_us": 165871,
+        "main_pause_us": 142337
+      }
+    ]
+  },
+  "anr": {
+    "samples": 10,
+    "candidates": 10,
+    "snapshots": 1,
+    "details": [
+      {
+        "iteration": 1,
+        "delay_ms": 5001,
+        "frames": 14,
+        "snapshot": true
+      },
+      {
+        "iteration": 2,
+        "delay_ms": 5035,
+        "frames": 14,
+        "snapshot": false
+      },
+      {
+        "iteration": 3,
+        "delay_ms": 5018,
+        "frames": 14,
+        "snapshot": false
+      },
+      {
+        "iteration": 4,
+        "delay_ms": 5021,
+        "frames": 14,
+        "snapshot": false
+      },
+      {
+        "iteration": 5,
+        "delay_ms": 5011,
+        "frames": 14,
+        "snapshot": false
+      },
+      {
+        "iteration": 6,
+        "delay_ms": 5010,
+        "frames": 14,
+        "snapshot": false
+      },
+      {
+        "iteration": 7,
+        "delay_ms": 5014,
+        "frames": 14,
+        "snapshot": false
+      },
+      {
+        "iteration": 8,
+        "delay_ms": 5018,
+        "frames": 14,
+        "snapshot": false
+      },
+      {
+        "iteration": 9,
+        "delay_ms": 5002,
+        "frames": 14,
+        "snapshot": false
+      },
+      {
+        "iteration": 10,
+        "delay_ms": 5016,
+        "frames": 14,
+        "snapshot": false
+      }
+    ]
+  },
+  "privacy": {
+    "raw_seed_matches": 1,
+    "summary_seed_matches": 0,
+    "internal_id_binary_matches": 0,
+    "emergency_identity_established": false,
+    "stream_inventory": [
+      {
+        "type": 7,
+        "name": "SystemInfoStream",
+        "size": 56
+      },
+      {
+        "type": 15,
+        "name": "MiscInfoStream",
+        "size": 832
+      },
+      {
+        "type": 3,
+        "name": "ThreadListStream",
+        "size": 820
+      },
+      {
+        "type": 24,
+        "name": "ThreadNamesStream",
+        "size": 208
+      },
+      {
+        "type": 6,
+        "name": "ExceptionStream",
+        "size": 168
+      },
+      {
+        "type": 4,
+        "name": "ModuleListStream",
+        "size": 29272
+      },
+      {
+        "type": 1129316353,
+        "name": "CrashpadInfoStream",
+        "size": 64
+      },
+      {
+        "type": 5,
+        "name": "MemoryListStream",
+        "size": 276
+      }
+    ]
+  },
+  "timeout_cancellation": [
+    {
+      "iteration": 1,
+      "elapsed_ms": 2347.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 2,
+      "elapsed_ms": 3703.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 3,
+      "elapsed_ms": 2546.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 4,
+      "elapsed_ms": 2769.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 5,
+      "elapsed_ms": 2598.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 6,
+      "elapsed_ms": 4005.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 7,
+      "elapsed_ms": 3007.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 8,
+      "elapsed_ms": 2983.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 9,
+      "elapsed_ms": 2905.0,
+      "result": "cancelled"
+    },
+    {
+      "iteration": 10,
+      "elapsed_ms": 2470.0,
+      "result": "cancelled"
+    }
+  ],
+  "fatal": {
+    "samples": 30,
+    "latency_ms_p50": 2019,
+    "latency_ms_p95": 6533,
+    "latency_ms_p99": 8941,
+    "details": [
+      {
+        "iteration": 1,
+        "elapsed_ms": 8941.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 2,
+        "elapsed_ms": 3127.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 3,
+        "elapsed_ms": 3352.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 4,
+        "elapsed_ms": 2019.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 5,
+        "elapsed_ms": 2500.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 6,
+        "elapsed_ms": 3069.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 7,
+        "elapsed_ms": 1642.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 8,
+        "elapsed_ms": 1357.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 9,
+        "elapsed_ms": 1415.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 10,
+        "elapsed_ms": 1209.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 11,
+        "elapsed_ms": 1730.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 12,
+        "elapsed_ms": 1702.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 13,
+        "elapsed_ms": 1740.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 14,
+        "elapsed_ms": 1895.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 15,
+        "elapsed_ms": 2122.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 16,
+        "elapsed_ms": 1516.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 17,
+        "elapsed_ms": 1276.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 18,
+        "elapsed_ms": 2033.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 19,
+        "elapsed_ms": 2444.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 20,
+        "elapsed_ms": 795.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 21,
+        "elapsed_ms": 988.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 22,
+        "elapsed_ms": 1216.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 23,
+        "elapsed_ms": 1521.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 24,
+        "elapsed_ms": 6533.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 25,
+        "elapsed_ms": 4100.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 26,
+        "elapsed_ms": 6437.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 27,
+        "elapsed_ms": 2055.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 28,
+        "elapsed_ms": 3187.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 29,
+        "elapsed_ms": 3394.0,
+        "artifact_created": true
+      },
+      {
+        "iteration": 30,
+        "elapsed_ms": 3196.0,
+        "artifact_created": true
+      }
+    ]
+  },
+  "handler_lifecycle": {
+    "death_notified": true,
+    "reconnected": true,
+    "crash_loop_blocked": true
+  },
+  "emergency": [
+    {
+      "fault": "early_abort",
+      "validator_exit": 0,
+      "validator_output": "valid emergency record v1",
+      "process_log": "I/Zygote  (  299): Process 25272 exited due to signal 6 (Aborted)"
+    },
+    {
+      "fault": "early_stack",
+      "validator_exit": 0,
+      "validator_output": "valid emergency record v1",
+      "process_log": [
+        "F/libc    (25319): exiting due to SIG_DFL handler for signal 11",
+        "I/Zygote  (  299): Process 25319 exited due to signal 6 (Aborted)"
+      ]
+    },
+    {
+      "fault": "early_recursive",
+      "validator_exit": 1,
+      "validator_output": "invalid emergency record: InvalidMagic",
+      "process_log": "I/Zygote  (  299): Process 25366 exited due to signal 6 (Aborted)"
+    },
+    {
+      "fault": "emergency_short",
+      "validator_exit": 1,
+      "validator_output": "invalid emergency record: Incomplete"
+    },
+    {
+      "fault": "emergency_failed",
+      "validator_exit": 1,
+      "validator_output": "invalid emergency record: InvalidMagic"
+    }
+  ],
+  "quota": {
+    "attempts": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ],
+    "retained_dumps": 8
+  },
+  "pass_checks": {
+    "false_positive_rate": true,
+    "install_to_volatile": false,
+    "time_to_durable": false,
+    "handler_cpu": false,
+    "app_cpu": true,
+    "handler_pss": true,
+    "heartbeat_rate": false,
+    "heartbeat_main_work": false,
+    "ineligible_heartbeat": true,
+    "nonfatal_capture": true,
+    "nonfatal_deadline": true,
+    "target_pause": false,
+    "deterministic_stalls": true,
+    "watchdog_rate_limit": true,
+    "seeded_raw": true,
+    "seeded_summary": true,
+    "internal_identity": true,
+    "quota_count": true,
+    "timeout_cancellation": false,
+    "fatal_capture": false,
+    "handler_lifecycle": true,
+    "emergency_faults": true
+  },
+  "matrix_cell": "API30_x86_64_4096B_MINIFIED_RELEASE",
+  "result": "FAIL"
+}

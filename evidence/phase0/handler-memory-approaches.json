@@ -1,0 +1,43 @@
+{
+  "requirement_id": "F0.7-HANDLER-PSS",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "threshold": {
+    "handler_idle_pss_kib_max": 12288
+  },
+  "attempts": [
+    {
+      "approach": "Debuggable Android service process hosting HandlerMain",
+      "command": "adb -s emulator-5558 shell dumpsys meminfo <handler-pid>",
+      "endpoint": "API30_x86_64_4K_DEBUG",
+      "actual_assertions": {
+        "handler_pss_kib": 17509,
+        "handler_rss_kib": 103076
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "Exec service process into linker64 plus native trampoline",
+      "command": "HandlerService JNI execl(/system/bin/linker64, trampoline, handler library, ...)",
+      "endpoint": "API30_x86_64_4K_DEBUG",
+      "actual_assertions": {
+        "native_exec_succeeded": true,
+        "android_service_process_survived": false,
+        "failure": "ActivityManager observed loss of the service Binder runtime and killed the exec-transformed PID with SIGKILL"
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "Minified non-debuggable release service process with stripped capture-only native library",
+      "command": "adb -s emulator-5554 shell dumpsys meminfo 5998",
+      "endpoint": "API30_x86_64_4K_MINIFIED_RELEASE",
+      "actual_assertions": {
+        "handler_pss_kib_initial_probe": 6516,
+        "handler_pss_kib_final_qualification": 7221,
+        "threshold_kib": 12288
+      },
+      "result": "PASS"
+    }
+  ],
+  "result": "PASS",
+  "selected_approach": "Minified non-debuggable release service process"
+}

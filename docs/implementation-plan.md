@@ -1,18 +1,21 @@
 # Tracebox Implementation Plan
 
-**Status:** Proposed  
+**Status:** Active under ADR-0010 personal-project scope
+
 **Companion design:** `docs/architecture/tracebox-design.md`
+
+**Execution roadmap:** `docs/project/personal-project-roadmap.md`
 
 ## 1. Delivery strategy
 
-Implementation proceeds through feasibility gates and vertical slices. Crashpad and live ANR monitoring are foundation requirements, so their feasibility is tested before the rest of the platform is allowed to grow around unproven assumptions.
+Implementation proceeds through feasibility gates and vertical slices. Crashpad and live ANR monitoring remain foundation requirements. Host tests carry most deterministic logic, and one API 36 `x86_64` emulator is the only required Android runtime lane under ADR-0009 and ADR-0010.
 
 Size scale:
 
 - **S:** localized, low uncertainty;
 - **M:** multiple components or meaningful testing;
 - **L:** cross-module or native/platform complexity;
-- **XL:** major uncertainty, security exposure, or certification burden.
+- **XL:** major uncertainty, security exposure, or validation burden.
 
 ## 2. Critical path
 
@@ -24,7 +27,7 @@ Product invariants and toolchains
   -> Crash/JVM/Rust/ANR pipelines
   -> Immutable package workflow
   -> Offline CLI and symbolication
-  -> No-network and platform certification
+  -> No-network proof and personal release readiness
 ```
 
 ## 3. Work packages
@@ -36,12 +39,13 @@ Product invariants and toolchains
 | F0.1 | Freeze terminology and invariants | — | Threat model, privacy classes, evidence grades, readiness states approved | Block coding | S |
 | F0.2 | Pin toolchains and dependencies | F0.1 | Gradle, AGP, Kotlin, JDK, NDK, CMake, Rust, Crashpad revisions locked and verified | Reviewed lock update only | M |
 | F0.3 | Crashpad privacy spike | F0.1-F0.2 | Raw stream inventory, structural-summary prototype, seeded-secret results | Revise raw-artifact policy | XL |
-| F0.4 | Android handler spike | F0.2 | Multi-client handler works on API 30/37, 4/16 KiB, restart/death behavior measured | Block foundation; narrowing requires a superseding ADR | XL |
-| F0.5 | Emergency fallback spike | F0.2 | Fixed signal record survives startup/IPC failure and stack overflow on registered threads; unregistered behavior documented | Re-raise without capture | L |
-| F0.6 | Live ANR spike | F0.3-F0.4 | Healthy overhead, candidate capture, nonfatal request, lifecycle adaptation, maximum target pause, timeout/cancellation, and raw-artifact size measured | Local-only candidate plus exit reconciliation | L |
-| F0.7 | Baseline artifact and PSS measurement | F0.3-F0.6 | Per-ABI size, handler PSS/CPU/wakeups, app overhead recorded | Update provisional budgets by ADR | M |
+| F0.4 | Android handler spike | F0.2 | Consolidated handler restart smoke proves cold attach, client survival, replacement, and a post-restart policy action on the required emulator | Host lifecycle tests cover the broader fault matrix | L |
+| F0.5 | Emergency fallback spike | F0.2 | Host/native fault tests plus retained targeted API 36 fallback evidence | Re-raise without capture | M |
+| F0.6 | Live ANR spike | F0.3-F0.4 | Host lifecycle/state-machine tests plus one real bounded `ANR.CANDIDATE` smoke | Local-only candidate plus exit reconciliation | M |
+| F0.7 | Optional artifact/resource observation | F0.3-F0.6 | Retain historical artifact evidence; record one-emulator startup/PSS observations only when useful | Hard bounds are covered by T5.5; no dedicated measurement campaign under ADR-0010 | S |
 
-**Phase gate:** Crashpad and ANR feasibility must pass before foundation API commitments are finalized.
+**Historical phase gate:** Superseded by ADR-0008. Personal release uses the
+mandatory host gates and representative emulator set defined by ADR-0010.
 
 ### Phase 1: Contracts and generation
 
@@ -82,7 +86,10 @@ Product invariants and toolchains
 | X3.9 | Live ANR watchdog | F0.6, X3.3, R2.1, R2.5 | Adaptive heartbeat, suppression, bounded candidate capture, on-demand raw snapshot lifecycle, target-pause and timeout gates | L |
 | X3.10 | Exit reconciliation | C1.6, R2.4-R2.5, R2.8, X3.6-X3.9 | Capture-time policy token gates raw import; full rescans use installation-lifetime exact source tombstones and crash-safe import; tombstone exhaustion disables raw import rather than evicting | L |
 
-**Phase gate:** managed, C++, Rust, Crashpad, fallback, and ANR fault matrices pass on the minimum supported matrix.
+**Personal-release gate:** the manifest's representative JVM, C++, ANR, exit,
+handler, deletion, package, and network scenarios pass on the required emulator.
+Rust, emergency, recursive-fault, and extended lifecycle cases remain available
+as host tests or opt-in diagnostics.
 
 ### Phase 4: Package and user workflow
 
@@ -96,16 +103,16 @@ Product invariants and toolchains
 | P4.6 | SAF save | P4.4 | Internal finalization, cancellable background copy, partial warning | M |
 | P4.7 | Final receipt integration | P4.5-P4.6 | Accurate generation, save, handoff, cancellation, and unknown-delivery outcomes | M |
 
-### Phase 5: Tooling and certification
+### Phase 5: Tooling and personal release readiness
 
 | ID | Work | Depends on | Output / acceptance | Size |
 |---|---|---|---|---|
 | T5.1 | Bounded Rust parser/validator | P4.2-P4.3 | Fuzzed streaming parser and malicious corpus | XL |
 | T5.2 | Gradle build/symbol plugin | C1.6 | R8, ELF, schema, provenance, manifest and dependency checks | XL |
 | T5.3 | Offline retrace/symbolication | T5.1-T5.2 | Exact identity matching; mixed Rust/C++ stacks | L |
-| T5.4 | No-network conformance | All foundation modules | Static, manifest, native and runtime proof | L |
-| T5.5 | Performance/battery qualification | R2.x-X3.x-P4.x | Device baselines and invariant checks | L |
-| T5.6 | Foundation release certification | All previous | Full declared platform matrix passes | XL |
+| T5.4 | No-network conformance | All foundation modules | Static, manifest, DEX/native and one-emulator blocked-egress smoke proof | L |
+| T5.5 | Personal-project resource qualification | R2.x-X3.x-P4.x | Hard architectural bounds plus optional emulator observations | S |
+| T5.6 | Personal release readiness | All mandatory implementation | Host gates, representative one-emulator smoke, documentation, and final review pass | M |
 
 ### Phase 6: Gated extensions
 
@@ -123,25 +130,27 @@ After Phase 0:
 - **Native lane:** X3.1-X3.5 prototypes hardened against the frozen ABI.
 - **Runtime lane:** R2.1-R2.7.
 - **Tooling lane:** initial Rust parser and symbol-catalog scaffolding.
-- **QA lane:** device farm, crash lab, performance harness, and network observation fixtures.
+- **QA lane:** consolidated lab app, host fault corpora, one-emulator smoke runner, and network observation controls.
 
 The package lane begins only after record and identity contracts stabilize.
 
-## 5. Required test applications
+## 5. Diagnostic scenario inventory
 
-| Fixture | Purpose |
+ADR-0010 preserves the broader scenarios as an opt-in diagnostic inventory and
+permits a smaller fixture topology:
+
+| Fixture or variant | Scenarios |
 |---|---|
-| `no-internet` | Prove merged manifest and runtime remain offline |
-| `host-with-internet` | Prove Tracebox does not use host networking capability |
-| `multiprocess` | Writers, handler clients, quotas, and reconciliation |
-| `crash-lab` | Managed, C++, Rust, recursive, OOM, stack overflow |
-| `handler-conflict` | Exclusive, chaining, and disable-on-conflict |
-| `anr-lab` | Deadlock, busy loop, binder wait, starvation, lifecycle states |
-| `responsive-main-anr` | OS ANRs that occur while the main looper remains responsive |
-| `direct-boot` | C0-only pre-unlock behavior |
-| `deletion-lab` | Process death and I/O failure at every deletion-journal transition |
-| `release-r8` | Mapping IDs, inlining, obfuscation and symbol catalog |
-| `malicious-package` | Parser and archive security corpus |
+| `tracebox-lab` | Multiprocess writers, handler clients, managed/C++/Rust faults, recursive faults, OOM, stack overflow, handler conflict/death, ANR variants, Direct Boot, deletion, restart, and storage pressure |
+| `tracebox-lab-no-internet` | Merged manifest and runtime without host networking capability |
+| `tracebox-lab-host-network` | Prove Tracebox does not use host-owned networking capability |
+| `tracebox-lab-release-r8` | Minification, mapping IDs, inlining, obfuscation, and symbol catalogs |
+| Host malicious corpora | Parser, archive, symbol-catalog, and bounded-allocation security cases |
+
+Only IDs listed in `personal_release_required` in
+`tooling/fixtures/personal-release-scenarios.json` block personal release.
+`-FullDiagnosticSuite` runs the retained inventory when deeper investigation is
+useful. Separate Android applications are not required.
 
 ## 6. Performance plan
 
@@ -154,21 +163,12 @@ The package lane begins only after record and identity contracts stabilize.
 - no unbounded retries or queues;
 - hard process-role and UID-wide quota enforcement.
 
-### Measurements
+### Personal-project observations
 
-Measure app process, handler process, and aggregate UID separately:
-
-- PSS/RSS and private dirty memory;
-- CPU time and scheduling wakeups;
-- allocation count and retained heap;
-- disk bytes and fsync latency;
-- crash-to-artifact latency;
-- ANR heartbeat and candidate overhead;
-- package throughput and working memory;
-- APK/AAB and per-ABI native size;
-- energy during foreground, background, cached, and crash-loop scenarios.
-
-Report p50/p95/p99 by API, ABI, page size, vendor, and process state.
+The architectural invariants above and their host tests are release gates.
+Startup time or PSS may be recorded once when diagnosing a regression.
+CPU/wakeup campaigns, latency percentiles, battery studies, package-memory
+benchmarks, and API/ABI/vendor/device matrices are optional.
 
 ## 7. ADR sequence
 
@@ -188,13 +188,17 @@ Report p50/p95/p99 by API, ABI, page size, vendor, and process state.
 14. Performance governance.
 15. Application-layer at-rest encryption after qualification.
 16. Age recipient encryption after review.
+17. Personal-project release scope and Tracker integration.
 
-## 8. Definition of foundation complete
+## 8. Definition of personal release ready
 
-Foundation is complete only when:
+Tracebox is `PERSONAL_RELEASE_READY` only when:
 
-- Crashpad and emergency capture pass the supported device/fault matrix.
-- Live ANR overhead and false-positive gates pass.
+- all foundation implementation work packages are connected and contain no production stubs;
+- host/native tests cover Crashpad and emergency fallback, while the
+  representative JVM and C++ fatal scenarios pass on the required emulator;
+- host state-machine tests cover ANR bounds/suppression, while
+  `ANR.CANDIDATE` and exit reconciliation pass once on the required emulator;
 - All generated privacy invariants pass.
 - Segments recover correctly under fault injection.
 - Handler summary persistence/import survives handler or client death without deleting the only raw evidence.
@@ -202,7 +206,6 @@ Foundation is complete only when:
 - Recovery after extractor/schema upgrade reuses the pre-append frozen summary derivation tuple.
 - Recovery after journal commit appends the exact staged canonical summary bytes and verifies their digest.
 - Import acknowledgement cannot retire the source before the target summary is durably recoverable.
-- Selective deletion removes an in-scope summary ID from both spool and imported stores before reporting completion.
 - Full-quota compaction stays within the reserved workspace and permits forward progress.
 - No Tracebox internal ID is intentionally encoded in package metadata, paths, generated records, annotations, or custom streams; raw artifacts matching known encodings are rejected.
 - Policy loosening cannot import an older OS artifact whose capture-time token did not permit raw import.
@@ -210,9 +213,14 @@ Foundation is complete only when:
 - Equal-timestamp, reordered, paginated, and late-visible OS records are processed without cursor loss.
 - Process registration at every tightening/loosening boundary cannot escape the target epoch or token acknowledgement set.
 - Disabled never reports success with any accessible library-owned data remaining.
-- Selective deletion never reports success with accessible in-scope data remaining.
 - Exact preview/package digest equality is proven.
 - Offline retracing and symbolication reject mismatched artifacts.
-- No-network conformance passes for every published module combination.
-- Resource budgets are backed by physical-device measurements.
+- No-network static conformance passes for every published module combination and the required emulator smoke paths show no Tracebox-owned attempt.
+- Architectural resource invariants pass; emulator resource observations are optional.
 - Unsupported devices or configurations are explicitly documented.
+- The final release-diff review is approved.
+- No physical-device, OEM-family, broad API-matrix, or independent-certification claim is made.
+
+Completion of Phase 6 extensions and selective diagnostic-record deletion is
+not required. Tracker is the downstream personal-project evaluation host
+described by ADR-0010.

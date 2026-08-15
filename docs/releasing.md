@@ -7,10 +7,15 @@ vMAJOR.MINOR.PATCH-alpha.N
 ```
 
 The GitHub workflow rebuilds the annotated tagged commit, derives the publication
-version from the tag, publishes both AARs to GitHub Packages, verifies that both
-POMs and AARs can be fetched and resolved by a clean Gradle consumer from the
+version from the tag. The complete implementation publishes ten module AARs; release automation
+must verify every POM and AAR with a clean Gradle consumer from the
 repository-scoped Maven endpoint, then publishes a GitHub **pre-release** with
 checksums and legal notices.
+
+The current checked-in tag workflow predates the complete implementation and still assumes the
+two-module bootstrap. Do not create a new release until that approval-gated publishing workflow is
+updated and reviewed for all modules. Local publication and consumer checks do not contact GitHub
+and remain safe for development.
 
 ## One-time repository setup
 
@@ -50,10 +55,10 @@ authenticated classic PAT with `read:packages`.
 4. Approve the protected release environment when GitHub prompts for it. The
    workflow validates the tag, test suite, AARs, checksums, and unused package
    coordinates before creating a draft release and publishing immutable packages.
-5. Verify that GitHub Packages contains both AARs and that the GitHub release is
+5. Verify that GitHub Packages contains all ten AARs and that the GitHub release is
    marked as a prerelease.
 6. Resolve the packages using the consumer snippet in `README.md`.
-7. Download the two AARs and the checksum asset, then run
+7. Download the ten AARs and the checksum asset, then run
    `sha256sum -c tracebox-0.1.0-alpha.1-sha256sums.txt` from that directory.
 8. Never delete or overwrite a published version. Correct mistakes with a new
    alpha version and a new tag.
@@ -65,10 +70,10 @@ operation. The tag workflow creates a protected **draft** only after the build
 has passed, and it refuses to publish a coordinate whose Maven POM already
 exists.
 
-- If the workflow fails before a draft exists and both POM URLs return HTTP 404,
+- If the workflow fails before a draft exists and every module POM URL returns HTTP 404,
   fix the failure and rerun the tag workflow.
-- If a draft exists and both the `tracebox-api` and `tracebox` POM/AAR URLs are
-  resolvable, run **Finalize alpha release draft** from GitHub Actions with that
+- If a draft exists and every module POM/AAR URL is resolvable, run **Finalize alpha release
+  draft** from GitHub Actions with that
   exact tag. It rebuilds the tagged source, rechecks the consumer endpoints,
   uploads checksums/legal notices, and publishes only the existing draft; it
   never republishes Maven artifacts.

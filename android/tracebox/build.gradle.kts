@@ -1,32 +1,10 @@
-// SPDX-License-Identifier: Apache-2.0
-
 plugins {
-    alias(libs.plugins.android.library)
+    id("tracebox.android.library")
     `maven-publish`
 }
 
 android {
-    namespace = "io.github.tracebox"
-    compileSdk = 37
-
-    defaultConfig {
-        minSdk = 30
-    }
-
-    buildFeatures {
-        buildConfig = false
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    lint {
-        abortOnError = true
-        warningsAsErrors = true
-    }
-
+    namespace = "dev.tracebox"
     publishing {
         singleVariant("release") {
             withSourcesJar()
@@ -36,12 +14,20 @@ android {
 
 dependencies {
     api(project(":android:tracebox-api"))
-    implementation(libs.kotlinx.coroutines.core)
-    testImplementation(libs.junit4)
+    implementation(project(":android:tracebox-core"))
+    implementation(project(":android:tracebox-storage"))
+    implementation(project(":android:tracebox-directboot"))
+    implementation(project(":android:tracebox-anr-exit"))
+    // Native capture is an explicit host dependency. The managed artifact compiles against its
+    // bridge but does not publish or package native binaries for applications that do not opt in.
+    compileOnly(project(":android:tracebox-native"))
+    implementation(project(":android:tracebox-export"))
+    implementation(project(":android:tracebox-export-ui"))
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    testImplementation(kotlin("test-junit"))
+    testImplementation(project(":android:tracebox-native"))
 }
 
 extra["traceboxPublicationName"] = "Tracebox Android"
-extra["traceboxPublicationDescription"] =
-    "Pre-certification offline Android diagnostics facade for Tracebox."
-
+extra["traceboxPublicationDescription"] = "Offline, user-controlled Android diagnostics runtime."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))

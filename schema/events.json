@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "evolution": {
+    "policy": "append_only",
+    "ids_never_reused": true,
+    "unknown_fields": "reject",
+    "incompatible_change": "new_record_or_abi_version"
+  },
+  "reserved_event_ids": [900],
+  "events": [
+    {
+      "id": 1,
+      "name": "StructuralSummary",
+      "category": "crash_summary",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "stream_count", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "thread_count", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 3, "name": "module_count", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 4, "name": "exception_code", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 5, "name": "processor_architecture", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "EmergencyRecord",
+      "category": "emergency",
+      "retention": "emergency_reserve",
+      "package_visibility": "minimal_crash",
+      "direct_boot_eligible": true,
+      "fields": [
+        {"id": 1, "name": "slot_sequence", "privacy": "C0", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 2, "name": "policy_epoch", "privacy": "C0", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 3, "name": "signal_number", "privacy": "C0", "semantic_type": "i32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 4, "name": "signal_code", "privacy": "C0", "semantic_type": "i32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 5, "name": "process_role", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 6, "name": "thread_role", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 7, "name": "flags", "privacy": "C0", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Breadcrumb",
+      "category": "breadcrumb",
+      "retention": "ordinary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "code", "privacy": "C1", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "monotonic_time_ns", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "HandledError",
+      "category": "handled_error",
+      "retention": "ordinary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "kind", "privacy": "C1", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "frame_count", "privacy": "C1", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "ManagedCrash",
+      "category": "managed_crash",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "primary_exception_code", "privacy": "C1", "semantic_type": "fixed32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "cause_count", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"},
+        {"id": 3, "name": "frame_count", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"},
+        {"id": 4, "name": "flags", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "RustPanic",
+      "category": "rust_panic",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "payload_class", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "thread_role", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 3, "name": "location_code", "privacy": "C1", "semantic_type": "fixed32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 4, "name": "flags", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"}
+      ]
+    },
+    {
+      "id": 7,
+      "name": "AnrCandidate",
+      "category": "anr_candidate",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "elapsed_millis", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "sample_count", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"},
+        {"id": 3, "name": "frame_count", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"},
+        {"id": 4, "name": "nonfatal_result", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 5, "name": "flags", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "OsExit",
+      "category": "os_exit",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "reason", "privacy": "C0", "semantic_type": "i32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "status", "privacy": "C0", "semantic_type": "i32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 3, "name": "importance", "privacy": "C0", "semantic_type": "i32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 4, "name": "link_confidence", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 5, "name": "artifact_state", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"}
+      ]
+    },
+    {
+      "id": 9,
+      "name": "LogRecord",
+      "category": "log",
+      "retention": "ordinary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "level", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "category", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 3, "name": "template_fingerprint", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 4, "name": "rendered_message", "privacy": "C2", "semantic_type": "bounded_utf8", "max_encoded_size": 1026, "transform": "parameter_redaction"},
+        {"id": 5, "name": "privacy_flags", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 6, "name": "monotonic_time_ns", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 7, "name": "duration_ns", "privacy": "C0", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 8, "name": "outcome", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"}
+      ]
+    },
+    {
+      "id": 10,
+      "name": "ExceptionRecord",
+      "category": "managed_exception",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "kind", "privacy": "C0", "semantic_type": "enum", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "exception_type", "privacy": "C1", "semantic_type": "bounded_utf8", "max_encoded_size": 258, "transform": "none"},
+        {"id": 3, "name": "frame_count", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"},
+        {"id": 4, "name": "stack_fingerprint", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 5, "name": "stack_trace", "privacy": "C1", "semantic_type": "bounded_utf8", "max_encoded_size": 2050, "transform": "none"},
+        {"id": 6, "name": "monotonic_time_ns", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"}
+      ]
+    },
+    {
+      "id": 11,
+      "name": "AnrTrace",
+      "category": "anr_trace",
+      "retention": "structural_summary",
+      "package_visibility": "standard",
+      "direct_boot_eligible": false,
+      "fields": [
+        {"id": 1, "name": "elapsed_millis", "privacy": "C0", "semantic_type": "u32", "max_encoded_size": 5, "transform": "none"},
+        {"id": 2, "name": "frame_count", "privacy": "C0", "semantic_type": "u16", "max_encoded_size": 3, "transform": "none"},
+        {"id": 3, "name": "stack_fingerprint", "privacy": "C1", "semantic_type": "u64", "max_encoded_size": 10, "transform": "none"},
+        {"id": 4, "name": "stack_trace", "privacy": "C1", "semantic_type": "bounded_utf8", "max_encoded_size": 2050, "transform": "none"}
+      ]
+    }
+  ]
+}

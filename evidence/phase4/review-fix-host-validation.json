@@ -1,0 +1,53 @@
+{
+  "phase": "Phase 4 review-fix",
+  "baseline_commit": "69a554e6489568100ce77e94f3970d599d61a94a",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "commands": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-export:test :android:tracebox-export-ui:test --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL; 14 tests passed, 0 failures, 0 errors."
+    },
+    {
+      "command": "$env:Path = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;' + $env:Path; & $env:ComSpec /c 'call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cd /d G:\\Github\\Tracebox-worktrees\\tracebox-foundation && cargo test -p tbdiag-format'",
+      "exit_status": 0,
+      "actual": "canonical_cbor_encoder_matches_kotlin_shared_golden_vector passed; 1 passed, 0 failed."
+    },
+    {
+      "command": "javap -p -classpath android\\tracebox-export\\build\\intermediates\\compile_library_classes_jar\\debug\\bundleLibCompileToJarDebug\\classes.jar dev.tracebox.export.MaterializedPackage dev.tracebox.export.PackageManifest; javap -p -classpath android\\tracebox-export-ui\\build\\intermediates\\compile_library_classes_jar\\debug\\bundleLibCompileToJarDebug\\classes.jar dev.tracebox.export.ui.TraceboxDisclosureActivity$ApprovedPackage dev.tracebox.export.ui.TraceboxDisclosureActivity$ActivityApprovedPackage",
+      "exit_status": 0,
+      "actual": "MaterializedPackage and PackageManifest are interfaces (no constructors). ApprovedPackage is an interface (no constructors). ActivityApprovedPackage is package-private (`final class`, not `public class`); its sole creation expression is in the Activity's private state machine, and TraceboxDisclosureActivity exposes only private confirmFreshGesture(), with no ApprovalIssuer class or public issue method."
+    }
+  ],
+  "finding_disposition": [
+    {
+      "finding": "Critical: approval issuance bypass",
+      "disposition": "APPLIED",
+      "evidence": "The old public ApprovalIssuer and public materialized/manifest constructors were removed. Finalized package, manifest, and approved-package APIs are constructor-free interfaces; the concrete approval implementation is non-public and constructed only after the Activity Confirm button callback."
+    },
+    {
+      "finding": "Major 1: raw artifacts enter Standard snapshot",
+      "disposition": "APPLIED",
+      "evidence": "PackagePipelineTest.raw_artifact_source_has_no_standard_request_constructor_path documents that SegmentSource.records is List<OrdinarySourceRecord>, while RawArtifactSource is a disjoint PackageSourceInput subtype."
+    },
+    {
+      "finding": "Major 2: final and staged bytes bypass quota",
+      "disposition": "APPLIED",
+      "evidence": "PackagePipelineTest.finalized_zip_byte_count_is_charged_not_entry_bodies proves actual ZIP bytes, including overhead, are charged and an exact-byte-short quota fails. ExportWorkflowTest.staging_write_without_exact_quota_reservation_is_rejected proves staging rejects before writing when its reservation transfer fails. StagingLeaseManager atomically transfers that same reservation before Files.write and releases it on TTL cleanup."
+    },
+    {
+      "finding": "Major 3: cross-language CBOR proof tautological",
+      "disposition": "APPLIED",
+      "evidence": "Rust now encodes the logical map fixture via encode_canonical_cbor; canonical_cbor_encoder_matches_kotlin_shared_golden_vector compares its emitted bytes to the Kotlin test's [a1,61,61,01] literal."
+    },
+    {
+      "finding": "Major 4: failed/cancelled receipt can carry handoff",
+      "disposition": "APPLIED",
+      "evidence": "ExportReceipt is sealed. GenerationFailed and Cancelled contain no save or handoff fields; only ExportReceipt.Approved carries them. ExportWorkflowTest.failed_pipeline_receipt_has_no_shareable_fields validates the failed variant."
+    }
+  ],
+  "limitations": [
+    "Validation was host-level only. No Android emulator or AVD was created, booted, or provisioned.",
+    "P4.1 remains IN_PROGRESS because the Phase 2/3 recovered-store adapter remains outside this review-fix scope."
+  ]
+}

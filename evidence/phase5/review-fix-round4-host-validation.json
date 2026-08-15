@@ -1,0 +1,75 @@
+{
+  "phase": "5",
+  "review_response": {
+    "finding_1_no_network_static_scope": {
+      "disposition": "APPLIED",
+      "implementation": [
+        "Verify-Phase5NoNetworkStatic.ps1 invokes :test-apps:phase0-fixture:processReleaseManifest --offline --no-daemon and reads test-apps/phase0-fixture/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml.",
+        "The verifier parses committed android/** and test-apps/** gradle.lockfile entries scoped to *ReleaseRuntimeClasspath configurations and applies a documented best-effort denylist of known networking coordinates.",
+        "The verifier separately reports, but excludes from the Android-runtime claim, tooling/tracebox-gradle-plugin's JVM build-time runtimeClasspath."
+      ],
+      "httpclient_provenance": {
+        "command": ".\\gradlew.bat :tooling:tracebox-gradle-plugin:dependencyInsight --dependency org.apache.httpcomponents:httpclient --configuration runtimeClasspath --offline --no-daemon --console=plain",
+        "exit_status": 0,
+        "result": "org.apache.httpcomponents:httpclient:4.5.14 is pulled by com.android.tools.analytics-library:crash:32.2.0, which is transitive from com.android.tools.build:gradle:9.2.0. The plugin declares implementation(\"com.android.tools.build:gradle:9.2.0\") in tooling/tracebox-gradle-plugin/build.gradle.kts. This is the JVM Gradle plugin's build-time runtimeClasspath; it is not a dependency packaged into the phase0-fixture release Android artifact.",
+        "reported_build_time_coordinates": [
+          "org.apache.httpcomponents:httpclient:4.5.14",
+          "org.apache.httpcomponents:httpcore:4.4.16",
+          "org.apache.httpcomponents:httpmime:4.5.6"
+        ]
+      },
+      "validation": {
+        "command": ".\\tools\\verify\\Verify-Phase5NoNetworkStatic.ps1",
+        "exit_status": 0,
+        "result": "PASS",
+        "source_manifests_scanned": 7,
+        "generated_merged_manifest": "test-apps\\phase0-fixture\\build\\intermediates\\merged_manifests\\release\\processReleaseManifest\\AndroidManifest.xml",
+        "android_release_runtime_lockfiles_scanned": 9,
+        "android_release_runtime_coordinates_scanned": 45
+      }
+    },
+    "finding_2_zip_integrity_validation": {
+      "disposition": "APPLIED",
+      "implementation": [
+        "tbdiag-cli rejects encrypted (bit 0) and data-descriptor (bit 3) general-purpose flags in both central and local headers with typed errors.",
+        "It cross-checks local versus central flags, method, CRC-32, compressed size, uncompressed size, and filename before copying payload bytes.",
+        "It calculates IEEE ZIP CRC-32 over bounded STORED payload slices and rejects a mismatch with ArchiveError::CrcMismatch."
+      ],
+      "adversarial_tests": [
+        "rejects_encryption_flag_in_local_or_central_header",
+        "rejects_data_descriptor_flag_in_local_or_central_header",
+        "rejects_mismatched_local_and_central_crc_or_size",
+        "rejects_payload_with_wrong_crc"
+      ],
+      "validation": {
+        "command": "cargo test -p tbdiag-cli --offline",
+        "exit_status": 0,
+        "unit_tests": {
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        "main_tests": {
+          "passed": 0,
+          "failed": 0
+        },
+        "doc_tests": {
+          "passed": 0,
+          "failed": 0
+        }
+      }
+    }
+  },
+  "end_to_end_host_readiness": {
+    "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\tools\\verify\\Invoke-Phase5HostReadiness.ps1",
+    "exit_status": 0,
+    "result": "PASS",
+    "stages": [
+      "Verify-FoundationSpecs.ps1",
+      "Verify-Phase5NoNetworkStatic.ps1",
+      "cargo test --workspace",
+      "gradlew.bat phase1Check phase2Check phase4CoreCheck --offline --no-daemon"
+    ]
+  },
+  "scope_limit": "No emulator or physical device was created, started, booted, provisioned, or used. Device runtime, Dex/native import, and blocked-egress observation remain UNAVAILABLE_EXTERNAL and are not certified."
+}

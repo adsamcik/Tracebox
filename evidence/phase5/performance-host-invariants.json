@@ -1,0 +1,9 @@
+{
+  "work_package": "T5.5",
+  "result": "UNAVAILABLE_EXTERNAL",
+  "host_invariants": [
+    "SegmentStore guards ordinary disk I/O with DiskIoGuard.assertNotMainThread",
+    "HandlerCoordination defines explicit reconnect triggers and forbids ordinary polling"
+  ],
+  "unavailable_reason": "Physical/emulator Android device measurement is prohibited/unavailable in this environment; PSS/RSS, CPU wakeups, battery, and startup latency were not measured."
+}

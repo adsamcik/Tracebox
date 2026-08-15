@@ -1,0 +1,52 @@
+{
+  "requirement_id": "C1.4",
+  "scope": "Fix a real MSVC compile failure found only by actually building the C ABI/schema headers, and a Phase 0 compatibility regression introduced while addressing Phase 1 review Finding 5",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "reviewed_implementation_commit": "92cef134659ad1201dfd0e8e013c18375fe23de7",
+  "tool_versions": {
+    "cmake": "C:\\Program Files\\CMake\\bin\\cmake.exe",
+    "msvc": "19.50.35725.0 (Visual Studio 18 Community, VC Tools 14.50.35717)"
+  },
+  "defects_found_by_actually_building": [
+    {
+      "defect": "native/include/tracebox/abi.h included generated_events.h before defining tb_header_v1/tb_status_v1, which generated_events.h requires; MSVC failed with C2061/C2059 undeclared-identifier errors across all four generated event structs and tb_breadcrumb_v1.",
+      "root_cause": "tooling/schema-compiler/compile_schema.py emitted generated_events.h without extern \"C\" guards and without documenting the required inclusion order; abi.h included it too early.",
+      "fix": "Reordered abi.h to define tb_header_v1/tb_status_v1 first, then include generated_events.h. Fixed the compiler template (compile_schema.py) itself so regeneration is stable, added extern \"C\" guards to the generated header, regenerated native/include/tracebox/generated_events.h, and updated the golden fixture used by tooling/schema-compiler/tests."
+    },
+    {
+      "defect": "native/tests/tracebox_abi_test.c referenced TB_EMERGENCY_RECORD_SIZE and tb_emergency_record_view_v1 without including tracebox/emergency.h (only included tracebox/abi.h).",
+      "fix": "Added the missing #include \"tracebox/emergency.h\"."
+    },
+    {
+      "defect": "CRITICAL Phase 0 compatibility regression: the Finding-5 fix for the Phase 1 review changed tb_emergency_initialize_v1's public signature from `tb_emergency_record_v1* record` to a raw `uint8_t record[TB_EMERGENCY_RECORD_SIZE]` array and deleted the tb_emergency_record_v1 struct entirely, then also rewrote the pre-existing Phase 0 test native/tests/tracebox_emergency_test.c to match. This broke native/crashpad/overlay/tracebox_bridge.cc (Phase 0's already-reviewed-and-approved capture path, lines 224 and 1002) and native/tests/tracebox_emergency_initialization_test.cc (round-3 fix), both of which still declared `tb_emergency_record_v1 record;` and called `tb_emergency_initialize_v1(&record, ...)`. This was undetected because the agent that made the Finding-5 change had no local C compiler and could not build to notice the break; the round-3-finishing agent's earlier successful Crashpad build predated this change.",
+      "fix": "Restored the original tb_emergency_record_v1 struct and tb_emergency_initialize_v1(tb_emergency_record_v1*, ...) signature in native/include/tracebox/emergency.h and native/emergency/tracebox_emergency.c (operating on record->bytes internally), keeping the NEW tb_emergency_record_view_v1 type and tb_validate_emergency_record_view_v1 function as a pure addition satisfying the C1.4 'every public struct starts with tb_header_v1' rule without altering the stable on-disk raw record layout or breaking any existing caller. Reverted the unnecessary and incorrect edit to native/tests/tracebox_emergency_test.c back to its original Phase 0 form. Verified native/crashpad/overlay/tracebox_bridge.cc's only relevant includes/usages (tb_emergency_record_v1, tb_emergency_initialize_v1) now match via grep across the whole repository."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python tooling\\schema-compiler\\compile_schema.py --schema schema\\events.json --out .",
+      "exit_status": 0,
+      "actual_assertions": ["schema fingerprint 6cab7df4c1845824d3db406e5c4702727585556758764a05d43014c66dcfa92c"]
+    },
+    {
+      "command": "python -m pytest tooling\\schema-compiler\\tests -q",
+      "exit_status": 0,
+      "actual_assertions": ["5 passed"]
+    },
+    {
+      "command": "call vcvars64.bat && cmake -S native -B native\\build-abi-check -G \"NMake Makefiles\" -DCMAKE_BUILD_TYPE=Release && cmake --build native\\build-abi-check && ctest --test-dir native\\build-abi-check --output-on-failure",
+      "exit_status": 0,
+      "actual_assertions": [
+        "tracebox_emergency_test: Passed",
+        "tracebox_abi_test: Passed",
+        "tracebox_emergency_initialization_test: Passed",
+        "100% tests passed, 0 tests failed out of 3"
+      ]
+    }
+  ],
+  "not_rerun": [
+    "Full Crashpad GN/Ninja build via tools/crashpad/Build-Crashpad.ps1 was not re-executed after this fix. This is justified by: (a) the native CMake build above compiles and links the identical tracebox_emergency.c/.h and abi.h/generated_events.h files exercised by the Crashpad overlay; (b) a whole-repository grep confirms tracebox_bridge.cc's only dependencies on these headers are tb_emergency_record_v1 and tb_emergency_initialize_v1, both restored to their exact pre-Phase-1 Phase 0 contract; (c) it introduces no new symbol tracebox_bridge.cc relies on. This is a targeted risk-based substitution, not a claim that the full Crashpad build was executed."
+  ],
+  "matrix_cell": "HOST_WINDOWS_X86_64_MSVC",
+  "result": "PASS"
+}

@@ -1,0 +1,16 @@
+diff --git a/BUILD.gn b/BUILD.gn
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -194,6 +194,12 @@
+   }
+ }
+ 
++if (crashpad_is_android) {
++  group("tracebox_capture_only") {
++    deps = [ "//tracebox_overlay:tracebox_crashpad" ]
++  }
++}
++
+ if (crashpad_is_ios) {
+   group("ios_xcuitests") {
+     testonly = true

@@ -3,6 +3,15 @@
 All notable changes are documented here. Tracebox follows Semantic Versioning
 once its public API stabilizes.
 
+## Unreleased
+
+### Changed
+
+- Joined the complete diagnostics implementation history with the release-engineering history so
+  the default branch, release automation, tags, and consumer source now describe one product.
+- Extended release verification from the original two-module bootstrap to all ten published
+  Android modules while preserving the no-network boundary.
+
 ## [0.1.0-alpha.1] - 2026-07-20
 
 ### Added
@@ -18,4 +27,3 @@ once its public API stabilizes.
 This pre-certification alpha does not provide durable segments, Crashpad, native
 or Rust capture, ANR capture, deterministic tbdiag export, disclosure UI,
 symbolication, or foundation certification.
-

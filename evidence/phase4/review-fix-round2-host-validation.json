@@ -1,0 +1,53 @@
+{
+  "phase": "Phase 4 review-fix round 2",
+  "baseline_commit": "db963d6cea391468ed1e965767acb7cb50de59db",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "commands": [
+    {
+      "command": ".\\gradlew.bat :android:tracebox-export:test :android:tracebox-export-ui:test --no-daemon --rerun-tasks",
+      "exit_status": 0,
+      "actual": "BUILD SUCCESSFUL; PackagePipelineTest: 10 tests, 0 failures, 0 errors; ExportWorkflowTest: 6 tests, 0 failures, 0 errors."
+    },
+    {
+      "command": "$env:Path = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;' + $env:Path; & $env:ComSpec /c 'call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cd /d G:\\Github\\Tracebox-worktrees\\tracebox-foundation && cargo test -p tbdiag-format --offline'",
+      "exit_status": 0,
+      "actual": "canonical_cbor_encoder_matches_actual_kotlin_encoder_output_for_shared_fixture passed; 1 passed, 0 failed; nested Kotlin fixture encoder reran successfully."
+    },
+    {
+      "command": "git diff --exit-code 21e5bef79987814ecd34c2a416caafd8fe39f79a..HEAD -- native/crashpad/overlay/tracebox_bridge.cc native/emergency/tracebox_emergency.c",
+      "exit_status": 0,
+      "actual": "No output; NATIVE_DIFF_EXIT=0."
+    }
+  ],
+  "finding_disposition": [
+    {
+      "finding": "1: raw artifact bytes injectable into Standard snapshots",
+      "disposition": "APPLIED",
+      "evidence": "OrdinarySourceRecord(sequence: Long, generated: GeneratedRecord, occurredAtMillis: Long, ...) has no ByteArray payload parameter; it derives its bounded payload with GeneratedRecordPayloadEncoder. RawArtifactSource.rawBytes is private. PackagePipelineTest.ordinary_source_record_requires_a_generated_record_not_raw_bytes passed."
+    },
+    {
+      "finding": "2: repeated staging moves one reservation",
+      "disposition": "APPLIED",
+      "evidence": "MaterializedPackage.reserveStagingQuota(destination): (() -> Unit)? creates a fresh PackageQuotaReservation per lease; StagingLeaseManager stores that lease-specific release callback. ExportWorkflowTest.simultaneous_staging_leases_hold_independent_exact_byte_reservations observed 6 bytes for two 3-byte leases, then 3 bytes after one expiry."
+    },
+    {
+      "finding": "3: CBOR comparison duplicates literals",
+      "disposition": "APPLIED",
+      "evidence": "tooling/fixtures/canonical-cbor-single-map.fixture is parsed by Kotlin and Rust. The Rust test reruns the actual Kotlin JUnit encoder, reads its emitted byte array, and assert_eq! compares it with Rust's actual encoder output."
+    },
+    {
+      "finding": "4: failed/cancelled save can carry handoff",
+      "disposition": "APPLIED",
+      "evidence": "ExportReceipt.Approved.SaveFailed and SaveCancelled constructors have no ShareHandoffState parameter; only SaveSucceededPendingOrCompleteHandoff has save: SaveResult.Complete plus handoff. ExportWorkflowTest.failed_or_cancelled_approved_receipts_have_no_handoff_constructor_parameter passed."
+    },
+    {
+      "finding": "5: protected native files differ from absolute baseline",
+      "disposition": "REJECTED (false positive)",
+      "evidence": "The files were created after absolute baseline dc87c6f9e2a6576cc554f7cb181ce80a02bf0802, and the emergency source had an approved Phase 1 round-3 change ending 8ce063f5aed95fbd66b0e6f990d9d29144ec98b1. The applicable invariant is the Phase 3 close; the recorded git diff command exited 0."
+    }
+  ],
+  "limitations": [
+    "Validation was host-level only. No Android emulator or AVD was created, booted, or provisioned.",
+    "P4.1 remains IN_PROGRESS because the Phase 2/3 recovered-store adapter remains outside this review-fix scope."
+  ]
+}

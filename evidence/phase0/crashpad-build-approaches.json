@@ -1,0 +1,29 @@
+{
+  "requirement_id": "F0.2-CRASHPAD-BUILD",
+  "attempts": [
+    {
+      "approach": "NDK 29.0.14206865 with upstream mini_chromium GN tool paths",
+      "failure": "GN selected extensionless POSIX shell compiler wrappers on Windows; CreateProcess returned not a valid Win32 application.",
+      "fix": "Patch 0001 selects the NDK .cmd wrappers on Windows.",
+      "result": "FAIL"
+    },
+    {
+      "approach": "NDK 29.0.14206865 with Windows wrapper and deterministic archive patches",
+      "failure": "The installed Windows NDK 29 package did not contain llvm-ar.exe, so Crashpad static archives could not be produced.",
+      "fix": "Select the complete NDK 28.2.13676358 LLVM toolset.",
+      "result": "FAIL"
+    },
+    {
+      "approach": "NDK 28.2.13676358 with .cmd wrapper and deterministic Python archive patches",
+      "assertions": {
+        "x86_64_build": "PASS",
+        "arm64_v8a_build": "PASS",
+        "elf_page_alignment": "0x4000",
+        "uploader_network_objects_excluded": true
+      },
+      "result": "PASS"
+    }
+  ],
+  "selected_ndk": "28.2.13676358",
+  "result": "PASS"
+}

@@ -1,0 +1,48 @@
+{
+  "requirement_id": "F0.6-TARGET-PAUSE",
+  "threshold": {
+    "p95_microseconds_max": 100000,
+    "absolute_microseconds_max": 100000
+  },
+  "attempts": [
+    {
+      "approach": "Standard Crashpad DumpWithoutCrash with all thread stacks",
+      "workload": "30 nonfatal captures on API 30 x86_64",
+      "actual_assertions": {
+        "captured": 30,
+        "pause_p95_microseconds": 285531,
+        "pause_max_microseconds": 296174
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "Direct ExceptionHandlerClient request with target-module and stack sanitization",
+      "workload": "10 nonfatal captures measured by a main-thread busy-loop pause probe",
+      "actual_assertions": {
+        "captured": 10,
+        "pause_p95_microseconds": 192631,
+        "pause_max_microseconds": 192631
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "Sanitized request with urgent handler/request thread priorities",
+      "workload": "30 nonfatal captures measured by a main-thread busy-loop pause probe",
+      "actual_assertions": {
+        "captured": 30,
+        "pause_p95_microseconds": 404703,
+        "pause_max_microseconds": 467711
+      },
+      "result": "FAIL"
+    }
+  ],
+  "selected_safe_implementation": "Sanitized request without priority escalation",
+  "selected_implementation_result": {
+    "evidence": "API30-x86_64-4096-qualification.json",
+    "pause_p95_microseconds": 431458,
+    "pause_max_microseconds": 477014,
+    "result": "FAIL"
+  },
+  "terminal_effect": "The mandatory live ANR feasibility gate failed after three materially different reasonable approaches. Dependent architecture must not proceed without a product decision or a new safe implementation.",
+  "result": "FAIL"
+}

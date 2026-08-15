@@ -1,0 +1,138 @@
+{
+  "requirement_id": "PHASE0-REVIEW-FIX-1-8",
+  "scope": "targeted review-fix regression; not full Phase 0 qualification",
+  "phase0_state": "INCOMPLETE",
+  "command": "tools\\android\\Run-Phase0ReviewFixQualification.ps1 -Serial emulator-5554 -ExpectedApi 30 -ExpectedPageSize 4096",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "reviewed_implementation_commit": "233f5a76cbef8b62548894fef1b64e754f74dc79",
+  "start_time_utc": "2026-07-18T19:33:49.1378616Z",
+  "end_time_utc": "2026-07-18T19:34:20.9115571Z",
+  "duration_ms": 31774.0,
+  "exit_status": 0,
+  "tools": {
+    "adb": "Android Debug Bridge version 1.0.41",
+    "cargo": "cargo 1.93.1 (083ac5135 2025-12-15)",
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)"
+  },
+  "endpoint": {
+    "serial": "emulator-5554",
+    "api": 30,
+    "abi": "x86_64",
+    "page_size": 4096,
+    "matrix_cell": "API30_x86_64_4096B_TARGETED_REVIEW_FIX"
+  },
+  "artifacts": {
+    "apk_sha256": "7d5249f1185d8ec9bb479db6d95c1202e1551d0ed7a97ccdf81544db693107c7",
+    "native_x86_64_sha256": "7311447a21d4c2c993a1d0ed95df6d4a490d981768154d8e36a47a080105b35d",
+    "seeded_dump_sha256": "b243d477627394e0ebbdf0fe66043e69af8083fbbb98e7962b5f939dbb0dd852"
+  },
+  "registration": {
+    "connected": false,
+    "outcome": 1,
+    "elapsed_us": 1977540
+  },
+  "hang_timeout": {
+    "captured": false,
+    "elapsed_us": 1983645
+  },
+  "privacy": {
+    "identity_established": true,
+    "identity_validator_exit": 0,
+    "identity_validator_output": "valid emergency record v1",
+    "summary_parser_exit": 0,
+    "summary_parser_output": "{\n  \"stream_profile_valid\": false,\n  \"stream_count\": 8,\n  \"streams\": [\n    {\"type\": 7, \"name\": \"SystemInfoStream\", \"size\": 56},\n    {\"type\": 15, \"name\": \"MiscInfoStream\", \"size\": 832},\n    {\"type\": 3, \"name\": \"ThreadListStream\", \"size\": 1012},\n    {\"type\": 24, \"name\": \"ThreadNamesStream\", \"size\": 256},\n    {\"type\": 6, \"name\": \"ExceptionStream\", \"size\": 168},\n    {\"type\": 4, \"name\": \"ModuleListStream\", \"size\": 29272},\n    {\"type\": 1129316353, \"name\": \"CrashpadInfoStream\", \"size\": 64},\n    {\"type\": 5, \"name\": \"MemoryListStream\", \"size\": 340}\n  ],\n  \"unexpected_stream_types\": [24, 1129316353, 5],\n  \"duplicate_stream_types\": [],\n  \"missing_required_stream_types\": [],\n  \"thread_count\": 21,\n  \"module_count\": 271,\n  \"memory_range_count\": 21,\n  \"exception_code\": 4294967295,\n  \"processor_architecture\": 9,\n  \"structural_summary_format\": 1\n,\n  \"raw_seed_matches\": 1,\n  \"summary_seed_matches\": 0,\n  \"raw_identity_matches\": 0,\n  \"summary_identity_matches\": 0,\n  \"identity_encodings_scanned\": 7\n}",
+    "stream_profile_valid": false,
+    "unexpected_stream_types": [
+      24,
+      1129316353,
+      5
+    ],
+    "missing_required_stream_types": [],
+    "raw_seed_matches": 1,
+    "summary_seed_matches": 0,
+    "raw_identity_matches": 0,
+    "summary_identity_matches": 0,
+    "identity_encodings_scanned": 7,
+    "stream_inventory": [
+      {
+        "type": 7,
+        "name": "SystemInfoStream",
+        "size": 56
+      },
+      {
+        "type": 15,
+        "name": "MiscInfoStream",
+        "size": 832
+      },
+      {
+        "type": 3,
+        "name": "ThreadListStream",
+        "size": 1012
+      },
+      {
+        "type": 24,
+        "name": "ThreadNamesStream",
+        "size": 256
+      },
+      {
+        "type": 6,
+        "name": "ExceptionStream",
+        "size": 168
+      },
+      {
+        "type": 4,
+        "name": "ModuleListStream",
+        "size": 29272
+      },
+      {
+        "type": 1129316353,
+        "name": "CrashpadInfoStream",
+        "size": 64
+      },
+      {
+        "type": 5,
+        "name": "MemoryListStream",
+        "size": 340
+      }
+    ]
+  },
+  "emergency_restart_reset": {
+    "prior_record_validator_exit": 0,
+    "restarted_record_validator_exit": 1,
+    "restarted_record_validator_output": "invalid emergency record: InvalidMagic",
+    "restarted_record_all_zero": true,
+    "pm_clear_used": false
+  },
+  "handler_unavailable_fallback": {
+    "validator_exit": 0,
+    "validator_output": "valid emergency record v1",
+    "slot_sequence": 1,
+    "flags": 3,
+    "raw_dump_delta": 0,
+    "process_death_observed": true,
+    "process_log": [
+      "F/libc    (30242): Fatal signal 6 (SIGABRT), code -6 (SI_TKILL) in tid 30242 (tracebox.phase0), pid 30242 (tracebox.phase0)",
+      "I/Zygote  (  299): Process 30242 exited due to signal 6 (Aborted)"
+    ]
+  },
+  "previous_signal_action": {
+    "validator_exit": 0,
+    "validator_output": "valid emergency record v1",
+    "slot_sequence": 1,
+    "prior_action_count": 1,
+    "process_death_observed": true,
+    "process_log": "I/Zygote  (  299): Process 30418 exited due to signal 6 (Aborted)"
+  },
+  "assertions": {
+    "registration_receive_deadline": true,
+    "hang_timeout_deadline": true,
+    "live_identity_required": true,
+    "seeded_summary_scan": true,
+    "known_identity_scan": true,
+    "emergency_slot_reset_on_process_restart": true,
+    "unexpected_streams_rejected": true,
+    "handler_unavailable_fallback": true,
+    "previous_signal_action_once": true
+  },
+  "result": "PASS"
+}

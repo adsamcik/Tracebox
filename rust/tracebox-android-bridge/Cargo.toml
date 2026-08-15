@@ -1,0 +1,23 @@
+[package]
+name = "tracebox-android-bridge"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+libc = "0.2.186"
+tracebox = { path = "../tracebox" }
+tracebox-identity = { path = "../tracebox-identity" }
+tracebox-phase0 = { path = "../tracebox-phase0" }
+tracebox-sys = { path = "../tracebox-sys" }
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"

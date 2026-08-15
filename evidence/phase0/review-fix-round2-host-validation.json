@@ -1,0 +1,118 @@
+{
+  "requirement_id": "PHASE0-REVIEW-FIX-ROUND2-HOST",
+  "scope": "round-2 targeted host/native/Rust/acquisition regression; not Phase 0 certification",
+  "phase0_state": "INCOMPLETE",
+  "reviewed_implementation_commit": "233f5a76cbef8b62548894fef1b64e754f74dc79",
+  "start_time_utc": "2026-07-18T19:34:33.3145184Z",
+  "end_time_utc": "2026-07-18T19:39:46.4456160Z",
+  "duration_ms": 313131.0,
+  "exit_status": 0,
+  "matrix_cell": "HOST_WINDOWS_NT_TARGETED_REVIEW_FIX",
+  "tools": {
+    "powershell": "7.6.3",
+    "git": "git version 2.49.0.windows.1",
+    "java": "openjdk version \"21.0.8\" 2025-07-15 LTS",
+    "cargo": "cargo 1.93.1 (083ac5135 2025-12-15)",
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)"
+  },
+  "commands": [
+    {
+      "command": "PowerShell parser: qualification/acquisition/tamper scripts",
+      "duration_ms": 33.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "duration_ms": 693.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "cargo clippy -p tracebox-phase0 -p tbdiag-phase0 --all-targets --locked --offline -- -D warnings",
+      "duration_ms": 886.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "cargo test -p tracebox-phase0 -p tbdiag-phase0 --locked --offline",
+      "duration_ms": 895.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "tools\\crashpad\\Test-AcquireCrashpadTamper.ps1",
+      "duration_ms": 97225.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "tools\\crashpad\\Test-CrashpadArchiveSecurity.ps1",
+      "duration_ms": 329.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "tools\\crashpad\\Build-Crashpad.ps1",
+      "duration_ms": 193602.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "gradlew.bat :test-apps:phase0-fixture:assembleQualificationRelease --dependency-verification strict --no-daemon",
+      "duration_ms": 17145.0,
+      "exit_status": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "tools\\traceability\\Initialize-Traceability.ps1; tools\\verify\\Verify-FoundationSpecs.ps1",
+      "duration_ms": 2274.0,
+      "exit_status": 0,
+      "status": "PASS"
+    }
+  ],
+  "assertions": {
+    "rust_parser_tests": "14 passed; 0 failed",
+    "crashpad_tamper_rejected": true,
+    "crashpad_original_sha256": "7c7b56bb58f7e1adc102be6a3b257d0c8535b3da737a02fb1fa07140a33e1658",
+    "crashpad_tampered_sha256": "988a8c78bce7ca7281e53ec9fe2cbf3084477df21d7eff508317d85779a76d77",
+    "crashpad_restored_sha256": "7c7b56bb58f7e1adc102be6a3b257d0c8535b3da737a02fb1fa07140a33e1658",
+    "mutable_manifest_post_patch_sha256": "148a67dd5afc8cda55dd85bf6ebaacaa1140a4f2d7f521c8f0866ae8cdc974ca",
+    "tracked_post_patch_sha256": "ea5cf61e876f04b45cc98778efb6c84209eac68138fd6b5c54e70a6c12ca40e0",
+    "archive_authentication": {
+      "tampered_archive_rejected_before_write": true,
+      "malicious_entries_rejected_before_write": [
+        "absolute",
+        "drive",
+        "traversal",
+        "backslash",
+        "symlink",
+        "hardlink",
+        "device",
+        "fifo"
+      ],
+      "safe_archive_entry_count": 1,
+      "result": "PASS"
+    },
+    "native_x86_64_sha256": "7311447a21d4c2c993a1d0ed95df6d4a490d981768154d8e36a47a080105b35d",
+    "native_arm64_sha256": "3e764776977bdcbbd4ad565784835ba6f568e75ccc9fb2a850339082d8fa7864",
+    "qualification_apk_sha256": "7d5249f1185d8ec9bb479db6d95c1202e1551d0ed7a97ccdf81544db693107c7",
+    "static_signal_and_deadline_checks": {
+      "emergency_signal_path_has_no_memset_or_memcpy": true,
+      "bridge_has_no_realtime_deadline": true,
+      "registration_receive_is_nonblocking": true,
+      "emergency_slot_reset_is_durable": true,
+      "summary_seed_count_is_computed": true,
+      "qualification_exit_status_is_derived": true,
+      "archive_locks_are_complete": true
+    },
+    "foundation_specs": {
+      "accepted_adrs": 6,
+      "open_decisions": 12,
+      "traceability_rows": 1571,
+      "emergency_record_bytes": 256,
+      "result": "PASS"
+    }
+  },
+  "result": "PASS"
+}

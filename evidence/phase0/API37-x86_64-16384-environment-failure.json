@@ -1,0 +1,105 @@
+{
+  "requirement_id": "F0.3-F0.7-API37",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "reviewed_implementation_commit": "551b95377eaf14ac77c76902def35c1dc81a96d1",
+  "endpoint": {
+    "required_api": 37,
+    "required_abi": "x86_64",
+    "required_page_size": 16384,
+    "system_image": "system-images;android-37.0;google_apis_ps16k;x86_64",
+    "system_image_revision": 6,
+    "alternate_system_image": "system-images;android-37.0;google_apis_playstore_ps16k;x86_64",
+    "alternate_system_image_revision": 6
+  },
+  "tools": [
+    {
+      "version": "Android Emulator 37.1.9",
+      "sha256": "181f0083096cd257784a5a896a5964bb2d58be5254f6ae5b62c0998b79016285"
+    },
+    {
+      "version": "Android Emulator 36.6.11",
+      "sha256": "7f101ca769c15e8b6311801c1487f28583ce643fa87d19a9e0da4cc230be7653"
+    }
+  ],
+  "attempts": [
+    {
+      "approach": "37.1.9 Google APIs image with SwiftShader",
+      "command": "emulator.exe -avd Tracebox_API37_16K -port 5558 -no-window -wipe-data -gpu swiftshader_indirect",
+      "actual_assertions": {
+        "api": 37,
+        "abi": "x86_64",
+        "page_size": 16384,
+        "boot_completed": true,
+        "stable": false,
+        "failure": "SurfaceFlinger RegionSampling repeatedly aborted: Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma"
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "37.1.9 Google APIs image with host GPU",
+      "command": "emulator.exe -avd Tracebox_API37_16K -port 5558 -no-window -wipe-data -gpu host",
+      "actual_assertions": {
+        "boot_completed_within_seconds": 300,
+        "actual": false
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "37.1.9 Google APIs image with Vulkan disabled",
+      "command": "emulator.exe -avd Tracebox_API37_16K -port 5558 -no-window -wipe-data -gpu swiftshader_indirect -feature -Vulkan",
+      "actual_assertions": {
+        "api": 37,
+        "page_size": 16384,
+        "boot_completed": true,
+        "stable": false,
+        "failure": "SurfaceFlinger PID repeatedly changed; package and activity services became unavailable after graphics-process crash cycles"
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "37.1.9 Google APIs image with Vulkan and GLDMA2 disabled",
+      "command": "emulator.exe -avd Tracebox_API37_16K -port 5558 -no-window -wipe-data -gpu swiftshader_indirect -feature -Vulkan -feature -GLDMA2",
+      "actual_assertions": {
+        "boot_completed_within_seconds": 300,
+        "actual": false
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "37.1.9 Google Play image with Vulkan disabled",
+      "command": "emulator.exe -avd Tracebox_API37_Play_16K -port 5558 -no-window -wipe-data -gpu swiftshader_indirect -feature -Vulkan",
+      "actual_assertions": {
+        "api": 37,
+        "page_size": 16384,
+        "boot_completed": true,
+        "stable": false,
+        "failure": "The alternate image exhibited the same recurring SurfaceFlinger RegionSampling failure"
+      },
+      "result": "FAIL"
+    },
+    {
+      "approach": "36.6.11 stable emulator binary with Google APIs image and Vulkan disabled",
+      "command": "emulator.backup\\emulator.exe -avd Tracebox_API37_16K -port 5558 -no-window -wipe-data -gpu swiftshader_indirect -feature -Vulkan",
+      "actual_assertions": {
+        "adb_endpoint_within_seconds": 420,
+        "actual": false
+      },
+      "result": "FAIL"
+    }
+  ],
+  "expected_assertions": [
+    "API 37 x86_64 endpoint boots",
+    "PAGE_SIZE is 16384",
+    "Android framework remains stable long enough to install and run the qualification APK",
+    "Crashpad, emergency, and ANR gates execute"
+  ],
+  "actual_assertions": {
+    "api_and_page_size_observed": true,
+    "trustworthy_test_infrastructure": false,
+    "qualification_executed": false
+  },
+  "matrix_cell": "API37_X86_64_16K",
+  "classification": "environment",
+  "result": "FAIL",
+  "terminal_effect": "ENGINEERING_FEASIBILITY_PASS is blocked; this is not UNAVAILABLE_EXTERNAL because the required emulator lane is locally provisioned but unusable."
+}

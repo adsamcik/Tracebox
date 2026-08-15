@@ -3,7 +3,7 @@
 **Status:** Proposed  
 **Version:** 0.1  
 **Date:** 2026-07-17  
-**Supported Android baseline:** API 30-37  
+**Supported Android baseline:** API 23-37
 
 ## 1. Executive decision
 
@@ -730,17 +730,24 @@ For `Disabled`:
 6. Delete active/sealed segments, structural-summary spools, raw artifacts, emergency reserves, indexes, snapshots, share staging, and rebuildable metadata.
 7. Persist completion only after no remaining library-owned path is readable through Tracebox.
 
-Selective deletion:
+The personal foundation exposes whole-store `ALL_TRACEBOX_DATA` deletion and
+bounded expired-package-staging cleanup. It does not expose a per-record,
+time-range, or summary-ID selector. Consequently, summary tombstones and mixed
+segment/spool compaction for selective deletion are optional post-foundation
+work, not a `PERSONAL_RELEASE_READY` requirement.
 
-- deletes whole segments when all records are in scope;
-- may sacrifice an entire mixed segment to provide prompt deletion;
-- may use bounded rewrite/compaction only when the caller explicitly prioritizes preservation of unaffected records;
-- writes an authoritative summary-ID tombstone before deleting a selected structural summary;
-- applies the same tombstone to both handler-spool and imported ordinary copies;
-- compacts mixed summary-spool segments by writing and sealing a new live-record segment, atomically switching the spool manifest, and only then deleting the old segment;
-- invalidates every snapshot containing an affected record.
+If selective diagnostic-record deletion is added later, it must use whole
+segments when possible, invalidate every affected snapshot, and use an
+authoritative summary-ID tombstone across handler-spool and imported copies
+before reporting success. Preservation of unaffected records would require a
+bounded journaled rewrite/compaction transaction.
 
-Tombstoned summary bytes continue to count against the hard spool quota until compaction removes them. Package planning and reconciliation exclude tombstoned IDs immediately. Deletion failure remains `pending_failure`, is visible in `DeleteReport`, and resumes on bounded startup, maintenance, and explicit retry triggers. Disabled never reports completion while any library-owned data remains accessible; selective deletion never reports completion while any in-scope summary ID or other in-scope data remains accessible from either authoritative or imported stores. Unlinking cannot guarantee secure flash erasure, and OS-owned `ApplicationExitInfo` history remains unaffected.
+Deletion failure remains `pending_failure`, is visible in `DeleteReport`, and
+resumes on bounded startup, maintenance, and explicit retry triggers.
+`ALL_TRACEBOX_DATA` never reports completion while any in-scope
+library-owned diagnostic data remains accessible. Unlinking cannot guarantee
+secure flash erasure, and OS-owned `ApplicationExitInfo` history remains
+unaffected.
 
 ## 12. Crash capture
 
@@ -802,7 +809,11 @@ The emergency writer uses:
 
 The emergency record is an allowlisted C0/C1 structural format, not a `RawArtifact`. It contains no stack bytes or general-purpose register file. Architecture-specific control values are restricted to the minimum needed for later normalization, such as the faulting instruction address and link/return address when valid.
 
-Alternate signal stacks are registered per thread. Tracebox registers its own native threads and exposes an explicit native/Rust thread-attachment API. Stack-overflow fallback is guaranteed only for registered threads; it is best effort for other host-created threads. Crashpad remains the primary stack-overflow capture mechanism.
+Alternate signal stacks are registered per thread, independently from the process-wide signal actions. Every Tracebox-owned pthread completes a registration handshake before its entry point runs, and JNI entry attaches its calling thread. The thread-local registration restores any pre-existing alternate stack and releases its mapping exactly once at explicit detach or thread exit.
+
+Host-created native or Rust threads inherently require cooperation: call `tb_register_current_thread_signal_stack_v1()` from `tracebox/signal_stack.h` at thread entry, or `NativeRuntime.registerCurrentThreadForCapture()` from a JVM-owned thread. Registration is idempotent and automatic thread-exit cleanup is the normal path. A long-lived thread that survives Tracebox shutdown may explicitly call `tb_unregister_current_thread_signal_stack_v1()` or `NativeRuntime.unregisterCurrentThreadForCapture()`. These attachment functions allocate and are never signal-handler APIs.
+
+Stack-overflow fallback is guaranteed only for registered threads; it is best effort for other host-created threads. Crashpad remains the primary stack-overflow capture mechanism.
 
 It does not:
 
@@ -920,7 +931,9 @@ Provisional measurement targets:
 | App-process retained memory | Under 512 KiB plus thread stack |
 | Nonfatal handler request | At most one per 10 minutes/process by default |
 
-These numbers are not release promises until measured on representative physical devices.
+These numbers are advisory engineering targets. Personal release depends on the
+hard bounded-work and idle-behavior invariants, not a dedicated measurement
+campaign.
 
 ## 14. Exit reconciliation
 
@@ -941,6 +954,7 @@ The reconciler:
 
 API behavior:
 
+- API 23-29: local Tracebox evidence only; OS exit-history import is unavailable.
 - API 30+: exit reasons and ANR trace when retained.
 - API 31+: native tombstone stream when retained.
 - API 37+: structured `AnrInfo` when present.
@@ -1048,7 +1062,7 @@ Production enablement requires:
 - CCTV vectors;
 - differential interoperability with Go `age` and Rust `rage`;
 - malformed-header and chunk fuzzing;
-- API 30-37 and ABI qualification;
+- qualification on the ADR-0009 required emulator lane;
 - independent cryptographic review;
 - no plugin, SSH, passphrase, armor, or network extension in Android v1;
 - no silent downgrade to plaintext.
@@ -1117,13 +1131,16 @@ The Gradle plugin uses public AGP Variant and Artifact APIs to:
 - inspect merged manifests;
 - fail release variants on forbidden dependencies or permissions.
 
-An AAR cannot control the host's final `targetSdk`; the plugin reports and certifies the observed host configuration.
+An AAR cannot control the host's final `targetSdk`; the plugin reports and
+verifies the observed host configuration.
 
 ## 20. No-network guarantee
 
 The exact claim is:
 
-> Tracebox-owned runtime and tooling artifacts introduce no network permission, networking dependency, uploader, exporter, remote configuration, or observed runtime network attempt in certified paths.
+> Tracebox-owned runtime and tooling artifacts introduce no network
+> permission, networking dependency, uploader, exporter, remote configuration,
+> or observed runtime network attempt in personal-release paths.
 
 It is not a claim that the host app, share target, or SAF provider is offline.
 
@@ -1186,19 +1203,30 @@ Release gates:
 | Fatal capture completion | p95 <= 2 seconds |
 | Package working memory | <= 8 MiB beyond output buffers |
 
-Budgets may change only from measured evidence and an ADR update. Invariants may not be relaxed through tuning.
+Budgets may change from useful measured evidence. Invariants may not be relaxed
+through tuning.
+
+ADR-0010 supplies that update for the personal-project release: the table is a
+set of tuning and regression targets rather than a release-blocking percentile
+contract. Structural invariants and configured hard bounds remain mandatory.
+The emulator smoke need not record a resource baseline or establish
+p50/p95/p99 distributions. Startup time and PSS are optional observations.
 
 ## 23. Testing strategy
 
 ### 23.1 Platform matrix
 
-- API 30, 31, 33, 34, 35, 36, and 37.
-- API 37.1 preview advisory lane.
-- `arm64-v8a` physical devices.
-- `x86_64` emulators.
-- 4 KiB and 16 KiB page sizes.
-- Pixel and at least two materially different OEM families.
-- Debug, minified release, and debuggable-release fixtures.
+- Required: the existing API 36 `x86_64`, 4 KiB emulator.
+- Advisory: other API 23-37 levels, API 37.1 previews, `arm64-v8a`,
+  physical devices, 16 KiB pages, Pixel devices, and other OEM families.
+- Required build coverage: debug plus one minified release-like fixture.
+
+ADR-0010 permits the logical crash, ANR, multiprocess, Direct Boot, deletion,
+network, and R8 scenarios to share one configurable lab application and build
+variants. The manifest's `personal_release_required` IDs are normative for the
+personal release; the wider inventory is opt-in diagnostics. Separate
+application modules are not required. `Tracker-Android` is the downstream
+evaluation host after Tracebox reaches `PERSONAL_RELEASE_READY`.
 
 ### 23.2 Crashpad
 
@@ -1282,10 +1310,10 @@ Crashpad failure leaves the emergency path available.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Android handler/`ptrace` behavior is not reliable across the matrix | Foundation blocked | Run feasibility spike before broad implementation; certify supported matrix |
+| Android handler/`ptrace` behavior is not reliable on the required emulator | Personal release blocked | Run the manifest's representative handler and native-crash smoke on the one required emulator |
 | Crashpad raw data contains sensitive memory | Critical privacy risk | C2 quarantine, short quota/TTL, no standard export, explicit disclosure |
-| Handler increases memory footprint | Adoption/performance risk | Native-only blocked process, one handler, no pollers, measured PSS gate |
-| Watchdog causes battery drain or false positives | Reliability risk | Adaptive lifecycle policy, rate limit, candidate terminology, measured thresholds |
+| Handler increases memory footprint | Adoption/performance risk | Native-only blocked process, one handler, no pollers, hard bounds, and optional PSS observation |
+| Watchdog causes battery drain or false positives | Reliability risk | Adaptive lifecycle policy, rate limit, candidate terminology, host state-machine tests, and optional live observation |
 | Handler and emergency paths double-handle | Corrupt/misleading evidence | One dispatch state machine and recursion/fault corpus |
 | Cross-process policy is described as globally atomic | False guarantee | Use handler-coordinated epoch commit and acknowledgements; return partial failure otherwise |
 | Package preview diverges | Consent failure | Materialize complete plaintext package before approval |
@@ -1296,33 +1324,37 @@ Crashpad failure leaves the emergency path available.
 
 ### Gate A: Crashpad feasibility
 
-Must demonstrate:
+Must demonstrate through host/native tests:
 
 - one handler serving multiple app processes;
-- supported Android lifecycle and attachment behavior;
-- useful minidumps and structural summaries;
-- bounded raw-artifact privacy handling;
-- emergency fallback;
-- acceptable idle memory;
-- 4 KiB and 16 KiB compatibility;
+- bounded raw-artifact privacy handling and emergency fallback;
+- useful structural summaries; and
 - no networking/uploader closure.
 
-The non-negotiable release matrix is API 30-37 on `arm64-v8a` physical devices and `x86_64` emulators, with both 4 KiB and 16 KiB page qualification where available. Failure blocks the foundation release. Narrowing the matrix or relaxing mandatory capture requires a superseding product ADR.
+The required emulator adds only the manifest's consolidated handler-restart and
+native-fault smoke. Idle memory is an optional observation.
+
+ADR-0009 and ADR-0010 define the release matrix as the one existing API 36
+`x86_64`, 4 KiB emulator. Additional API, ABI, page-size, physical-device, and
+OEM lanes are advisory. Failure on the required emulator blocks
+`PERSONAL_RELEASE_READY`.
 
 ### Gate B: Live ANR feasibility
 
-Must demonstrate:
+Host state-machine tests must demonstrate lifecycle suppression, bounded
+candidate capture, rate limiting, timeout behavior, and no heartbeat while
+ineligible. The required emulator adds one `ANR.CANDIDATE` plus exit
+reconciliation smoke. Long overhead and false-positive observations are
+optional diagnostics.
 
-- negligible healthy-state overhead;
-- no heartbeat when no observable eligible component is active;
-- bounded candidate capture;
-- acceptable false-positive behavior;
-- one on-demand handler request;
-- successful OS reconciliation.
+### Gate C: Personal release readiness
 
-### Gate C: Foundation certification
-
-All privacy, persistence, crash, ANR, package, symbol, and no-network invariants pass across the declared platform matrix.
+All mandatory implementation paths are connected; host unit, property,
+fault-injection, native, Rust, build, package, and static no-network gates pass;
+the manifest's representative privacy, persistence, capture, package, and
+no-network smoke scenarios pass on the single required emulator; the final
+review is approved; and unsupported environments are documented without
+claiming broad certification.
 
 ## 27. Open decisions
 

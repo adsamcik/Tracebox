@@ -10,7 +10,7 @@ val githubRepository = providers.gradleProperty("traceboxGitHubRepository")
     .orElse(providers.environmentVariable("GITHUB_REPOSITORY"))
     .orNull
 val projectUrl = githubRepository?.let { "https://github.com/$it" }
-    ?: "https://github.com/OWNER/REPOSITORY"
+    ?: "https://github.com/adsamcik/Tracebox"
 
 afterEvaluate {
     extensions.configure<PublishingExtension> {
@@ -41,7 +41,7 @@ afterEvaluate {
                         url.set(projectUrl)
                         connection.set("scm:git:$projectUrl.git")
                         developerConnection.set(
-                            "scm:git:ssh://git@github.com/${githubRepository ?: "OWNER/REPOSITORY"}.git",
+                            "scm:git:ssh://git@github.com/${githubRepository ?: "adsamcik/Tracebox"}.git",
                         )
                         tag.set("v${project.version}")
                     }

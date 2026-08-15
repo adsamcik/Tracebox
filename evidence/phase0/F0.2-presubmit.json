@@ -1,0 +1,62 @@
+{
+  "requirement_id": "F0.2",
+  "command": "tools\\ci\\presubmit.ps1",
+  "working_directory": "G:\\Github\\Tracebox-worktrees\\tracebox-foundation",
+  "tool_versions": {
+    "powershell": "7.6.3",
+    "gradle": "9.6.1",
+    "agp": "9.2.0",
+    "kotlin": "2.2.10 built-in",
+    "java": "Temurin 21.0.8+9",
+    "ndk": "29.0.14206865",
+    "cmake": "4.1.2",
+    "rust": "1.93.1",
+    "crashpad": "efdc820b087c20eec9e32cb5e5b1a63dcf73a724"
+  },
+  "start_time_utc": "2026-07-18T09:12:22.8928841Z",
+  "end_time_utc": "2026-07-18T09:13:14.9373505Z",
+  "timeout_seconds": 600,
+  "exit_status": 0,
+  "expected_assertions": [
+    "toolchain pins match",
+    "dependency verification and locks present",
+    "Crashpad source trees verify",
+    "debug/minified/debuggable-release APKs build",
+    "Rust host tests and Android cross-builds pass",
+    "no Tracebox INTERNET permission"
+  ],
+  "actual_assertions": {
+    "presubmit_exit": 0,
+    "apks": 5,
+    "internet_permissions": 0,
+    "crashpad_components": 6,
+    "dependency_components": 360,
+    "rust_android_targets": [
+      "aarch64-linux-android",
+      "x86_64-linux-android"
+    ]
+  },
+  "artifact_paths": [
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk"
+  ],
+  "artifact_sha256": {
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk": "da2212787d58bf6816b6f6bdd67492e4001074e5c9ddb783a6fb4507bcc7e3bc",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk": "fcc18de957220fd96ea4e1b9c19b268e06262159a2aaf0ec89e621e60508dc32",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk": "a75e72ffdb252f3019ac8c7acc4bcd91e7cc0c0cbc4f4afc76456dbd951f70d6",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk": "eb82483f536836c736e3022f36ac4d456baec3d19691bf098346033d8cd7b9e7",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk": "cdd040edc6b18309647785038158844f6a1cda97fbc693ae52270eea7df267ab"
+  },
+  "permission_dump": {
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debuggableRelease\\phase0-fixture-debuggableRelease-unsigned.apk": "package: dev.tracebox.phase0",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\debug\\phase0-fixture-debug.apk": "package: dev.tracebox.phase0",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\debug\\phase0-benchmark-debug.apk": "package: dev.tracebox.phase0.benchmark",
+    "test-apps\\phase0-fixture\\build\\outputs\\apk\\release\\phase0-fixture-release-unsigned.apk": "package: dev.tracebox.phase0",
+    "benchmarks\\phase0-benchmark\\build\\outputs\\apk\\release\\phase0-benchmark-release-unsigned.apk": "package: dev.tracebox.phase0.benchmark"
+  },
+  "matrix_cell": "HOST_WINDOWS; ARM64_V8A_BUILD; X86_64_BUILD",
+  "result": "PASS"
+}

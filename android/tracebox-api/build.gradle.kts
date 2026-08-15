@@ -1,32 +1,10 @@
-// SPDX-License-Identifier: Apache-2.0
-
 plugins {
-    alias(libs.plugins.android.library)
+    id("tracebox.android.library")
     `maven-publish`
 }
 
 android {
-    namespace = "io.github.tracebox.api"
-    compileSdk = 37
-
-    defaultConfig {
-        minSdk = 30
-    }
-
-    buildFeatures {
-        buildConfig = false
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    lint {
-        abortOnError = true
-        warningsAsErrors = true
-    }
-
+    namespace = "dev.tracebox.api"
     publishing {
         singleVariant("release") {
             withSourcesJar()
@@ -35,12 +13,10 @@ android {
 }
 
 dependencies {
-    api(libs.kotlinx.coroutines.core)
-    testImplementation(libs.junit4)
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    testImplementation(kotlin("test-junit"))
 }
 
-extra["traceboxPublicationName"] = "Tracebox Android API"
-extra["traceboxPublicationDescription"] =
-    "Typed public contract for Tracebox's offline Android diagnostics alpha."
-
+extra["traceboxPublicationName"] = "Tracebox API"
+extra["traceboxPublicationDescription"] = "Generated, privacy-classified Tracebox public API."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))

@@ -1,0 +1,51 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Tracebox Phase 0"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".LegacyPhase0Activity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:process=":phase0_main" />
+        <activity
+            android:name=".LabPackageActivity"
+            android:exported="true" />
+        <service
+            android:name=".HandlerService"
+            android:exported="false"
+            android:process=":phase0_handler" />
+        <service
+            android:name=".WorkerService"
+            android:exported="false"
+            android:process=":worker" />
+        <service
+            android:name=".ProductionParticipantService"
+            android:exported="false"
+            android:process=":production_participant" />
+        <receiver
+            android:name=".FaultReceiver"
+            android:exported="true"
+            android:process=":phase0_main" />
+        <receiver
+            android:name=".LabDirectBootReceiver"
+            android:directBootAware="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
