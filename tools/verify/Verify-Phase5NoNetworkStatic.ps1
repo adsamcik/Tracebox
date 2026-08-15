@@ -59,6 +59,7 @@ $androidModules = @(
     'tracebox-storage',
     'tracebox-export',
     'tracebox-export-ui',
+    'tracebox-ui-compose',
     'tracebox-directboot',
     'tracebox'
 )
