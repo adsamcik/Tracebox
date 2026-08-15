@@ -6,6 +6,8 @@ import dev.tracebox.api.generated.GeneratedRecord
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class TraceboxApiTest {
     @Test
@@ -43,6 +45,48 @@ class TraceboxApiTest {
         assertFailsWith<IllegalArgumentException> {
             LogTemplate.of("line one\nline two")
         }
+    }
+
+    @Test
+    fun privacy_configuration_equivalence_compares_adapter_behavior() {
+        val piiString = PrivacyConfiguration.Builder()
+            .register(String::class.java, Privacy.PII)
+            .build()
+        val samePiiString = PrivacyConfiguration.Builder()
+            .register(String::class.java, Privacy.PII)
+            .build()
+        val secretString = PrivacyConfiguration.Builder()
+            .register(String::class.java, Privacy.SECRET)
+            .build()
+
+        assertTrue(piiString.isEquivalentForInstallation(samePiiString))
+        assertFalse(piiString.isEquivalentForInstallation(secretString))
+        assertFalse(piiString.isEquivalentForInstallation(PrivacyConfiguration.defaults()))
+    }
+
+    @Test
+    fun privacy_configuration_equivalence_requires_renderer_identity_and_adapter_order() {
+        val sharedRenderer = PrivacyRenderer<Number> { it.toLong().toString() }
+        val first = PrivacyConfiguration.Builder()
+            .register(Number::class.java, Privacy.PUBLIC, sharedRenderer)
+            .register(Int::class.java, Privacy.PII)
+            .build()
+        val same = PrivacyConfiguration.Builder()
+            .register(Number::class.java, Privacy.PUBLIC, sharedRenderer)
+            .register(Int::class.java, Privacy.PII)
+            .build()
+        val reordered = PrivacyConfiguration.Builder()
+            .register(Int::class.java, Privacy.PII)
+            .register(Number::class.java, Privacy.PUBLIC, sharedRenderer)
+            .build()
+        val differentRenderer = PrivacyConfiguration.Builder()
+            .register(Number::class.java, Privacy.PUBLIC) { it.toLong().toString() }
+            .register(Int::class.java, Privacy.PII)
+            .build()
+
+        assertTrue(first.isEquivalentForInstallation(same))
+        assertFalse(first.isEquivalentForInstallation(reordered))
+        assertFalse(first.isEquivalentForInstallation(differentRenderer))
     }
 
     private class FakeDiagnostics(private val enabled: Boolean) : Diagnostics {

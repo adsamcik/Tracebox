@@ -4,6 +4,7 @@ import dev.tracebox.api.DiagnosticsProfile
 import dev.tracebox.api.PolicyUpdateResult
 import dev.tracebox.api.Privacy
 import dev.tracebox.api.PrivacyConfiguration
+import dev.tracebox.api.TraceboxPolicy
 import dev.tracebox.anr.ExitPolicyToken
 import dev.tracebox.core.PolicySnapshot
 import dev.tracebox.directboot.DenyState
@@ -73,7 +74,7 @@ class TraceboxStorageLifecycleTest {
     }
 
     @Test
-    fun installation_equivalence_includes_the_exact_custom_privacy_configuration() {
+    fun installation_equivalence_includes_structurally_equivalent_privacy_adapters() {
         val privacy = PrivacyConfiguration.Builder()
             .register(String::class.java, Privacy.PII)
             .build()
@@ -88,12 +89,29 @@ class TraceboxStorageLifecycleTest {
             .build()
 
         assertTrue(first.equivalentTo(reused))
-        assertFalse(first.equivalentTo(independentlyBuilt))
+        assertTrue(first.equivalentTo(independentlyBuilt))
         assertTrue(
             TraceboxConfiguration.Builder().build().equivalentTo(
                 TraceboxConfiguration.Builder().build(),
             ),
         )
+    }
+
+    @Test
+    fun installation_equivalence_rejects_every_effective_setting_change() {
+        val defaults = TraceboxConfiguration.Builder().build()
+        val differences = listOf(
+            TraceboxConfiguration.Builder().setProcessRole(3).build(),
+            TraceboxConfiguration.Builder().setInitialPolicy(TraceboxPolicy.standard()).build(),
+            TraceboxConfiguration.Builder().setNativeCaptureEnabled(true).build(),
+            TraceboxConfiguration.Builder().setPersistRequestedProfile(true).build(),
+            TraceboxConfiguration.Builder().setDirectBootC0Enabled(true).build(),
+            TraceboxConfiguration.Builder()
+                .privacy { register(String::class.java, Privacy.PII) }
+                .build(),
+        )
+
+        differences.forEach { assertFalse(defaults.equivalentTo(it)) }
     }
 
     @Test

@@ -110,12 +110,16 @@ class PrivacyConfiguration private constructor(
     /**
      * Returns whether two configurations are provably identical for process-install reuse.
      *
-     * Empty configurations are structurally equivalent. Custom renderers can contain arbitrary
-     * application state, so Tracebox fails closed and accepts them only when the exact immutable
-     * [PrivacyConfiguration] instance is reused.
+     * Adapter order is significant because rendering selects the first assignable adapter. Types
+     * and privacy classes are compared structurally. Custom renderers can contain arbitrary
+     * application state, so renderer-backed adapters are equivalent only when they reuse the exact
+     * [PrivacyRenderer] instance.
      */
-    fun isEquivalentForInstallation(other: PrivacyConfiguration): Boolean =
-        this === other || (adapters.isEmpty() && other.adapters.isEmpty())
+    fun isEquivalentForInstallation(other: PrivacyConfiguration): Boolean {
+        if (this === other) return true
+        return adapters.size == other.adapters.size &&
+            adapters.indices.all { index -> adapters[index].isEquivalentTo(other.adapters[index]) }
+    }
 
     @Suppress("UNCHECKED_CAST")
     private fun renderValue(value: Any?, adapter: Adapter<*>?): String {
@@ -154,7 +158,10 @@ class PrivacyConfiguration private constructor(
         val type: Class<T>,
         val privacy: Privacy,
         val renderer: PrivacyRenderer<T>?,
-    )
+    ) {
+        fun isEquivalentTo(other: Adapter<*>): Boolean =
+            type == other.type && privacy == other.privacy && renderer === other.renderer
+    }
 
     companion object {
         private const val REDACTED = "[redacted]"

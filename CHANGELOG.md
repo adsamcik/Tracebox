@@ -13,6 +13,8 @@ once its public API stabilizes.
   Android modules while preserving the no-network boundary.
 - Replaced raw logging strings and values with bounded static `LogTemplate` and privacy-classified
   `LogArgument` contracts, backed by a consumer-facing fatal lint check.
+- Made idempotent installation compare privacy adapters by ordered type/classification mappings and
+  exact renderer identity instead of requiring the same `PrivacyConfiguration` container instance.
 
 ## [0.1.0-alpha.1] - 2026-07-20
 
