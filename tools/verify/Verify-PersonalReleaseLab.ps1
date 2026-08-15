@@ -340,6 +340,8 @@ $requiredRunnerBindings = @(
         "'HIDE TECHNICAL DETAILS'",
         'Technical disclosure facts were visible before explicit expansion',
         'Exact disclosure facts were not visible after explicit expansion',
+        'function Remove-UidPacketCounter',
+        'Remove-UidPacketCounter -Uid $uid -Chain $Chain',
         'scenario_anr_stall_started',
         "keyevent '--async' KEYCODE_DPAD_CENTER",
         'Wait-AndroidAnr',

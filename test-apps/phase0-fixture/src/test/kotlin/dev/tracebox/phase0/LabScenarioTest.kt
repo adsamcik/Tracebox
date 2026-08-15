@@ -156,6 +156,13 @@ class LabScenarioTest {
         assertTrue(runner.contains("'HIDE TECHNICAL DETAILS'"))
         assertTrue(runner.contains("Technical disclosure facts were visible before explicit expansion"))
         assertTrue(runner.contains("Exact disclosure facts were not visible after explicit expansion"))
+        assertTrue(runner.contains("function Remove-UidPacketCounter"))
+        assertEquals(
+            2,
+            """Remove-UidPacketCounter -Uid \${'$'}uid -Chain \${'$'}Chain""".toRegex()
+                .findAll(runner)
+                .count(),
+        )
         assertTrue(runner.contains("scenario_anr_stall_started"))
         assertTrue(runner.contains("keyevent '--async' KEYCODE_DPAD_CENTER"))
         assertTrue(runner.contains("Wait-AndroidAnr"))

@@ -1046,6 +1046,23 @@ function Get-AppUid {
     return ConvertFrom-PmPackageUid -Package $Package -Lines $rows
 }
 
+function Remove-UidPacketCounter {
+    param(
+        [int] $Uid,
+        [string] $Chain
+    )
+    try {
+        & adb -s $Serial shell iptables '-D' OUTPUT '-m' owner '--uid-owner' $Uid '-j' $Chain 2>&1 |
+            Out-Null
+    } catch { }
+    try {
+        & adb -s $Serial shell iptables '-F' $Chain 2>&1 | Out-Null
+    } catch { }
+    try {
+        & adb -s $Serial shell iptables '-X' $Chain 2>&1 | Out-Null
+    } catch { }
+}
+
 function Invoke-WithUidPacketCounter {
     param(
         [string] $Package,
@@ -1055,9 +1072,7 @@ function Invoke-WithUidPacketCounter {
     )
     Assert-AdbRoot -Context "UID packet counter for $Package" | Out-Null
     $uid = Get-AppUid $Package
-    & adb -s $Serial shell iptables '-D' OUTPUT '-m' owner '--uid-owner' $uid '-j' $Chain 2>$null | Out-Null
-    & adb -s $Serial shell iptables '-F' $Chain 2>$null | Out-Null
-    & adb -s $Serial shell iptables '-X' $Chain 2>$null | Out-Null
+    Remove-UidPacketCounter -Uid $uid -Chain $Chain
     try {
         $target = if ($Drop) { 'DROP' } else { 'RETURN' }
         Invoke-Adb shell iptables '-N' $Chain | Out-Null
@@ -1075,9 +1090,7 @@ function Invoke-WithUidPacketCounter {
         }
         return $packets
     } finally {
-        & adb -s $Serial shell iptables '-D' OUTPUT '-m' owner '--uid-owner' $uid '-j' $Chain 2>$null | Out-Null
-        & adb -s $Serial shell iptables '-F' $Chain 2>$null | Out-Null
-        & adb -s $Serial shell iptables '-X' $Chain 2>$null | Out-Null
+        Remove-UidPacketCounter -Uid $uid -Chain $Chain
     }
 }
 
