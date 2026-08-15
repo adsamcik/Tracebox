@@ -1,0 +1,148 @@
+﻿{
+    "schema":  "tracebox-personal-release-emulator-result-v1",
+    "scope":  "Representative personal-release smoke on one API-36 x86_64 4-KiB emulator.",
+    "mode":  "PERSONAL_RELEASE",
+    "command":  "tools\\verify\\Invoke-PersonalReleaseEmulator.ps1 -Serial emulator-5554",
+    "start_time_utc":  "2026-08-15T22:44:01.0206867Z",
+    "end_time_utc":  "2026-08-15T22:49:03.7273244Z",
+    "endpoint":  {
+                     "serial":  "emulator-5554",
+                     "api":  36,
+                     "abi":  "x86_64",
+                     "page_size":  4096,
+                     "emulator":  true
+                 },
+    "provenance":  {
+                       "base_commit":  "e35aeaf8803dd80460f26bfa0d822f0536368cda",
+                       "working_tree_patch_sha256":  "66f310cac3f0dd687281cc2674b255d462d8941bdc704ca8ed67fea601663212",
+                       "source_state_recheck_sha256":  "66f310cac3f0dd687281cc2674b255d462d8941bdc704ca8ed67fea601663212",
+                       "source_state_stable":  true,
+                       "source_state_entries":  [
+
+                                                ],
+                       "scenario_manifest_sha256":  "4d8a29d65ced4e0a067c14b2fea849c6992012e60b1b1fa022c199e1100ac8f9",
+                       "no_internet_apk_sha256":  "e17bfc6e5e1b6ae3d9c62a9b9a708795c9ddc1ecd8feca6a68f33c34ddae7659",
+                       "host_network_apk_sha256":  "0d8aa6844abd71db144b60b53fa04578a25bf61d0ab5a77d381187f5147decdf",
+                       "no_internet_apk":  "test-apps\\phase0-fixture\\build\\outputs\\apk\\noInternet\\qualificationRelease\\phase0-fixture-noInternet-qualificationRelease.apk",
+                       "host_network_apk":  "test-apps\\phase0-fixture\\build\\outputs\\apk\\hostNetwork\\qualificationRelease\\phase0-fixture-hostNetwork-qualificationRelease.apk"
+                   },
+    "host_gates":  [
+                       {
+                           "name":  "static_release_artifacts",
+                           "outcome":  "PASS"
+                       },
+                       {
+                           "name":  "malicious_corpora",
+                           "outcome":  "PASS"
+                       }
+                   ],
+    "scenario_coverage":  {
+                              "inventory":  39,
+                              "required":  13,
+                              "observed":  13,
+                              "missing":  [
+
+                                          ],
+                              "duplicate":  [
+
+                                            ],
+                              "unexpected":  [
+
+                                             ],
+                              "result":  "PASS"
+                          },
+    "scenarios":  [
+                      {
+                          "id":  "INSTALL.READINESS",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "I/TraceboxLab(18684): scenario_result id=INSTALL.READINESS outcome=PASS readiness=DURABLE health=READY"
+                                       ]
+                      },
+                      {
+                          "id":  "HANDLER.RESTART",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "I/TraceboxLab(18808): scenario_result id=MULTIPROCESS.POLICY_BARRIER outcome=PASS standard=SUCCESS standard_ready=true minimal=SUCCESS minimal_ready=true main=18808 previous_handler=18839 replacement_handler=18939"
+                                       ]
+                      },
+                      {
+                          "id":  "FAULT.JVM_UNCAUGHT",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "terminated_pid=19117 handler_pid=19147 termination_ms=224 pre_death_evidence=\u0027not_required\u0027 new_dump=none changed_segments=1 restart_segment=/data/user/0/dev.tracebox.phase0/no_backup/tracebox/instances/j9dmDp3oeCC4t1az0zD3mJ2tlHkXEHRCA3eBnYmYTSc/segments/xPCKCb2BZOxmCgksIWAHo4bjxP715GghjuWy39KRU3I.tbseg=6ff7d82c4ff0da256cc36c6a82245fa2d363ef7d1efa7e566f74fe1c5618131c recovery_handler=19252 restart_readiness=\u0027I/TraceboxLab(19227): scenario_result id=INSTALL.READINESS outcome=PASS readiness=DURABLE health=READY\u0027"
+                                       ]
+                      },
+                      {
+                          "id":  "FAULT.CPP_SEGV",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "terminated_pid=19337 handler_pid=19367 termination_ms=818 pre_death_evidence=\u0027not_required\u0027 new_dump=/data/user/0/dev.tracebox.phase0/no_backup/tracebox/native-handler/tracebox-handler-handoff/0735c684644ec906dfe398d3069ef54259d18087596fcd7a3b84ea8459254e37.dmp=046fa1c351dffc7f468ecebc3f9ca05d499b60727b426e56da4789fae78bc3d1 changed_segments=0 restart_segment=/data/user/0/dev.tracebox.phase0/no_backup/tracebox/instances/PCoApAHtIbOH4VOlV4B74D9sFDhzuY3a5aVQIN_UrMk/segments/9fj4GinxeTYSjZGwnIlPlH4lJqEviBJqDj-hLqG4J9g.tbseg=17ab0c446ac8bbe36dcda0dcc1797e0f31be65c5efe06e78fd782edf9a9ec9f4 recovery_handler=19480 restart_readiness=\u0027I/TraceboxLab(19458): scenario_result id=INSTALL.READINESS outcome=PASS readiness=DURABLE health=READY\u0027"
+                                       ]
+                      },
+                      {
+                          "id":  "ANR.CANDIDATE",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "I/TraceboxLab(19607): scenario_anr_armed id=ANR.CANDIDATE stall=true policy=SUCCESS I/TraceboxLab(19607): scenario_anr_window_complete id=ANR.CANDIDATE stall=true segment_count_before=2 segment_count_after=2"
+                                       ]
+                      },
+                      {
+                          "id":  "EXIT.RESTART_RECONCILIATION",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "I/TraceboxLab(20021): scenario_anr_armed id=EXIT.RESTART_RECONCILIATION stall=true policy=SUCCESS I/TraceboxLab(20021): scenario_anr_stall_started id=EXIT.RESTART_RECONCILIATION stall=true I/am_anr  (  700): [0,20021,dev.tracebox.phase0,552091204,Input dispatching timed out (2db2a76 dev.tracebox.phase0/dev.tracebox.phase0.LabPackageActivity is not responding. Waited 5000ms for KeyEvent(deviceId=-1, eventTime=3933334000000, source=UNKNOWN, displayId=-1, action=DOWN, flags=0x00000000, keyCode=DPAD_CENTER(23), scanCode=0, metaState=0x00000000, repeatCount=0), policyFlags=0x6b000000).] anr_dialog_close=true selector=resource_id elapsed_ms=3983 before_tombstone=absent after_tombstone=/data/user/0/dev.tracebox.phase0/no_backup/tracebox/exit-tombstones-v1=badb7ad0b9d366e65ed84d622418fdd9adc168eb6d3cdd0fd1d3bcd1f14ded8d osexit_segments=2 pending_journals=0"
+                                       ]
+                      },
+                      {
+                          "id":  "DELETE.ALL_RESTART",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "I/TraceboxLab(20591): scenario_result id=DELETE.ALL_RESTART outcome=PASS report=COMPLETE readiness=DURABLE health=DISABLED I/TraceboxLab(20715): scenario_state id=DELETE.ALL_RESTART phase=post_delete_restart outcome=PASS readiness=DURABLE health=DISABLED pre_delete_payloads=1 surviving=0 current_payloads=0"
+                                       ]
+                      },
+                      {
+                          "id":  "PACKAGE.DISCLOSURE",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "I/TraceboxLab(20784): scenario_result id=PACKAGE.DISCLOSURE outcome=PASS disclosure_reviewed=true approved=false"
+                                       ]
+                      },
+                      {
+                          "id":  "PACKAGE.EXACT_APPROVAL",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "I/TraceboxLab(21042): scenario_result id=PACKAGE.EXACT_APPROVAL outcome=PASS package_created=true size=524"
+                                       ]
+                      },
+                      {
+                          "id":  "PACKAGE.SAVE_SHARE",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "I/TraceboxLab(21268): scenario_save_picker id=PACKAGE.SAVE_SHARE expected_bytes=524 I/TraceboxLab(21268): scenario_share_handoff id=PACKAGE.SAVE_SHARE saved_bytes=524 expected_bytes=524 digest_match=true receipt=CHOOSER_OPENED chooser=ACTIVITY MANAGER TOP-RESUMED (dumpsys activity top-resumed) packageName=com.android.intentresolver processName=com.android.intentresolver launchedFromUid=10216 launchedFromPackage=dev.tracebox.phase0 launchedFromFeature=null userId=0 app=ProcessRecord{3d08dff 13221:com.android.intentresolver/u0a110} Intent { act=android.intent.action.CHOOSER flg=0x800001 xflg=0x4 cmp=com.android.intentresolver/.ChooserActivityLauncher clip={text/uri-list hasLabel(16) {U(content)}} (has extras) } rootOfTask=false task=Task{ce746c1 #67 type=standard A=10216:dev.tracebox.phase0} taskAffinity=10110:com.android.intentresolver mActivityComponent=com.android.intentresolver/.ChooserActivity baseDir=/system/priv-app/IntentResolver/IntentResolver.apk dataDir=/data/user/0/com.android.intentresolver stateNotNeeded=false componentSpecified=false mActivityType=standard compat={420dpi} theme=0x7f0d0113 mLastReportedConfigurations:   mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.3 s.53 fontWeightAdjustment=0}   mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.3 s.2 fontWeightAdjustment=0} mLastReportedActivityWindowInfo=ActivityWindowInfo{isEmbedded=false, taskBounds=Rect(0, 0 - 1080, 2400), taskFragmentBounds=Rect(0, 0 - 1080, 2400)} CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h914dp 420dpi nrml long port finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2400) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.3 s.2 fontWeightAdjustment=0} RequestedOverrideConfiguration={0.0 ?mcc0mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=undefined mActivityType=undefined mAlwaysOnTop=undefined mRotation=undefined} ?fontWeightAdjustment} resultTo=ActivityRecord{239203277 u0 dev.tracebox.phase0/.LabPackageActivity t67} resultWho=null resultCode=43 taskDescription: label=\"null\" icon=null iconResource=/0 iconFilename=null primaryColor=fff1f0f7   backgroundColor=ffeeedf4 statusBarColor=0 navigationBarColor=0  backgroundColorFloating=fff1f0f7 readUriPermissions={UriPermission{84bdb39 content://dev.tracebox.phase0.tracebox.export/tbdiag-b5753f42-d469-4b52-ba0f-c5e8b38fab94.tbdiag [user 0]}} launchFailed=false launchCount=1 lastLaunchTime=-1s352ms mHaveState=false mIcicle=null state=RESUMED delayedResume=false finishing=false keysPaused=false inHistory=true idle=false occludesParent=false mNoDisplay=false immersive=false launchMode=0 mActivityType=standard windows=[Window{f598f5c u0 com.android.intentresolver/com.android.intentresolver.ChooserActivityLauncher}] windowType=2 mOccludesParent=false overrideOrientation=SCREEN_ORIENTATION_UNSPECIFIED requestedOrientation=SCREEN_ORIENTATION_UNSPECIFIED mVisibleRequested=true mVisible=false mClientVisible=true reportedDrawn=false reportedVisible=false mNumInterestingWindows=1 mNumDrawnWindows=0 allDrawn=false) resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false supportsSizeChanges=SIZE_CHANGES_UNSUPPORTED_METADATA configChanges=0xd33 neverSandboxDisplayApis=false alwaysSandboxDisplayApis=false isTransparentPolicyRunning=false areBoundsLetterboxed=false isLetterboxRunning=false I/TraceboxLab(21268): scenario_result id=PACKAGE.SAVE_SHARE outcome=PASS saved_bytes=524 expected_bytes=524 digest_match=true chooser_returned=true receipt=CHOOSER_OPENED staging_deleted=true"
+                                       ]
+                      },
+                      {
+                          "id":  "NETWORK.NO_INTERNET",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "uid_packets=0"
+                                       ]
+                      },
+                      {
+                          "id":  "NETWORK.HOST_CONTROL",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "uid_packets=1"
+                                       ]
+                      },
+                      {
+                          "id":  "NETWORK.BLOCKED_EGRESS",
+                          "outcome":  "PASS",
+                          "evidence":  [
+                                           "uid_packets=0 workflows=2"
+                                       ]
+                      }
+                  ],
+    "result":  "PASS"
+}
