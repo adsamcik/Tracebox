@@ -83,13 +83,22 @@ exists.
 This recovery design prevents an automated retry from accidentally overwriting
 or duplicating immutable package coordinates.
 
-## Local publication smoke test
+## Isolated candidate publication
 
-This only publishes to the local Maven cache; it does not contact GitHub:
+Never put an unpublished Tracebox build in the user's global Maven Local cache. Publish a uniquely
+versioned candidate to an explicit disposable repository instead:
 
-```bash
-./gradlew publishToMavenLocal
+```text
+./gradlew.bat \
+  -PtraceboxVersion=0.1.0-alpha.4-<commit> \
+  -PtraceboxLocalRepository=C:\tmp\tracebox-0.1.0-alpha.4-<commit> \
+  publishFoundation
 ```
+
+The property configures a file-backed `IsolatedCandidate` repository for all ten publications,
+rejects the global `~/.m2/repository`, and is forbidden when `CI` is present. Pass the same path and
+version to Tracker's candidate-validation seams, then remove the disposable repository after the
+consumer checks. This workflow never contacts GitHub and never changes the catalog-pinned release.
 
 To exercise the GitHub publication configuration outside Actions, set the
 repository and credentials in an untracked local properties file or the

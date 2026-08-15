@@ -11,6 +11,18 @@ val githubRepository = providers.gradleProperty("traceboxGitHubRepository")
     .orNull
 val projectUrl = githubRepository?.let { "https://github.com/$it" }
     ?: "https://github.com/adsamcik/Tracebox"
+val isolatedCandidateRepository = providers.gradleProperty("traceboxLocalRepository").orNull
+
+if (isolatedCandidateRepository != null) {
+    check(!providers.environmentVariable("CI").isPresent) {
+        "traceboxLocalRepository is a developer-only candidate-validation seam and is forbidden in CI."
+    }
+    val target = rootProject.file(isolatedCandidateRepository).canonicalFile
+    val globalMavenLocal = file("${System.getProperty("user.home")}/.m2/repository").canonicalFile
+    check(target != globalMavenLocal) {
+        "traceboxLocalRepository must be isolated from the user's global Maven Local cache."
+    }
+}
 
 afterEvaluate {
     extensions.configure<PublishingExtension> {
@@ -63,10 +75,21 @@ afterEvaluate {
                 }
             }
         }
+
+        if (isolatedCandidateRepository != null) {
+            repositories {
+                maven {
+                    name = "IsolatedCandidate"
+                    url = rootProject.uri(isolatedCandidateRepository)
+                }
+            }
+        }
     }
 }
 
 // A direct GitHub Packages publication must not bypass immutable release metadata validation.
 tasks.withType<PublishToMavenRepository>().configureEach {
-    dependsOn(rootProject.tasks.named("verifyReleaseMetadata"))
+    if (name.endsWith("ToGitHubPackagesRepository")) {
+        dependsOn(rootProject.tasks.named("verifyReleaseMetadata"))
+    }
 }
