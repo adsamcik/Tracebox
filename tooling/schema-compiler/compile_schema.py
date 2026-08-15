@@ -9,7 +9,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tooling" / "schema-model"))
-from schema_model import SchemaError, parse_schema  # noqa: E402
+from schema_model import SchemaError, parse_schema, validate_compatibility  # noqa: E402
+
+COMPATIBILITY_BASELINE = ROOT / "schema" / "compatibility" / "v1.json"
+COMPATIBILITY_BASELINE_SHA256 = "cce0f7c4b1bff19d5b2f0d7de85b71ef96f41ccf3a917a318696adb4b272f8fe"
 
 
 def _kotlin_name(name: str) -> str:
@@ -326,7 +329,19 @@ def main() -> int:
     args = parser.parse_args()
     raw = args.schema.read_bytes()
     try:
-        schema = parse_schema(json.loads(raw), raw.decode("utf-8"))
+        document = json.loads(raw)
+        baseline_bytes = COMPATIBILITY_BASELINE.read_bytes()
+        baseline = json.loads(baseline_bytes)
+        canonical_baseline = json.dumps(
+            baseline,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        if hashlib.sha256(canonical_baseline).hexdigest() != COMPATIBILITY_BASELINE_SHA256:
+            raise SchemaError("released compatibility baseline checksum changed")
+        schema = parse_schema(document, raw.decode("utf-8"))
+        validate_compatibility(document, baseline)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, SchemaError) as error:
         print(f"schema compilation failed: {error}", file=sys.stderr)
         return 1

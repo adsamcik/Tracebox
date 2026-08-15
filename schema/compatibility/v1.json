@@ -1,0 +1,18 @@
+{
+  "contract": "tracebox-schema-compatibility-v1",
+  "schema_version": 1,
+  "reserved_event_ids": [900],
+  "event_prefix": [
+    {"id": 1, "sha256": "69f1da4018d7ea2c5ffb3236a01d2083fafcc210e4a34ef3dcd1cf9b307899c7"},
+    {"id": 2, "sha256": "c0cc9321eb8572689bfd0a6911f3ef74696242ab5f8cf77f3f4c917ae74c6b65"},
+    {"id": 3, "sha256": "234f877a4252c7eba571ea4861deb99f4c7bcdca98726e7fe9a716aeccbffaf2"},
+    {"id": 4, "sha256": "7ea39a59f3560365bed519c44309b6d549d1fa58de5ca706f5b81293e12ad5f8"},
+    {"id": 5, "sha256": "5f6a418386aaae42f8728ab03647c07dc4513b6620214d096d3f7dcc7cc1cc1f"},
+    {"id": 6, "sha256": "edd1bc04cc2e722246d32479af8d40afbb861020c18502cbd047c0711f7d0df7"},
+    {"id": 7, "sha256": "e0f642acaa9bf10154faaffdda6e443bbf412627a81264c22237fd60d566ccda"},
+    {"id": 8, "sha256": "8c98ae3432ba597bc5108e79e7d9dfc2941b49b41eee698ea34aff246dff0621"},
+    {"id": 9, "sha256": "5bae5720d6be8c403df0825f9b0eaffee8aec0a5ef2e4ab22e011b8d5a38082a"},
+    {"id": 10, "sha256": "cdf76aef2fbd25b237380feae12462c3e409c699760195a447bfa611a8ba2fb3"},
+    {"id": 11, "sha256": "5368e77264844a9fb7eaef7442e05893b3de95a1b56f0c84eda58523227539f3"}
+  ]
+}

@@ -9,3 +9,9 @@ Prohibited semantic types, ID reuse, and non-C0 Direct Boot fields.
 Run `python tooling\schema-compiler\compile_schema.py` to update every generated
 consumer. Generated surfaces are the only recording contracts; there is no
 generic event, map, label, object, or text collection construct.
+
+`compatibility/v1.json` freezes the released event prefix as canonical hashes.
+The compiler requires every released event and field contract to remain exact;
+v1 can grow only by appending a new event with a fresh ID. Reserved IDs cannot be
+removed. A future incompatible schema version requires an explicit, reviewed
+compatibility-baseline migration.

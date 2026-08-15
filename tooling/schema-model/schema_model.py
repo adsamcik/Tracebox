@@ -1,6 +1,8 @@
 """Authoritative, strict model for Tracebox's bounded event schema."""
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +14,59 @@ SEMANTIC_TYPES = frozenset(
 
 class SchemaError(ValueError):
     """Raised when a schema could admit data outside the privacy contract."""
+
+
+def validate_compatibility(
+    document: dict[str, Any],
+    released_baseline: dict[str, Any],
+) -> None:
+    """Require the released event prefix to remain byte-contract equivalent.
+
+    V1 can grow only by appending a new event. Existing event metadata and fields are frozen
+    together because their generated Kotlin, C, Rust, protobuf, storage, and package record
+    representations form one ABI. A future schema-version migration requires a new reviewed
+    compatibility-baseline format rather than silently weakening this check.
+    """
+    expected_baseline_fields = {
+        "contract",
+        "schema_version",
+        "reserved_event_ids",
+        "event_prefix",
+    }
+    if set(released_baseline) != expected_baseline_fields:
+        raise SchemaError("released compatibility baseline has unknown or missing fields")
+    if released_baseline["contract"] != "tracebox-schema-compatibility-v1":
+        raise SchemaError("unsupported schema compatibility baseline")
+    if document.get("schema_version") != released_baseline["schema_version"]:
+        raise SchemaError("schema version changes require an explicit compatibility-baseline migration")
+
+    baseline_reserved = released_baseline["reserved_event_ids"]
+    current_reserved = document.get("reserved_event_ids")
+    if not isinstance(baseline_reserved, list) or not isinstance(current_reserved, list):
+        raise SchemaError("compatibility reserved event IDs must be lists")
+    if not set(baseline_reserved).issubset(current_reserved):
+        raise SchemaError("released reserved event IDs cannot be removed")
+
+    event_prefix = released_baseline["event_prefix"]
+    current_events = document.get("events")
+    if not isinstance(event_prefix, list) or not isinstance(current_events, list):
+        raise SchemaError("compatibility event prefixes must be lists")
+    if len(current_events) < len(event_prefix):
+        raise SchemaError("released events cannot be removed")
+    for index, locked in enumerate(event_prefix):
+        if set(locked) != {"id", "sha256"}:
+            raise SchemaError("released event lock has unknown or missing fields")
+        current = current_events[index]
+        if current.get("id") != locked["id"]:
+            raise SchemaError(f"released event prefix changed at position {index}")
+        canonical = json.dumps(
+            current,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        if hashlib.sha256(canonical).hexdigest() != locked["sha256"]:
+            raise SchemaError(f"released event {locked['id']} changed incompatibly")
 
 
 @dataclass(frozen=True)

@@ -40,9 +40,22 @@ class SchemaCompilerTests(unittest.TestCase):
 
     def test_field_name_and_type_drive_every_contract_target(self):
         schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
-        field = schema["events"][1]["fields"][2]
-        field["name"] = "signed_signal"
-        field["semantic_type"] = "i32"
+        schema["events"].append({
+            "id": 12,
+            "name": "SignedProbe",
+            "category": "compatibility_probe",
+            "retention": "ordinary",
+            "package_visibility": "standard",
+            "direct_boot_eligible": False,
+            "fields": [{
+                "id": 1,
+                "name": "signed_signal",
+                "privacy": "C0",
+                "semantic_type": "i32",
+                "max_encoded_size": 5,
+                "transform": "none",
+            }],
+        })
         result = self.compile(schema)
         self.assertEqual(0, result.returncode, result.stderr)
         targets = [
@@ -73,7 +86,68 @@ class SchemaCompilerTests(unittest.TestCase):
         schema["events"][1]["id"] = schema["events"][0]["id"]
         self.assertNotEqual(0, self.compile(schema).returncode)
 
-    def test_direct_boot_fingerprint_ignores_unrelated_events_but_tracks_its_projection(self):
+    def test_released_event_prefix_is_immutable(self):
+        source = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
+        mutations = []
+
+        renamed = json.loads(json.dumps(source))
+        renamed["events"][0]["name"] = "RenamedStructuralSummary"
+        mutations.append(renamed)
+
+        removed = json.loads(json.dumps(source))
+        removed["events"].pop(4)
+        mutations.append(removed)
+
+        reordered = json.loads(json.dumps(source))
+        reordered["events"][0], reordered["events"][1] = reordered["events"][1], reordered["events"][0]
+        mutations.append(reordered)
+
+        field_changed = json.loads(json.dumps(source))
+        field_changed["events"][2]["fields"][0]["privacy"] = "C2"
+        mutations.append(field_changed)
+
+        field_appended = json.loads(json.dumps(source))
+        field_appended["events"][3]["fields"].append({
+            "id": 3,
+            "name": "new_field",
+            "privacy": "C0",
+            "semantic_type": "u32",
+            "max_encoded_size": 5,
+            "transform": "none",
+        })
+        mutations.append(field_appended)
+
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                self.assertNotEqual(0, self.compile(mutation).returncode)
+
+    def test_released_reserved_ids_cannot_be_removed(self):
+        schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
+        schema["reserved_event_ids"] = []
+        self.assertNotEqual(0, self.compile(schema).returncode)
+
+    def test_new_event_must_be_appended_and_is_compatible(self):
+        schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
+        schema["events"].append({
+            "id": 12,
+            "name": "CompatibilityProbe",
+            "category": "compatibility_probe",
+            "retention": "ordinary",
+            "package_visibility": "standard",
+            "direct_boot_eligible": False,
+            "fields": [{
+                "id": 1,
+                "name": "code",
+                "privacy": "C0",
+                "semantic_type": "u32",
+                "max_encoded_size": 5,
+                "transform": "none",
+            }],
+        })
+        result = self.compile(schema)
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_direct_boot_fingerprint_ignores_appended_events_and_rejects_projection_changes(self):
         schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))
         baseline = self.compile(schema)
         self.assertEqual(0, baseline.returncode, baseline.stderr)
@@ -83,7 +157,22 @@ class SchemaCompilerTests(unittest.TestCase):
         )
         baseline_fingerprint = self.direct_boot_fingerprint(generated.read_text(encoding="utf-8"))
 
-        schema["events"][0]["fields"][0]["name"] = "unrelated_code"
+        schema["events"].append({
+            "id": 12,
+            "name": "UnrelatedProbe",
+            "category": "compatibility_probe",
+            "retention": "ordinary",
+            "package_visibility": "standard",
+            "direct_boot_eligible": False,
+            "fields": [{
+                "id": 1,
+                "name": "unrelated_code",
+                "privacy": "C0",
+                "semantic_type": "u32",
+                "max_encoded_size": 5,
+                "transform": "none",
+            }],
+        })
         unrelated = self.compile(schema)
         self.assertEqual(0, unrelated.returncode, unrelated.stderr)
         self.assertEqual(
@@ -93,11 +182,7 @@ class SchemaCompilerTests(unittest.TestCase):
 
         schema["events"][1]["fields"][0]["name"] = "direct_boot_slot"
         direct_boot_changed = self.compile(schema)
-        self.assertEqual(0, direct_boot_changed.returncode, direct_boot_changed.stderr)
-        self.assertNotEqual(
-            baseline_fingerprint,
-            self.direct_boot_fingerprint(generated.read_text(encoding="utf-8")),
-        )
+        self.assertNotEqual(0, direct_boot_changed.returncode)
 
     @staticmethod
     def direct_boot_fingerprint(generated):
