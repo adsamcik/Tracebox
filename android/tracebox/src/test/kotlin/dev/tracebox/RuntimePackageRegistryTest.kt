@@ -12,6 +12,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -55,14 +56,56 @@ class RuntimePackageRegistryTest {
         assertEquals(0 to 1, registry.activeSlotCounts())
 
         registry.put(preview(2), byteArrayOf(22))
+        assertNull(registry.take(firstNonce))
         val secondNonce = assertNotNull(registry.approve(digest(2)))
         assertEquals(0 to 1, registry.activeSlotCounts())
-        assertNull(registry.take(firstNonce))
-        assertContentEquals(byteArrayOf(22), registry.take(secondNonce))
+        val consumed = assertNotNull(registry.take(secondNonce))
+        assertContentEquals(byteArrayOf(22), consumed.use { it.copyOf() })
         assertNull(registry.take(secondNonce))
         assertEquals(0 to 0, registry.activeSlotCounts())
+        assertEquals(1, retired.size)
+        consumed.close()
         assertEquals(2, retired.size)
         assertTrue(retired.all { bytes -> bytes.all { it == 0.toByte() } })
+    }
+
+    @Test
+    fun approvedBytesConsumeTransferBuffersAndAreExplicitlyDisposable() {
+        val source = byteArrayOf(1, 2, 3)
+        val retired = mutableListOf<ByteArray>()
+        val approved = ApprovedPackageBytes.copyAndConsume(source) { retired += it.copyOf() }
+
+        assertContentEquals(byteArrayOf(0, 0, 0), source)
+        assertEquals(3L, approved.sizeBytes)
+        assertContentEquals(byteArrayOf(1, 2, 3), approved.use { it.copyOf() })
+
+        approved.close()
+        approved.close()
+
+        assertTrue(approved.isClosed())
+        assertEquals(0L, approved.sizeBytes)
+        assertNull(approved.use { it.copyOf() })
+        assertEquals(1, retired.size)
+        assertContentEquals(byteArrayOf(0, 0, 0), retired.single())
+
+        val oversized = byteArrayOf(4, 5, 6)
+        assertFailsWith<IllegalArgumentException> {
+            ApprovedPackageBytes.copyAndConsume(oversized, maximumBytes = 2)
+        }
+        assertContentEquals(byteArrayOf(0, 0, 0), oversized)
+    }
+
+    @Test
+    fun publicationAlwaysConsumesTransferBytesEvenWhenRejectedOrFailed() {
+        val rejected = byteArrayOf(1, 2, 3)
+        assertFalse(publishAndConsumePackageBytes(rejected) { false })
+        assertContentEquals(byteArrayOf(0, 0, 0), rejected)
+
+        val failed = byteArrayOf(4, 5, 6)
+        assertFailsWith<IllegalStateException> {
+            publishAndConsumePackageBytes(failed) { error("publication failed") }
+        }
+        assertContentEquals(byteArrayOf(0, 0, 0), failed)
     }
 
     @Test
@@ -128,11 +171,28 @@ class RuntimePackageRegistryTest {
         assertEquals(1, clearCalls)
         assertContentEquals(byteArrayOf(0, 0, 0), created.value)
         assertNull(fence.use(created.generation, created.token) { created.value.copyOf() })
-        val replacement = assertNotNull(fence.bind(acquire = { byteArrayOf(4) }))
+        val replacement = assertNotNull(
+            fence.bind(
+                acquire = { byteArrayOf(4) },
+                retire = { it.fill(0) },
+            ),
+        )
         assertTrue(replacement.generation != created.generation)
         assertContentEquals(
             byteArrayOf(4),
             fence.use(replacement.generation, replacement.token) { replacement.value.copyOf() },
+        )
+        val newest = assertNotNull(
+            fence.bind(
+                acquire = { byteArrayOf(5) },
+                retire = { it.fill(0) },
+            ),
+        )
+        assertContentEquals(byteArrayOf(0), replacement.value)
+        assertEquals(1, fence.activeCapabilityCount())
+        assertContentEquals(
+            byteArrayOf(5),
+            fence.use(newest.generation, newest.token) { newest.value.copyOf() },
         )
     }
 

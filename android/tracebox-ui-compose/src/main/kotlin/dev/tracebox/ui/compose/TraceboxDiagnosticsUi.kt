@@ -4,6 +4,7 @@ import dev.tracebox.api.CaptureKind
 import dev.tracebox.api.DiagnosticPackage
 import dev.tracebox.api.LogLevel
 import dev.tracebox.api.TraceboxPolicy
+import java.io.Closeable
 import java.io.InputStream
 
 /** The action performed after the user reviews and approves the exact diagnostic package. */
@@ -182,6 +183,32 @@ class TraceboxUploadRequest internal constructor(
     /** Reads the approved ZIP without exposing Tracebox storage paths or long-lived URIs. */
     fun <T> useInputStream(block: (InputStream) -> T): T? =
         diagnosticPackage.useInputStream(block)
+}
+
+/** Single-slot UI ownership that closes packages on replacement and screen disposal. */
+internal class DiagnosticPackageOwner : Closeable {
+    private var active: DiagnosticPackage? = null
+
+    @Synchronized
+    fun replace(replacement: DiagnosticPackage) {
+        if (active === replacement) return
+        val retired = active
+        active = replacement
+        retired?.close()
+    }
+
+    @Synchronized
+    fun retire(expected: DiagnosticPackage? = null) {
+        val retired = active ?: return
+        if (expected != null && retired !== expected) return
+        active = null
+        retired.close()
+    }
+
+    @Synchronized
+    internal fun current(): DiagnosticPackage? = active
+
+    override fun close() = retire()
 }
 
 /** Backend outcome intentionally excludes raw server messages from the user-facing UI. */

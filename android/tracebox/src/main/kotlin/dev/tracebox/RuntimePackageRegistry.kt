@@ -3,11 +3,58 @@ package dev.tracebox
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
+import dev.tracebox.api.DiagnosticPackage
 import dev.tracebox.api.PackagePreview
+import java.io.Closeable
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.TimeUnit
+
+/** One bounded owner for finalized bytes; closing irreversibly zeroes the backing array. */
+internal class ApprovedPackageBytes private constructor(
+    private val bytes: ByteArray,
+    private val retiredObserver: (ByteArray) -> Unit,
+) : Closeable {
+    private var closed = false
+
+    val sizeBytes: Long
+        @Synchronized get() = if (closed) 0L else bytes.size.toLong()
+
+    @Synchronized
+    fun <T> use(block: (ByteArray) -> T): T? = if (closed) null else block(bytes)
+
+    @Synchronized
+    override fun close() {
+        if (closed) return
+        closed = true
+        bytes.fill(0)
+        runCatching { retiredObserver(bytes) }
+    }
+
+    @Synchronized
+    internal fun isClosed(): Boolean = closed
+
+    companion object {
+        const val MAX_BYTES: Int = DiagnosticPackage.MAX_APPROVED_PACKAGE_BYTES
+
+        /** Copies into Tracebox ownership and wipes the caller-owned transfer buffer. */
+        fun copyAndConsume(
+            source: ByteArray,
+            maximumBytes: Int = MAX_BYTES,
+            retiredObserver: (ByteArray) -> Unit = {},
+        ): ApprovedPackageBytes {
+            val owned = try {
+                require(maximumBytes in 1..MAX_BYTES)
+                require(source.isNotEmpty() && source.size <= maximumBytes)
+                source.copyOf()
+            } finally {
+                source.fill(0)
+            }
+            return ApprovedPackageBytes(owned, retiredObserver)
+        }
+    }
+}
 
 /**
  * Fixed-capacity ownership for finalized package bytes awaiting disclosure or one-time consume.
@@ -27,13 +74,13 @@ internal class BoundedRuntimePackageRegistry(
     private data class PreparedSlot(
         val digestKey: String,
         val preview: PackagePreview,
-        val bytes: ByteArray,
+        val bytes: ApprovedPackageBytes,
         val expiresAtMillis: Long,
     )
 
     private data class ApprovedSlot(
         val nonce: ByteArray,
-        val bytes: ByteArray,
+        val bytes: ApprovedPackageBytes,
         val expiresAtMillis: Long,
     )
 
@@ -42,20 +89,36 @@ internal class BoundedRuntimePackageRegistry(
 
     init {
         require(ttlMillis in 1..MAXIMUM_TTL_MILLIS)
-        require(maximumPackageBytes in 1..DEFAULT_MAXIMUM_PACKAGE_BYTES)
+        require(maximumPackageBytes in 1..ApprovedPackageBytes.MAX_BYTES)
     }
 
     @Synchronized
     fun put(preview: PackagePreview, bytes: ByteArray) {
-        require(bytes.isNotEmpty() && bytes.size <= maximumPackageBytes)
-        expire(clockMillis())
-        retire(prepared?.bytes)
-        prepared = PreparedSlot(
-            digestKey = key(preview.disclosure.plaintextDigestSha256),
-            preview = PackagePreview(preview.disclosure),
-            bytes = bytes.copyOf(),
-            expiresAtMillis = expiry(clockMillis()),
+        val ownedBytes = ApprovedPackageBytes.copyAndConsume(
+            bytes,
+            maximumPackageBytes,
+            retiredObserver,
         )
+        try {
+            val now = clockMillis()
+            expire(now)
+            val replacement = PreparedSlot(
+                digestKey = key(preview.disclosure.plaintextDigestSha256),
+                preview = PackagePreview(preview.disclosure),
+                bytes = ownedBytes,
+                expiresAtMillis = expiry(now),
+            )
+            prepared?.bytes?.close()
+            approved?.let {
+                it.bytes.close()
+                it.nonce.fill(0)
+            }
+            approved = null
+            prepared = replacement
+        } catch (failure: RuntimeException) {
+            ownedBytes.close()
+            throw failure
+        }
     }
 
     @Synchronized
@@ -80,7 +143,7 @@ internal class BoundedRuntimePackageRegistry(
         require(nonce.size == NONCE_BYTES && nonce.any { it != 0.toByte() })
 
         approved?.let {
-            retire(it.bytes)
+            it.bytes.close()
             it.nonce.fill(0)
         }
         approved = ApprovedSlot(nonce, slot.bytes, expiry(now))
@@ -89,21 +152,19 @@ internal class BoundedRuntimePackageRegistry(
     }
 
     @Synchronized
-    fun take(nonce: ByteArray): ByteArray? {
+    fun take(nonce: ByteArray): ApprovedPackageBytes? {
         expire(clockMillis())
         val slot = approved ?: return null
         if (!MessageDigest.isEqual(slot.nonce, nonce)) return null
-        val result = slot.bytes.copyOf()
         approved = null
-        retire(slot.bytes)
         slot.nonce.fill(0)
-        return result
+        return slot.bytes
     }
 
     @Synchronized
     fun clear() {
-        retire(prepared?.bytes)
-        retire(approved?.bytes)
+        prepared?.bytes?.close()
+        approved?.bytes?.close()
         approved?.nonce?.fill(0)
         prepared = null
         approved = null
@@ -117,11 +178,11 @@ internal class BoundedRuntimePackageRegistry(
 
     private fun expire(now: Long) {
         prepared?.takeIf { now >= it.expiresAtMillis }?.let {
-            retire(it.bytes)
+            it.bytes.close()
             prepared = null
         }
         approved?.takeIf { now >= it.expiresAtMillis }?.let {
-            retire(it.bytes)
+            it.bytes.close()
             it.nonce.fill(0)
             approved = null
         }
@@ -130,12 +191,6 @@ internal class BoundedRuntimePackageRegistry(
     private fun expiry(now: Long): Long =
         if (now > Long.MAX_VALUE - ttlMillis) Long.MAX_VALUE else now + ttlMillis
 
-    private fun retire(bytes: ByteArray?) {
-        if (bytes == null) return
-        bytes.fill(0)
-        retiredObserver(bytes)
-    }
-
     private fun key(bytes: ByteArray): String =
         Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 
@@ -143,7 +198,7 @@ internal class BoundedRuntimePackageRegistry(
         const val NONCE_BYTES = 32
         val DEFAULT_TTL_MILLIS: Long = TimeUnit.MINUTES.toMillis(10)
         val MAXIMUM_TTL_MILLIS: Long = TimeUnit.HOURS.toMillis(1)
-        const val DEFAULT_MAXIMUM_PACKAGE_BYTES = 64 * 1024 * 1024
+        const val DEFAULT_MAXIMUM_PACKAGE_BYTES = ApprovedPackageBytes.MAX_BYTES
     }
 }
 
@@ -164,7 +219,7 @@ internal object RuntimePackageRegistry {
 
     fun approve(digest: ByteArray): ByteArray? = registry.approve(digest)
 
-    fun take(nonce: ByteArray): ByteArray? = registry.take(nonce)
+    fun take(nonce: ByteArray): ApprovedPackageBytes? = registry.take(nonce)
 
     fun clear() = registry.clear()
 }

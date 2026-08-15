@@ -14,6 +14,8 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
+import kotlin.test.assertSame
 
 class TraceboxDiagnosticsUiTest {
     @Test
@@ -76,12 +78,36 @@ class TraceboxDiagnosticsUiTest {
         returnedDigest.fill(0)
         assertContentEquals(digest, request.plaintextDigestSha256)
     }
+
+    @Test
+    fun package_owner_closes_on_replacement_explicit_retirement_and_screen_disposal() {
+        val owner = DiagnosticPackageOwner()
+        val first = FakeDiagnosticPackage(byteArrayOf(1), ByteArray(32))
+        val second = FakeDiagnosticPackage(byteArrayOf(2), ByteArray(32) { 2 })
+
+        owner.replace(first)
+        owner.replace(second)
+        owner.retire(first)
+
+        assertEquals(1, first.closeCalls)
+        assertEquals(0, second.closeCalls)
+        assertSame(second, owner.current())
+
+        owner.close()
+        owner.close()
+
+        assertEquals(1, second.closeCalls)
+        assertNull(owner.current())
+    }
 }
 
 private class FakeDiagnosticPackage(
     private val bytes: ByteArray,
     private val digest: ByteArray,
 ) : DiagnosticPackage {
+    var closeCalls: Int = 0
+        private set
+
     override val plaintextDigestSha256: ByteArray
         get() = digest.copyOf()
     override val sizeBytes: Long = bytes.size.toLong()
@@ -100,4 +126,8 @@ private class FakeDiagnosticPackage(
         bytes.inputStream().use(block)
 
     override fun deleteStaging(): Boolean = true
+
+    override fun close() {
+        closeCalls += 1
+    }
 }

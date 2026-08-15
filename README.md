@@ -32,7 +32,9 @@ Log templates are bounded, compile-time-constant `LogTemplate` values; runtime v
 only as privacy-classified `LogArgument`s. The API types and embedded lint check enforce that
 boundary before Logcat or storage. Tracebox does not request `INTERNET`, create an HTTP client, or
 automatically upload an export. A person must explicitly approve and invoke Android's local
-save/share surface.
+save/share surface. Each approved package is capped at 64 MiB and has an explicit disposable
+lifetime; replacement, policy change, deletion, runtime shutdown, or UI disposal wipes its owned
+bytes and removes Tracebox-owned staging.
 
 ## Development
 

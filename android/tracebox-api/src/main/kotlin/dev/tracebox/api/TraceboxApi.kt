@@ -146,7 +146,10 @@ interface DiagnosticPackages {
     /** Returns a non-exported Tracebox approval activity intent for this exact preview, if valid. */
     fun approvalIntent(context: Context, preview: PackagePreview): Intent?
 
-    /** Creates a package only when [approval] matches the exact finalized preview bytes. */
+    /**
+     * Creates a package only when [approval] matches the exact finalized preview bytes.
+     * Creating a replacement retires the previous in-process package capability.
+     */
     fun create(request: PackageRequest, approval: ApprovalToken): PackageResult
 }
 
@@ -170,7 +173,13 @@ enum class SaveFailure { OUTPUT_UNAVAILABLE, WRITE_FAILED }
 /** Accurate final handoff state; Android cannot prove recipient delivery. */
 enum class SharePackageResult { NOT_STARTED, CHOOSER_OPENED, DELIVERY_UNKNOWN }
 
-/** A package created from exact user-approved bytes. Tracebox never uploads it automatically. */
+/**
+ * A package created from exact user-approved bytes. Tracebox never uploads it automatically.
+ *
+ * At most one created package remains active per installed runtime. Replacement, policy changes,
+ * deletion, and runtime close retire its capability and wipe its owned bytes. Call [close] as soon
+ * as the user flow or scoped host upload completes.
+ */
 interface DiagnosticPackage : Closeable {
     val plaintextDigestSha256: ByteArray
     val sizeBytes: Long
@@ -190,7 +199,8 @@ interface DiagnosticPackage : Closeable {
      *
      * The stream is valid only for [block] and is closed by Tracebox. This deliberately avoids
      * exposing a storage path or long-lived URI. Returns `null` if the package capability has
-     * expired. Call off the main thread.
+     * expired or was retired by replacement, policy change, deletion, or close. Call off the main
+     * thread.
      */
     fun <T> useInputStream(block: (InputStream) -> T): T?
 
@@ -203,6 +213,11 @@ interface DiagnosticPackage : Closeable {
      */
     override fun close() {
         deleteStaging()
+    }
+
+    companion object {
+        /** Hard upper bound for one in-memory approved package. */
+        const val MAX_APPROVED_PACKAGE_BYTES: Int = 64 * 1024 * 1024
     }
 }
 

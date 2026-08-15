@@ -87,7 +87,8 @@ fun TraceboxDiagnosticsScreen(
     )
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    var currentPackage by remember { mutableStateOf<DiagnosticPackage?>(null) }
+    val packageOwner = remember(handle) { DiagnosticPackageOwner() }
+    var currentPackage by remember(handle) { mutableStateOf<DiagnosticPackage?>(null) }
     // Preserve the fail-closed delivery choice if Android recreates this screen while the
     // disclosure activity is open. Enums are directly saveable by Compose.
     var pendingPrimaryAction by rememberSaveable {
@@ -95,6 +96,20 @@ fun TraceboxDiagnosticsScreen(
     }
     var advancedExpanded by rememberSaveable { mutableStateOf(advanced.initiallyExpanded) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+
+    DisposableEffect(packageOwner) {
+        onDispose { packageOwner.close() }
+    }
+
+    fun replaceCurrentPackage(replacement: DiagnosticPackage) {
+        packageOwner.replace(replacement)
+        currentPackage = replacement
+    }
+
+    fun retireCurrentPackage(expected: DiagnosticPackage? = null) {
+        packageOwner.retire(expected)
+        if (expected == null || currentPackage === expected) currentPackage = null
+    }
 
     fun runOperation(operation: suspend () -> String) {
         if (busy) return
@@ -118,8 +133,7 @@ fun TraceboxDiagnosticsScreen(
             transport.upload(TraceboxUploadRequest(diagnosticPackage))
         }) {
             is TraceboxUploadResult.Uploaded -> {
-                diagnosticPackage.close()
-                if (currentPackage === diagnosticPackage) currentPackage = null
+                retireCurrentPackage(diagnosticPackage)
                 strings.uploadSuccess
             }
             TraceboxUploadResult.RetryableFailure -> strings.uploadRetryableFailure
@@ -129,8 +143,7 @@ fun TraceboxDiagnosticsScreen(
     }
 
     fun applyPolicy(next: TraceboxPolicy) = runOperation {
-        currentPackage?.close()
-        currentPackage = null
+        retireCurrentPackage()
         when (withContext(Dispatchers.IO) { handle.updatePolicy(next) }) {
             PolicyUpdateResult.SUCCESS -> strings.policyUpdated
             PolicyUpdateResult.LOCAL_ONLY_RESTRICTED -> strings.policyRestrictedLocally
@@ -156,8 +169,7 @@ fun TraceboxDiagnosticsScreen(
                 PackageResult.NotReady -> return@runOperation strings.diagnosticsNotReady
                 PackageResult.Rejected -> return@runOperation strings.packageApprovalMismatch
             }
-            currentPackage?.close()
-            currentPackage = diagnosticPackage
+            replaceCurrentPackage(diagnosticPackage)
             when (delivery) {
                 ResolvedPrimaryAction.UPLOAD -> uploadPackage(diagnosticPackage)
                 ResolvedPrimaryAction.SHARE -> {
@@ -201,13 +213,11 @@ fun TraceboxDiagnosticsScreen(
                     diagnosticPackage.save(context, destination)
                 }) {
                     is SavePackageResult.Complete -> {
-                        diagnosticPackage.close()
-                        if (currentPackage === diagnosticPackage) currentPackage = null
+                        retireCurrentPackage(diagnosticPackage)
                         format(strings.savedBytes, saved.bytesWritten)
                     }
                     is SavePackageResult.PartialCopyWarning -> {
-                        diagnosticPackage.close()
-                        if (currentPackage === diagnosticPackage) currentPackage = null
+                        retireCurrentPackage(diagnosticPackage)
                         format(strings.partialCopyBytes, saved.bytesWritten)
                     }
                     is SavePackageResult.Failed -> strings.saveFailed
@@ -262,9 +272,6 @@ fun TraceboxDiagnosticsScreen(
         }
 
         currentPackage?.let { diagnosticPackage ->
-            DisposableEffect(diagnosticPackage) {
-                onDispose { diagnosticPackage.close() }
-            }
             if ((actions.upload && uploader != null) || actions.share || actions.save) {
                 ControlCard(strings.moreSharingOptions) {
                     if (actions.upload && uploader != null) {
@@ -428,8 +435,7 @@ fun TraceboxDiagnosticsScreen(
                 TextButton(onClick = {
                     showDeleteConfirmation = false
                     runOperation {
-                        currentPackage?.close()
-                        currentPackage = null
+                        retireCurrentPackage()
                         when (withContext(Dispatchers.IO) {
                             handle.delete(DeleteRequest.ALL_TRACEBOX_DATA)
                         }) {

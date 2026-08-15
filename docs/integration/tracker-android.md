@@ -181,6 +181,14 @@ bytes, not a database, filesystem path, or raw crash store. The standalone
 `TraceboxDiagnosticsActivity` uses the same settings after
 `TraceboxDiagnosticsUi.configure(ui, uploader)`.
 
+One approved package is bounded to 64 MiB, and only one created package remains
+active per installed runtime. Hosts that retain a `DiagnosticPackage` outside
+the provided screen must call `close()` as soon as the share, save, or upload
+operation finishes. Creating a replacement retires the earlier capability;
+policy changes, all-data deletion, runtime shutdown, and Compose screen disposal
+also wipe owned package bytes and remove Tracebox-owned staging. A stream scope
+therefore returns `null` after retirement and must not be retained by the host.
+
 Tracker currently chooses reviewed Android sharing because it has no configured
 diagnostics endpoint. Adding one requires only a Tracker-owned uploader; the
 screen and package pipeline do not change.

@@ -15,6 +15,8 @@ once its public API stabilizes.
   `LogArgument` contracts, backed by a consumer-facing fatal lint check.
 - Made idempotent installation compare privacy adapters by ordered type/classification mappings and
   exact renderer identity instead of requiring the same `PrivacyConfiguration` container instance.
+- Bounded the runtime to one explicitly disposable approved package, wipe-on-transfer byte owners,
+  and cleanup on replacement, policy change, deletion, runtime close, and diagnostics-screen exit.
 
 ## [0.1.0-alpha.1] - 2026-07-20
 

@@ -645,6 +645,7 @@ internal class DefaultTraceboxHandle(
         val terminalBarrier = Runnable {
             synchronized(profileLock) {
                 try {
+                    runCatching { packageSurface.retireActivePackage() }
                     runCatching { quiesceManagedWriters() }
                     runCatching { quiesceNativeClient() }
                     if (coordinatesGlobalStorage) runCatching { stopNativeHandler() }
@@ -3977,23 +3978,30 @@ internal class DefaultTraceboxHandle(
     private fun publishPreparedPackage(
         preview: PackagePreview,
         bytes: ByteArray,
-    ): Boolean =
+    ): Boolean = publishAndConsumePackageBytes(bytes) { transferredBytes ->
         packageCapabilityFence.publishIf(
             isAllowed = {
                 coordinatesGlobalStorage &&
                     !closed.get() &&
                     activeProfile != DiagnosticsProfile.DISABLED
             },
-            publish = { RuntimePackageRegistry.put(preview, bytes) },
+            publish = { RuntimePackageRegistry.put(preview, transferredBytes) },
         )
+    }
 
     internal fun consumeApproval(
         approval: ApprovalToken,
-    ): RuntimePackageCapability<ByteArray>? =
-        packageCapabilityFence.bind(
-            acquire = { RuntimePackageRegistry.take(approval.opaqueBytes()) },
-            retire = { it.fill(0) },
-        )
+    ): RuntimePackageCapability<ApprovedPackageBytes>? {
+        val nonce = approval.opaqueBytes()
+        return try {
+            packageCapabilityFence.bind(
+                acquire = { RuntimePackageRegistry.take(nonce) },
+                retire = ApprovedPackageBytes::close,
+            )
+        } finally {
+            nonce.fill(0)
+        }
+    }
 
     internal fun stagePackage(
         bytes: ByteArray,
@@ -4069,6 +4077,11 @@ internal class DefaultTraceboxHandle(
 
     private fun invalidateRuntimePackageCapabilities() {
         packageCapabilityFence.invalidate(RuntimePackageRegistry::clear)
+        if (Thread.currentThread() === executorThread) {
+            packageSurface.retireActivePackage()
+        } else if (!closed.get()) {
+            enqueue(packageSurface::retireActivePackage)
+        }
     }
 
     internal fun deleteStagingPath(path: Path): Boolean {
@@ -4087,6 +4100,23 @@ internal class DefaultTraceboxHandle(
             false
         } catch (_: RuntimeException) {
             false
+        }
+    }
+
+    internal fun scheduleStagingDeletion(paths: List<Path>) {
+        if (paths.isEmpty()) return
+        val cleanup = Runnable { paths.forEach(::deleteStagingPath) }
+        if (Thread.currentThread() === executorThread) {
+            cleanup.run()
+            return
+        }
+        try {
+            // Package retirement must drain even after close() marks the runtime closed. The
+            // terminal barrier is submitted after this task and therefore preserves ordering.
+            executor.execute(cleanup)
+        } catch (_: RejectedExecutionException) {
+            // Runtime close drains the active package before shutting down this executor. A
+            // rejected task can only be a redundant retirement after that terminal boundary.
         }
     }
 
@@ -4687,6 +4717,9 @@ internal class RuntimePackageCapabilityFence {
         retire: (T) -> Unit = {},
     ): RuntimePackageCapability<T>? {
         val value = acquire() ?: return null
+        val replaced = retirements.values.toList()
+        retirements.clear()
+        replaced.forEach { callback -> runCatching(callback) }
         val token = nextToken
         nextToken = if (nextToken == Long.MAX_VALUE) 1L else nextToken + 1L
         check(token !in retirements) { "package capability token space exhausted" }
@@ -4721,6 +4754,9 @@ internal class RuntimePackageCapabilityFence {
     fun retire(token: Long) {
         retirements.remove(token)?.let { callback -> runCatching(callback) }
     }
+
+    @Synchronized
+    internal fun activeCapabilityCount(): Int = retirements.size
 }
 
 /**
@@ -4877,6 +4913,9 @@ private val CRASHPAD_COMPONENT = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 private class RuntimePackages(
     private val runtime: DefaultTraceboxHandle,
 ) : DiagnosticPackages {
+    private val packageLock = Any()
+    private var activePackage: RuntimeDiagnosticPackage? = null
+
     override fun prepare(request: PackageRequest): PackagePreparationResult =
         when (request) {
             PackageRequest.STANDARD -> runtime.prepareStandardPackage()
@@ -4888,7 +4927,17 @@ private class RuntimePackages(
     override fun create(request: PackageRequest, approval: ApprovalToken): PackageResult {
         if (request != PackageRequest.STANDARD) return PackageResult.Rejected
         val capability = runtime.consumeApproval(approval) ?: return PackageResult.Rejected
-        return PackageResult.Created(RuntimeDiagnosticPackage(runtime, capability))
+        val replacement = try {
+            RuntimeDiagnosticPackage(runtime, capability, ::onPackageClosed)
+        } catch (_: RuntimeException) {
+            runtime.retirePackageCapability(capability.token)
+            return PackageResult.Rejected
+        }
+        val previous = synchronized(packageLock) {
+            activePackage.also { activePackage = replacement }
+        }
+        previous?.close()
+        return PackageResult.Created(replacement)
     }
 
     fun deleteExpiredStaging() {
@@ -4898,16 +4947,42 @@ private class RuntimePackages(
     fun deleteAllStaging() {
         RuntimeDiagnosticPackage.deleteAll(runtime)
     }
+
+    fun retireActivePackage() {
+        val retired = synchronized(packageLock) {
+            activePackage.also { activePackage = null }
+        }
+        retired?.close()
+    }
+
+    private fun onPackageClosed(closedPackage: RuntimeDiagnosticPackage) {
+        synchronized(packageLock) {
+            if (activePackage === closedPackage) activePackage = null
+        }
+    }
+}
+
+internal inline fun publishAndConsumePackageBytes(
+    bytes: ByteArray,
+    publish: (ByteArray) -> Boolean,
+): Boolean = try {
+    publish(bytes)
+} finally {
+    bytes.fill(0)
 }
 
 private class RuntimeDiagnosticPackage(
     private val runtime: DefaultTraceboxHandle,
-    capability: RuntimePackageCapability<ByteArray>,
+    capability: RuntimePackageCapability<ApprovedPackageBytes>,
+    private val onClosed: (RuntimeDiagnosticPackage) -> Unit,
 ) : DiagnosticPackage {
-    private val bytes = capability.value
+    private val approvedBytes = capability.value
     private val capabilityGeneration = capability.generation
     private val capabilityToken = capability.token
-    private val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+    private val digest = checkNotNull(
+        approvedBytes.use { MessageDigest.getInstance("SHA-256").digest(it) },
+    )
+    private val packageSizeBytes = approvedBytes.sizeBytes
     private val mutableReceipt = MutableStateFlow(SharePackageResult.NOT_STARTED)
     private val staged = linkedSetOf<Path>()
     private val closed = AtomicBoolean(false)
@@ -4915,24 +4990,26 @@ private class RuntimeDiagnosticPackage(
     override val plaintextDigestSha256: ByteArray
         get() = digest.copyOf()
     override val sizeBytes: Long
-        get() = bytes.size.toLong()
+        get() = packageSizeBytes
     override val receipt: StateFlow<SharePackageResult> = mutableReceipt.asStateFlow()
 
     override fun shareIntent(context: Context): Intent? =
         runtime.withPackageCapability(capabilityGeneration, capabilityToken) {
-            val path = synchronized(staged) { stage() }
-                ?: return@withPackageCapability null
-            val uri = TraceboxFileProvider.uriForFile(context, path)
-            val send = Intent(Intent.ACTION_SEND)
-                .setType("application/zip")
-                .putExtra(Intent.EXTRA_STREAM, uri)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            send.clipData = android.content.ClipData.newRawUri(
-                context.getString(R.string.tracebox_package_clip_label),
-                uri,
-            )
-            mutableReceipt.value = SharePackageResult.CHOOSER_OPENED
-            Intent.createChooser(send, context.getString(R.string.tracebox_package_share_title))
+            approvedBytes.use { bytes ->
+                val path = synchronized(staged) { stage(bytes) }
+                    ?: return@use null
+                val uri = TraceboxFileProvider.uriForFile(context, path)
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("application/zip")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                send.clipData = android.content.ClipData.newRawUri(
+                    context.getString(R.string.tracebox_package_clip_label),
+                    uri,
+                )
+                mutableReceipt.value = SharePackageResult.CHOOSER_OPENED
+                Intent.createChooser(send, context.getString(R.string.tracebox_package_share_title))
+            }
         }
 
     override fun createSaveIntent(): Intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
@@ -4942,24 +5019,33 @@ private class RuntimeDiagnosticPackage(
 
     override fun save(context: Context, destination: Uri, isCancelled: () -> Boolean): SavePackageResult {
         return runtime.withPackageCapability(capabilityGeneration, capabilityToken) {
-            savePackageBytes(
-                bytes = bytes,
-                openOutput = { context.contentResolver.openOutputStream(destination) },
-                isCancelled = isCancelled,
-            )
+            approvedBytes.use { bytes ->
+                savePackageBytes(
+                    bytes = bytes,
+                    openOutput = { context.contentResolver.openOutputStream(destination) },
+                    isCancelled = isCancelled,
+                )
+            }
         } ?: SavePackageResult.Failed(SaveFailure.OUTPUT_UNAVAILABLE)
     }
 
     override fun <T> useInputStream(block: (java.io.InputStream) -> T): T? =
         runtime.withPackageCapability(capabilityGeneration, capabilityToken) {
-            bytes.inputStream().use(block)
+            approvedBytes.use { bytes -> bytes.inputStream().use(block) }
         }
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        deleteStaging()
         runtime.retirePackageCapability(capabilityToken)
         digest.fill(0)
+        val ownedStaging = synchronized(staged) {
+            staged.toList().also { staged.clear() }
+        }
+        try {
+            runtime.scheduleStagingDeletion(ownedStaging)
+        } finally {
+            onClosed(this)
+        }
     }
 
     override fun deleteStaging(): Boolean = synchronized(staged) {
@@ -4975,7 +5061,7 @@ private class RuntimeDiagnosticPackage(
         complete
     }
 
-    private fun stage(): Path? {
+    private fun stage(bytes: ByteArray): Path? {
         val path = runtime.stagePackage(bytes, capabilityGeneration, capabilityToken) ?: return null
         return try {
             staged.add(path)
