@@ -399,6 +399,21 @@ class LabScenarioTest {
         listOf("LabNativeIdentity", "HandlerService", "WorkerService", "AnrWatchdog")
             .forEach { legacyControl -> assertTrue(legacyActivity.contains(legacyControl)) }
 
+        val labRuntime = Files.readString(
+            root.resolve(
+                "test-apps/phase0-fixture/src/main/kotlin/" +
+                    "dev/tracebox/phase0/LabRuntime.kt",
+            ),
+        )
+        val participantService = Files.readString(
+            root.resolve(
+                "test-apps/phase0-fixture/src/main/kotlin/" +
+                    "dev/tracebox/phase0/ProductionParticipantService.kt",
+            ),
+        )
+        assertTrue(labRuntime.contains(".setNativeCaptureEnabled(true)"))
+        assertTrue(participantService.contains(".setNativeCaptureEnabled(true)"))
+
         Files.walk(root.resolve("android")).use { paths ->
             val productionMentions = paths
                 .filter(Files::isRegularFile)

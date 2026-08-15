@@ -29,6 +29,7 @@ object LabRuntime {
             TraceboxConfiguration.Builder()
                 .setProcessRole(PROCESS_ROLE_LAB)
                 .setInitialProfile(DiagnosticsProfile.MINIMAL_CRASH)
+                .setNativeCaptureEnabled(true)
                 .setPersistRequestedProfile(false)
                 .setDirectBootC0Enabled(true)
                 .build(),

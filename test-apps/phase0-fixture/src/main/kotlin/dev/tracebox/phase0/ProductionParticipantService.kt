@@ -21,6 +21,7 @@ class ProductionParticipantService : Service() {
             TraceboxConfiguration.Builder()
                 .setProcessRole(PROCESS_ROLE_PARTICIPANT)
                 .setInitialProfile(DiagnosticsProfile.MINIMAL_CRASH)
+                .setNativeCaptureEnabled(true)
                 .setPersistRequestedProfile(false)
                 .setDirectBootC0Enabled(true)
                 .build(),
