@@ -6,8 +6,8 @@ bundled or published by this alpha.
 
 | Component | Version | Scope | License | Source |
 | --- | --- | --- | --- | --- |
-| Kotlinx Coroutines Core | 1.10.2 | Runtime API support | Apache-2.0 | https://github.com/Kotlin/kotlinx.coroutines |
-| Kotlin standard library | 2.2.10 | Transitive runtime API support, published in Maven metadata | Apache-2.0 | https://kotlinlang.org/ |
+| Kotlinx Coroutines Core | 1.11.0 | Runtime API support | Apache-2.0 | https://github.com/Kotlin/kotlinx.coroutines |
+| Kotlin standard library | 2.4.10 | Transitive runtime API support, published in Maven metadata | Apache-2.0 | https://kotlinlang.org/ |
 | JUnit | 4.13.2 | Test only, not published in AARs | EPL-1.0 | https://github.com/junit-team/junit4 |
 | Hamcrest Core | 1.3 | Test only, transitive from JUnit and not published in AARs | BSD-3-Clause | https://github.com/hamcrest/JavaHamcrest |
 

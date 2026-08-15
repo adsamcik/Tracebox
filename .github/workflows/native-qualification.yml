@@ -1,0 +1,63 @@
+name: Native qualification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 3"
+
+permissions: {}
+
+concurrency:
+  group: native-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-native:
+    name: bounded Android native qualification
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825a76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - name: Install pinned Rust Android targets
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal --component clippy,rustfmt --target aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          rustup override set 1.93.1
+      - name: Install pinned Android native tools
+        shell: pwsh
+        run: |
+          & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "platforms;android-37.0" "build-tools;37.0.0" "ndk;28.2.13676358" "cmake;4.1.2"
+      - name: Build and qualify all native ABIs
+        shell: pwsh
+        run: tools\ci\presubmit.ps1
+      - name: Verify identity capture against real native release inputs
+        shell: pwsh
+        run: >-
+          .\gradlew.bat -p tooling\tracebox-gradle-plugin
+          identityCaptureTest
+          --offline --no-daemon --dependency-verification strict
+      - name: Prove fixture panic injection is absent from release artifacts
+        shell: pwsh
+        run: >-
+          .\gradlew.bat
+          :test-apps:phase0-fixture:verifyFixtureRustPanicProbeIsolation
+          --offline --no-daemon --dependency-verification strict
+      - name: Verify packaged no-network artifacts
+        shell: pwsh
+        run: tools\verify\Verify-Phase5NoNetworkStatic.ps1 -SkipBuild
+      - name: Ensure qualification did not change tracked inputs
+        shell: pwsh
+        run: |
+          if (git status --porcelain) { throw "Qualification changed tracked files" }

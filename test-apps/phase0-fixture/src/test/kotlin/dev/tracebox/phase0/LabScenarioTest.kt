@@ -259,16 +259,13 @@ class LabScenarioTest {
     }
 
     @Test
-    fun mandatory_release_graphs_verify_fixture_rust_panic_probe_isolation() {
+    fun native_and_emulator_qualification_verify_fixture_rust_panic_probe_isolation() {
         val root = repositoryRoot()
         val isolationTask = ":test-apps:phase0-fixture:verifyFixtureRustPanicProbeIsolation"
-        val hostReadiness = Files.readString(
-            root.resolve("tools/verify/Invoke-Phase5HostReadiness.ps1"),
+        val nativeQualification = Files.readString(
+            root.resolve(".github/workflows/native-qualification.yml"),
         )
-        val hostAndroidGraph = hostReadiness
-            .substringAfter("Invoke-HostCheck 'android_jvm_fixture_and_release_conformance'")
-            .substringBefore("Invoke-HostCheck 'android_release_lint'")
-        assertTrue(hostAndroidGraph.contains(isolationTask))
+        assertTrue(nativeQualification.contains(isolationTask))
 
         val emulator = Files.readString(
             root.resolve("tools/verify/Invoke-PersonalReleaseEmulator.ps1"),

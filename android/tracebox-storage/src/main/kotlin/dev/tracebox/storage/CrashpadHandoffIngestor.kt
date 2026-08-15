@@ -1170,7 +1170,7 @@ class CrashpadPendingHandoffRecoverer(
                 if (result == UidReservationTransferResult.TRANSFERRED ||
                     result == UidReservationTransferResult.ALREADY_TRANSFERRED
                 ) {
-                    uidQuota?.resize(
+                    uidQuota.resize(
                         pending,
                         UidBucket.RAW_ARTIFACTS,
                         reservation.originalBytes,

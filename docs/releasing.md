@@ -12,10 +12,9 @@ must verify every POM and AAR with a clean Gradle consumer from the
 repository-scoped Maven endpoint, then publishes a GitHub **pre-release** with
 checksums and legal notices.
 
-The current checked-in tag workflow predates the complete implementation and still assumes the
-two-module bootstrap. Do not create a new release until that approval-gated publishing workflow is
-updated and reviewed for all modules. Local publication and consumer checks do not contact GitHub
-and remain safe for development.
+Release automation checks coordinate availability and post-publication POM/AAR reachability for
+all ten modules. The clean consumer also hashes each downloaded AAR against the exact locally
+verified release build before a draft can be published.
 
 ## One-time repository setup
 
@@ -27,7 +26,7 @@ Before the first tag, a repository administrator must:
    `packages: write` permissions required by the protected release environment.
 4. Create the `github-packages-alpha` environment and require an appropriate
    maintainer review; restrict it to protected alpha tags.
-5. Protect `main` and require the `CI / verify` status check.
+5. Protect `main` and require the `CI / required host readiness` status check.
 6. Create an active repository ruleset for `v*-alpha.*` that explicitly restricts
    tag creation, updates, and deletion. Keep any bypass list narrowly limited to
    authorized release maintainers.
@@ -77,7 +76,7 @@ exists.
   exact tag. It rebuilds the tagged source, rechecks the consumer endpoints,
   uploads checksums/legal notices, and publishes only the existing draft; it
   never republishes Maven artifacts.
-- If only one artifact is visible, or neither is visible after a failed publish,
+- If only a subset of module artifacts is visible after a failed publish,
   do not publish the draft and do not reuse the version. Preserve the partial
   state for audit, correct the cause, and roll forward to a new alpha version.
 
@@ -102,7 +101,7 @@ environment:
   -Pgpr.user=YOUR_GITHUB_USERNAME \
   -Pgpr.key=YOUR_CLASSIC_PAT \
   -PtraceboxVersion=0.1.0-alpha.1 \
-  verifyReleaseMetadata publish
+  verifyReleaseMetadata publishFoundation
 ```
 
 Do not use that command to overwrite a release version.

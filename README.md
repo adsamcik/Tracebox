@@ -37,22 +37,24 @@ save/share surface.
 
 The build uses JDK 21, targets Java 17 bytecode, compiles against Android SDK 37, and supports API
 23 and newer. The native build is pinned through the repository toolchain manifests. On Windows,
-run the complete host presubmit with:
+run the same bounded host-readiness contract required by CI with:
+
+```powershell
+tools\verify\Invoke-Phase5HostReadiness.ps1
+```
+
+Cross-ABI Crashpad/Rust builds and packaged artifact qualification are intentionally separate from
+the required pull-request path. Run them explicitly when changing native inputs:
 
 ```powershell
 tools\ci\presubmit.ps1
+tools\verify\Verify-Phase5NoNetworkStatic.ps1 -SkipBuild
 ```
 
-Then run the remaining runtime and UI tests with:
+The representative rootable emulator suite is a bounded manual qualification job rather than a
+pull-request prerequisite.
 
-```powershell
-.\gradlew.bat phase1Check phase2Check phase4CoreCheck verifyNoNetworkBoundary `
-  :android:tracebox-export-ui:testDebugUnitTest `
-  :android:tracebox-ui-compose:testDebugUnitTest `
-  :android:tracebox:testDebugUnitTest
-```
-
-See [toolchain policy](docs/toolchain.md), [release instructions](docs/releasing.md),
+See [toolchain policy](docs/toolchains-and-dependencies.md), [release instructions](docs/releasing.md),
 [contributing](CONTRIBUTING.md), and [security reporting](SECURITY.md).
 
 ## License

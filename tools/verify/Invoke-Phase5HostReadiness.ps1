@@ -1,12 +1,13 @@
 param(
-    [switch] $SkipBuild,
     [switch] $RunBlockedEgress,
     [string] $Output
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'PersonalReleaseRunnerSupport.ps1')
+. (Join-Path $PSScriptRoot 'AndroidSdkSupport.ps1')
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$androidSdkRoot = Get-TraceboxAndroidSdkRoot -RepositoryRoot $root
 $gradle = Join-Path $root 'gradlew.bat'
 $started = (Get-Date).ToUniversalTime()
 $checks = [Collections.Generic.List[object]]::new()
@@ -52,7 +53,7 @@ function Assert-LastExitCode {
 function Get-PinnedCMakeTool {
     param([string] $Name)
     $executableName = if ($env:OS -eq 'Windows_NT') { "$Name.exe" } else { $Name }
-    $candidate = Join-Path $env:ANDROID_HOME "cmake\4.1.2\bin\$executableName"
+    $candidate = Join-Path $androidSdkRoot "cmake\4.1.2\bin\$executableName"
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
         throw "Pinned CMake tool is unavailable: $candidate"
     }
@@ -111,15 +112,8 @@ try {
     }
     Invoke-HostCheck 'gradle_plugin_contracts' {
         & $gradle `
-            :test-apps:phase0-fixture:minifyNoInternetReleaseWithR8 `
-            --offline `
-            --no-daemon `
-            --dependency-verification strict
-        Assert-LastExitCode 'Real no-INTERNET R8 mapping prerequisite'
-        & $gradle `
             -p tooling/tracebox-gradle-plugin `
             test `
-            identityCaptureTest `
             --offline `
             --no-daemon
         Assert-LastExitCode 'Gradle plugin tests'
@@ -166,24 +160,27 @@ try {
             Assert-LastExitCode 'Native CTest'
         }
     }
-    Invoke-HostCheck 'android_jvm_fixture_and_release_conformance' {
+    Invoke-HostCheck 'android_jvm_and_fixture_contracts' {
         $tasks = @(
-            'phase0Check',
-            'phase1Check',
-            'phase2Check',
-            'phase4CoreCheck',
+            ':android:tracebox-anr-exit:testDebugUnitTest',
+            ':android:tracebox-native:testDebugUnitTest',
+            ':android:tracebox-api:testDebugUnitTest',
+            ':android:tracebox-core:testDebugUnitTest',
+            ':android:tracebox-storage:testDebugUnitTest',
+            ':android:tracebox-directboot:testDebugUnitTest',
+            ':android:tracebox-export:testDebugUnitTest',
             ':android:tracebox-export-ui:testDebugUnitTest',
+            ':android:tracebox-ui-compose:testDebugUnitTest',
             ':android:tracebox:testDebugUnitTest',
             ':test-apps:phase0-fixture:testNoInternetDebugUnitTest',
             ':test-apps:phase0-fixture:testHostNetworkDebugUnitTest',
-            ':test-apps:phase0-fixture:verifyFixtureRustPanicProbeIsolation',
-            ':test-apps:phase0-fixture:verifyTraceboxReleaseConformanceNoInternetQualificationRelease'
+            'verifyNoNetworkBoundary'
         )
         & $gradle @tasks `
             --offline `
             --no-daemon `
             --dependency-verification strict
-        Assert-LastExitCode 'Android JVM/fixture/release-conformance checks'
+        Assert-LastExitCode 'Android JVM and fixture contract checks'
     }
     Invoke-HostCheck 'android_release_lint' {
         $lintTasks = @(
@@ -194,6 +191,7 @@ try {
             ':android:tracebox-storage:lintRelease',
             ':android:tracebox-export:lintRelease',
             ':android:tracebox-export-ui:lintRelease',
+            ':android:tracebox-ui-compose:lintRelease',
             ':android:tracebox-directboot:lintRelease',
             ':android:tracebox:lintRelease',
             ':test-apps:phase0-fixture:lintNoInternetRelease',
@@ -210,8 +208,8 @@ try {
     Pop-Location
 }
 
-Invoke-HostCheck 'release_artifacts_and_static_no_network' {
-    & (Join-Path $PSScriptRoot 'Verify-Phase5NoNetworkStatic.ps1') -SkipBuild:$SkipBuild
+Invoke-HostCheck 'static_no_network_source_boundary' {
+    & (Join-Path $PSScriptRoot 'Verify-NoNetworkStatic.ps1')
 }
 
 if ($RunBlockedEgress) {
@@ -243,8 +241,8 @@ if (-not $sourceStateStable) {
 }
 $passed = -not $script:hostGateFailed
 $report = [ordered]@{
-    schema = 'tracebox-personal-release-host-readiness-v2'
-    scope = 'All host-runnable implementation, unit, native, parser, lint, fixture, release-conformance, and static no-network gates for the personal release. No Android endpoint is contacted.'
+    schema = 'tracebox-host-readiness-v3'
+    scope = 'All bounded host-runnable implementation, unit, native-host, parser, lint, fixture, dependency, and static source no-network gates. Android cross-native artifacts and emulator behavior are separate qualification jobs.'
     started_utc = $started.ToString('o')
     ended_utc = $ended.ToString('o')
     provenance = [ordered]@{
@@ -261,6 +259,7 @@ $report = [ordered]@{
         'OPTIONAL_NOT_RUN; ANDROID_UID_EGRESS_REMAINS_IN_EMULATOR_GATE'
     }
     emulator_validation = 'SEPARATE_INVOKE_PERSONAL_RELEASE_EMULATOR'
+    android_native_qualification = 'SEPARATE_NATIVE_QUALIFICATION_WORKFLOW'
     result = if ($passed) { 'PASS' } else { 'FAIL' }
 }
 $json = $report | ConvertTo-Json -Depth 6

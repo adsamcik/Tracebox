@@ -10,8 +10,8 @@ for the two published Android AARs.
 | JDK | 17 | Required by AGP 9.1.1 |
 | compileSdk | 37 | Product baseline |
 | minSdk | 30 | Product baseline |
-| Kotlin standard library | 2.2.10 | Transitive runtime API support published with the AARs |
-| Kotlinx Coroutines Core | 1.10.2 | StateFlow in the published API |
+| Kotlin standard library | 2.4.10 | Transitive runtime API support published with the AARs |
+| Kotlinx Coroutines Core | 1.11.0 | StateFlow in the published API |
 | JUnit | 4.13.2 | Test-only unit testing |
 
 The wrapper distribution is checksum-pinned. Generated dependency lockfiles and

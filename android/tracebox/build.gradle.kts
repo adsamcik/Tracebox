@@ -23,7 +23,7 @@ dependencies {
     compileOnly(project(":android:tracebox-native"))
     implementation(project(":android:tracebox-export"))
     implementation(project(":android:tracebox-export-ui"))
-    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    api(libs.kotlinx.coroutines.core)
     testImplementation(kotlin("test-junit"))
     testImplementation(project(":android:tracebox-native"))
 }

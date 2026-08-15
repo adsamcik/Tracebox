@@ -4,10 +4,11 @@ Normative machine-readable pins are in `gradle/toolchains.lock.toml`, `gradle/ve
 
 | Component | Pin | Provenance | License | Rationale |
 |---|---|---|---|---|
-| Gradle | 9.6.1 | services.gradle.org, distribution SHA-256 locked | Apache-2.0 | Current stable wrapper; supports AGP 9.2 |
-| AGP | 9.2.0 | Google Maven | Apache-2.0 | Stable API 37.0 support |
-| Kotlin | 2.2.10 built into AGP | AGP runtime dependency/Maven Central | Apache-2.0 | AGP 9.2 built-in Kotlin; separate Android plugin is forbidden |
-| JDK | Temurin 21.0.8+9 | Adoptium | GPL-2.0-with-classpath-exception | AGP-compatible LTS |
+| Gradle | 9.6.1 | services.gradle.org, distribution SHA-256 locked | Apache-2.0 | Tracker-aligned wrapper for AGP 9.3.1 |
+| AGP | 9.3.1 | Google Maven | Apache-2.0 | Tracker-aligned API 37 toolchain |
+| Kotlin | 2.4.10 | Maven Central | Apache-2.0 | Tracker-aligned Kotlin and Compose compiler plugin |
+| Coroutines | 1.11.0 | Maven Central | Apache-2.0 | Tracker-aligned public `StateFlow` and coroutine handler ABI |
+| JDK | Temurin 21 | Adoptium | GPL-2.0-with-classpath-exception | Tracker-aligned AGP LTS; Java bytecode remains 17 |
 | Android SDK | compile/target 37, min 23, Build Tools 37.0.0 | Google Android SDK | Android SDK License | Required support boundary |
 | NDK | 28.2.13676358 | Google Android SDK | Android SDK License | Complete LLVM archive toolset and 16 KiB support; NDK 29.0.14206865 omitted `llvm-ar.exe` on Windows |
 | CMake | 4.1.2 | Google Android SDK package | BSD-3-Clause | Pinned AGP external-native build |
@@ -18,7 +19,16 @@ Crashpad transitive source pins are mini_chromium `e5169551...` (BSD-3-Clause), 
 
 No runtime dependency is permitted to introduce HTTP, DNS, remote configuration, upload, analytics, or transport code. Gradle dependency resolution is repository-restricted, locked, and SHA-256 verified. Rust has no registry dependency in Phase 0. Crashpad source is outside the Gradle runtime graph until its explicit capture-only build is verified.
 
+Gradle's build cache and configuration cache are enabled. Kotlin compilation runs in the Gradle
+process so nested cross-language contract tests do not depend on a separately managed compiler
+daemon transport.
+
 Updates refresh provenance, licenses, hashes/locks, the affected host gates, and
 no-network scans. Runtime-affecting updates rerun the representative emulator
 smoke. Crashpad updates additionally require a clean patch rebase; the
 historical full feasibility/matrix campaign is optional diagnostics.
+
+Every push and pull request must pass `.github/workflows/ci.yml`'s bounded full host-readiness
+job. Android cross-native/Crashpad qualification runs only in the scheduled or manually dispatched
+`native-qualification.yml` job. The rootable representative emulator is intentionally isolated in
+the manually dispatched, 90-minute `emulator-qualification.yml` job.

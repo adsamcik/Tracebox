@@ -1183,7 +1183,7 @@ class DenyMirror private constructor(
     }
 
     fun writePending(state: DenyState) = synchronized(lock) { write(pendingPath, state) }
-    fun promotePending() = synchronized(lock) {
+    fun promotePending(): Unit = synchronized(lock) {
         val pending = pending() ?: return
         write(activePath, pending)
         Files.deleteIfExists(pendingPath)

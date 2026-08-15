@@ -3,9 +3,9 @@ plugins {
 }
 
 dependencies {
-    implementation("com.android.tools.build:gradle:9.2.0")
+    implementation(libs.android.gradle.plugin)
     testImplementation(gradleTestKit())
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit4)
 }
 
 gradlePlugin {

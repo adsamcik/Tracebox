@@ -13,7 +13,7 @@ android {
 }
 
 dependencies {
-    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    api(libs.kotlinx.coroutines.core)
     testImplementation(kotlin("test-junit"))
 }
 

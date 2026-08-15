@@ -30,16 +30,16 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Install Android SDK platform
         shell: bash
         run: |
-          sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Set up Gradle and validate wrapper
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
@@ -61,7 +61,7 @@ jobs:
           release_commit="$(git rev-list -n 1 "$tag")"
           test "$release_commit" = "$TRACEBOX_EVENT_COMMIT"
           test "$(git rev-parse HEAD)" = "$release_commit"
-          test "$(./gradlew -q -PtraceboxVersion="$version" printVersion)" = "$version"
+          test "$(./gradlew -q --dependency-verification=strict -PtraceboxVersion="$version" printVersion)" = "$version"
           git merge-base --is-ancestor "$release_commit" origin/main
           remote_tag_object="$(git ls-remote --refs origin "refs/tags/$tag" | awk '{print $1}')"
           test "$remote_tag_object" = "$tag_object"
@@ -105,7 +105,12 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           maven_repository="${GITHUB_REPOSITORY,,}"
           maven_base="https://maven.pkg.github.com/$maven_repository/io/github/tracebox"
-          for artifact in tracebox-api tracebox; do
+          artifacts=(
+            tracebox-api tracebox-core tracebox-storage tracebox-directboot
+            tracebox-anr-exit tracebox-native tracebox-export tracebox-export-ui
+            tracebox-ui-compose tracebox
+          )
+          for artifact in "${artifacts[@]}"; do
             url="$maven_base/$artifact/$version/$artifact-$version.pom"
             status="$(curl --location --silent --show-error --output /dev/null \
               --write-out '%{http_code}' \
@@ -147,7 +152,7 @@ jobs:
           ./gradlew --no-daemon --stacktrace --dependency-verification=strict \
             -PtraceboxGitHubRepository="${{ github.repository }}" \
             -PtraceboxVersion="$version" \
-            publish
+            publishFoundation
 
       - name: Verify GitHub Packages consumer endpoints
         env:
@@ -174,7 +179,12 @@ jobs:
             return 1
           }
 
-          for artifact in tracebox-api tracebox; do
+          artifacts=(
+            tracebox-api tracebox-core tracebox-storage tracebox-directboot
+            tracebox-anr-exit tracebox-native tracebox-export tracebox-export-ui
+            tracebox-ui-compose tracebox
+          )
+          for artifact in "${artifacts[@]}"; do
             await_artifact "$maven_base/$artifact/$version/$artifact-$version.pom"
             await_artifact "$maven_base/$artifact/$version/$artifact-$version.aar"
           done
@@ -190,6 +200,7 @@ jobs:
             -p integration/consumer-smoke \
             -PtraceboxGitHubRepository="${{ github.repository }}" \
             -PtraceboxVersion="$version" \
+            -PtraceboxExpectedArtifactRoot="$GITHUB_WORKSPACE" \
             resolvePublishedArtifacts
 
       - name: Upload assets to alpha draft

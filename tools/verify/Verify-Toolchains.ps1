@@ -1,7 +1,102 @@
 $ErrorActionPreference = 'Stop'
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'AndroidSdkSupport.ps1')
+$androidSdkRoot = Get-TraceboxAndroidSdkRoot -RepositoryRoot $root
 Set-Location $root
+$toolchainLockText = Get-Content 'gradle\toolchains.lock.toml' -Raw
+$catalogText = Get-Content 'gradle\libs.versions.toml' -Raw
+
+function Get-LockedVersion {
+    param([string] $Section)
+    $escaped = [regex]::Escape($Section)
+    $match = [regex]::Match(
+        $toolchainLockText,
+        "(?ms)^\[$escaped\]\s+.*?^version\s*=\s*`"([^`"]+)`""
+    )
+    if (-not $match.Success) { throw "Missing locked $Section version" }
+    return $match.Groups[1].Value
+}
+
+function Assert-CatalogVersion {
+    param([string] $Name, [string] $Expected)
+    $escapedName = [regex]::Escape($Name)
+    $escapedVersion = [regex]::Escape($Expected)
+    if ($catalogText -notmatch "(?m)^$escapedName\s*=\s*`"$escapedVersion`"\s*$") {
+        throw "Version catalog $Name does not match the locked version $Expected"
+    }
+}
+
+Assert-CatalogVersion 'agp' (Get-LockedVersion 'agp')
+Assert-CatalogVersion 'kotlin' (Get-LockedVersion 'kotlin')
+Assert-CatalogVersion 'coroutines' (Get-LockedVersion 'coroutines')
+
+function Assert-FileContains {
+    param(
+        [string] $Path,
+        [string[]] $Required,
+        [string[]] $Forbidden = @()
+    )
+    $text = Get-Content $Path -Raw
+    foreach ($pattern in $Required) {
+        if ($text -notmatch $pattern) {
+            throw "$Path does not satisfy required contract: $pattern"
+        }
+    }
+    foreach ($pattern in $Forbidden) {
+        if ($text -match $pattern) {
+            throw "$Path violates forbidden contract: $pattern"
+        }
+    }
+}
+
+Assert-FileContains '.github\workflows\ci.yml' @(
+    '(?m)^\s*host-readiness:',
+    'Invoke-Phase5HostReadiness\.ps1',
+    'java-version:\s*"21"',
+    'build-tools;37\.0\.0'
+) @('tools\\ci\\presubmit\.ps1')
+Assert-FileContains '.github\workflows\native-qualification.yml' @(
+    '(?m)^\s*workflow_dispatch:',
+    '(?m)^\s*schedule:',
+    'timeout-minutes:\s*90',
+    'tools\\ci\\presubmit\.ps1',
+    'identityCaptureTest',
+    'verifyFixtureRustPanicProbeIsolation'
+)
+Assert-FileContains '.github\workflows\emulator-qualification.yml' @(
+    '(?m)^\s*workflow_dispatch:',
+    'timeout-minutes:\s*90',
+    'self-hosted',
+    'Invoke-PersonalReleaseEmulator\.ps1'
+) @('(?m)^\s*schedule:')
+
+$allPublishedArtifacts = @(
+    'tracebox-api',
+    'tracebox-core',
+    'tracebox-storage',
+    'tracebox-directboot',
+    'tracebox-anr-exit',
+    'tracebox-native',
+    'tracebox-export',
+    'tracebox-export-ui',
+    'tracebox-ui-compose',
+    'tracebox'
+)
+foreach ($workflow in @('.github\workflows\release.yml', '.github\workflows\recover-alpha-release.yml')) {
+    Assert-FileContains $workflow @(
+        'java-version:\s*"21"',
+        'build-tools;37\.0\.0',
+        'traceboxExpectedArtifactRoot'
+    )
+    $workflowText = Get-Content $workflow -Raw
+    foreach ($artifact in $allPublishedArtifacts) {
+        $escapedArtifact = [regex]::Escape($artifact)
+        if ($workflowText -notmatch "(?<![A-Za-z0-9-])$escapedArtifact(?![A-Za-z0-9-])") {
+            throw "$workflow does not verify published artifact $artifact"
+        }
+    }
+}
 
 $savedErrorActionPreference = $ErrorActionPreference
 try {
@@ -19,10 +114,12 @@ if ($javaExitCode -ne 0) { throw "java -version failed with exit code $javaExitC
 $java = ($javaOutput | Select-Object -First 1).ToString()
 $rust = (& rustc --version) -join ''
 $cargo = (& cargo --version) -join ''
-$cmake = (& "$env:ANDROID_HOME\cmake\4.1.2\bin\cmake.exe" --version | Select-Object -First 1) -join ''
+$cmakeExecutable = if ($env:OS -eq 'Windows_NT') { 'cmake.exe' } else { 'cmake' }
+$cmakePath = Join-Path $androidSdkRoot "cmake\4.1.2\bin\$cmakeExecutable"
+$cmake = (& $cmakePath --version | Select-Object -First 1) -join ''
 $wrapper = (Get-FileHash 'gradle\wrapper\gradle-wrapper.jar' -Algorithm SHA256).Hash.ToLowerInvariant()
 
-if ($java -notmatch '21\.0\.8') { throw "Unexpected Java: $java" }
+if ($java -notmatch 'version "21(?:\.|\")') { throw "Unexpected Java: $java" }
 if ($rust -notmatch '^rustc 1\.93\.1 ') { throw "Unexpected Rust: $rust" }
 if ($cargo -notmatch '^cargo 1\.93\.1 ') { throw "Unexpected Cargo: $cargo" }
 if ($cmake -ne 'cmake version 4.1.2') { throw "Unexpected CMake: $cmake" }
@@ -31,10 +128,10 @@ if ($wrapper -ne '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9
 }
 
 $requiredSdkPaths = @(
-    "$env:ANDROID_HOME\platforms\android-37.0",
-    "$env:ANDROID_HOME\build-tools\37.0.0",
-    "$env:ANDROID_HOME\ndk\28.2.13676358",
-    "$env:ANDROID_HOME\cmake\4.1.2"
+    (Join-Path $androidSdkRoot 'platforms\android-37.0'),
+    (Join-Path $androidSdkRoot 'build-tools\37.0.0'),
+    (Join-Path $androidSdkRoot 'ndk\28.2.13676358'),
+    (Join-Path $androidSdkRoot 'cmake\4.1.2')
 )
 foreach ($path in $requiredSdkPaths) {
     if (-not (Test-Path $path)) {

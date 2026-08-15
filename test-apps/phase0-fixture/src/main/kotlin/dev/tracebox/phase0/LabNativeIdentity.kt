@@ -136,7 +136,6 @@ internal object LabIdentityFiles {
             try {
                 Files.deleteIfExists(temporary)
             } catch (_: IOException) {
-                Unit
             }
             null
         } catch (_: SecurityException) {

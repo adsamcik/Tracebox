@@ -5,6 +5,9 @@ import java.util.zip.ZipFile
 
 plugins {
     base
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.library) apply false
+    alias(libs.plugins.kotlin.compose) apply false
 }
 
 val traceboxGroup = providers.gradleProperty("traceboxGroup").get()
@@ -85,28 +88,40 @@ tasks.register("printVersion") {
     }
 }
 
+val noNetworkBoundaryFiles = files(
+    publishedModules.map { module ->
+        fileTree("android/$module/src/main") {
+            include(
+                "**/*.kt",
+                "**/*.java",
+                "**/*.c",
+                "**/*.cc",
+                "**/*.cpp",
+                "**/*.h",
+                "AndroidManifest.xml",
+            )
+        }
+    },
+)
+
 tasks.register("verifyNoNetworkBoundary") {
     group = "verification"
     description = "Rejects networking permissions and client APIs in Tracebox-owned runtime sources."
-
-    val forbidden = Regex(
-        """android\.permission\.INTERNET|java\.net\.(Socket|ServerSocket|DatagramSocket|HttpURLConnection)|""" +
-            """android\.net\.(ConnectivityManager|NetworkCapabilities|NetworkRequest)|""" +
-            """android\.webkit\.|java\.nio\.channels\.SocketChannel|InetAddress|SSLSocket|""" +
-            """OkHttpClient|okhttp3\.|Retrofit|retrofit2\.|\bSocket\s*\(|<sys/socket\.h>""",
-    )
+    inputs.files(noNetworkBoundaryFiles)
+        .withPropertyName("ownedRuntimeSources")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 
     doLast {
-        val ownedFiles = fileTree("android") {
-            include("**/*.kt", "**/*.java", "**/*.c", "**/*.cc", "**/*.cpp", "**/*.h")
-            exclude("**/src/test/**", "**/src/androidTest/**")
-        }.files + fileTree("android") {
-            include("**/src/main/AndroidManifest.xml")
-        }.files
-        val violations = ownedFiles.flatMap { file ->
+        val forbidden = Regex(
+            """android\.permission\.INTERNET|java\.net\.(Socket|ServerSocket|DatagramSocket|HttpURLConnection)|""" +
+                """android\.net\.(ConnectivityManager|NetworkCapabilities|NetworkRequest)|""" +
+                """android\.webkit\.|java\.nio\.channels\.SocketChannel|InetAddress|SSLSocket|""" +
+                """OkHttpClient|okhttp3\.|Retrofit|retrofit2\.|\bSocket\s*\(|<sys/socket\.h>""",
+        )
+        val violations = inputs.files.files.flatMap { file ->
             file.readLines().mapIndexedNotNull { index, line ->
                 if (forbidden.containsMatchIn(line)) {
-                    "${file.relativeTo(rootDir)}:${index + 1}: $line"
+                    "${file.path}:${index + 1}: $line"
                 } else {
                     null
                 }

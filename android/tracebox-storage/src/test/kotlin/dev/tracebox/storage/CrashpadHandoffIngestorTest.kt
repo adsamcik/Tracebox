@@ -328,7 +328,7 @@ class CrashpadHandoffIngestorTest {
         )
         assertTrue(coordinator.used(UidBucket.SUMMARY_SPOOL) > 0)
 
-        spool.replay { _, _ -> Unit }
+        spool.replay { _, _ -> }
 
         assertEquals(1, spool.purgeRetired())
         assertEquals(0L, coordinator.used(UidBucket.SUMMARY_SPOOL))

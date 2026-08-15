@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: complete host verification
+  host-readiness:
+    name: required host readiness
     runs-on: windows-2025
     timeout-minutes: 60
     permissions:
@@ -33,23 +33,17 @@ jobs:
       - name: Install pinned Rust
         shell: pwsh
         run: |
-          rustup toolchain install 1.93.1 --profile minimal --component clippy,rustfmt --target aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          rustup toolchain install 1.93.1 --profile minimal --component clippy,rustfmt
           rustup override set 1.93.1
       - name: Install pinned Android tools
         shell: pwsh
         run: |
           & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "platforms;android-37.0" "build-tools;37.0.0" "ndk;28.2.13676358" "cmake;4.1.2"
-      - name: Native and Phase 0 presubmit
-        shell: pwsh
-        run: tools\ci\presubmit.ps1
-      - name: Kotlin runtime, export, and UI tests
+      - name: Run complete bounded host readiness
         shell: pwsh
         run: >-
-          .\gradlew.bat --no-daemon --stacktrace --dependency-verification=strict
-          phase1Check phase2Check phase4CoreCheck verifyNoNetworkBoundary
-          :android:tracebox-export-ui:testDebugUnitTest
-          :android:tracebox-ui-compose:testDebugUnitTest
-          :android:tracebox:testDebugUnitTest
+          tools\verify\Invoke-Phase5HostReadiness.ps1
+          -Output build\reports\host-readiness.json
       - name: Ensure dependency integrity files are committed
         shell: pwsh
         run: |

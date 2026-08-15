@@ -45,7 +45,7 @@ val verifyCrashpadPrebuilt = tasks.register("verifyCrashpadPrebuilt") {
 }
 
 tasks.configureEach {
-    if (name == "preBuild") {
+    if (name.startsWith("merge") && name.endsWith("NativeLibs")) {
         dependsOn(verifyCrashpadPrebuilt)
     }
 }

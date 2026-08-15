@@ -186,7 +186,7 @@ class LabPackageActivity : Activity() {
                     pendingPackage = null
                     return@Thread
                 }
-                savedBytes = (saved as SavePackageResult.Complete).bytesWritten
+                savedBytes = saved.bytesWritten
                 savedDigestMatches = true
                 val share = diagnosticPackage.shareIntent(this)
                 if (

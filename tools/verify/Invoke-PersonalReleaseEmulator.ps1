@@ -1200,7 +1200,7 @@ $qualificationTasks = @(
     ':test-apps:phase0-fixture:verifyFixtureRustPanicProbeIsolation'
 )
 if (-not $SkipBuild) {
-    & $gradle @qualificationTasks '--offline' '--no-daemon'
+    & $gradle @qualificationTasks '--offline' '--no-daemon' '--dependency-verification' 'strict'
     if ($LASTEXITCODE -ne 0) {
         throw "Emulator fixture build failed with exit code $LASTEXITCODE"
     }

@@ -218,7 +218,7 @@ class SegmentWriter private constructor(
                     val roleLockAlreadyReserved =
                         uidQuota?.owns(roleLockPath, UidBucket.METADATA, 0L) != false
                     if (!roleLockAlreadyReserved &&
-                        uidQuota?.reserve(roleLockPath, UidBucket.METADATA, 0L) == false
+                        uidQuota.reserve(roleLockPath, UidBucket.METADATA, 0L) == false
                     ) {
                         throw SegmentException.Quota
                     }
@@ -231,7 +231,7 @@ class SegmentWriter private constructor(
                         if (!roleLockAlreadyReserved &&
                             !Files.exists(roleLockPath, LinkOption.NOFOLLOW_LINKS)
                         ) {
-                            uidQuota?.release(roleLockPath)
+                            uidQuota.release(roleLockPath)
                         }
                         throw SegmentException.Quota
                     }
@@ -260,7 +260,7 @@ class SegmentWriter private constructor(
                         if (!roleLockAlreadyReserved &&
                             !Files.exists(roleLockPath, LinkOption.NOFOLLOW_LINKS)
                         ) {
-                            uidQuota?.release(roleLockPath)
+                            uidQuota.release(roleLockPath)
                         }
                         throw failure
                     }

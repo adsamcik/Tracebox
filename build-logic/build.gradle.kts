@@ -3,8 +3,8 @@ plugins {
 }
 
 dependencies {
-    implementation("com.android.tools.build:gradle:9.2.0")
-    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.10")
+    compileOnly(libs.android.gradle.plugin)
+    compileOnly(libs.kotlin.gradle.plugin)
 }
 
 gradlePlugin {

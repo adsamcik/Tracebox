@@ -1,6 +1,6 @@
 plugins {
     id("tracebox.android.library")
-    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10"
+    alias(libs.plugins.kotlin.compose)
     `maven-publish`
 }
 
@@ -16,12 +16,12 @@ android {
 
 dependencies {
     api(project(":android:tracebox"))
-    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
-    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation(platform(libs.compose.bom))
+    implementation(libs.activity.compose)
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation(libs.lifecycle.runtime.compose)
     testImplementation(kotlin("test-junit"))
 }
 
