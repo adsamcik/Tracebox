@@ -405,24 +405,21 @@ private class InstanceLease private constructor(
     }
 }
 
-/** C1 structural JVM exception representation; diagnostic messages remain opt-in. */
-data class JvmCrashCause(val type: String, val message: String?, val frames: List<JvmCrashFrame>, val cycle: Boolean)
+/** C1 structural JVM exception representation; throwable messages are never captured. */
+data class JvmCrashCause(val type: String, val frames: List<JvmCrashFrame>, val cycle: Boolean)
 data class JvmCrashFrame(val declaringClass: String, val method: String, val line: Int)
 data class JvmCrashRecord(val causes: List<JvmCrashCause>)
 data class JvmCapturePolicy(
-    val includeMessage: Boolean = false,
     val maxCauses: Int = 8,
     val maxFramesPerCause: Int = 64,
     val maxClassNameUtf8Bytes: Int = 256,
     val maxMethodNameUtf8Bytes: Int = 128,
-    val maxMessageUtf8Bytes: Int = 256,
 ) {
     init {
         require(maxCauses in 1..16)
         require(maxFramesPerCause in 1..128)
         require(maxClassNameUtf8Bytes in 1..1024)
         require(maxMethodNameUtf8Bytes in 1..512)
-        require(maxMessageUtf8Bytes in 1..1024)
     }
 }
 
@@ -463,7 +460,6 @@ class TraceboxUncaughtExceptionHandler(
             }
             causes += JvmCrashCause(
                 truncateUtf8(current.javaClass.name, policy.maxClassNameUtf8Bytes),
-                if (policy.includeMessage) current.message?.let { truncateUtf8(it, policy.maxMessageUtf8Bytes) } else null,
                 frames,
                 cycle,
             )

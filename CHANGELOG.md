@@ -37,6 +37,8 @@ once its public API stabilizes.
   accessibility semantics, and staging cleanup.
 - Kept Crashpad database metadata outside the raw-artifact quota and reserved its bounded settings
   bytes before native startup, so a full-size native handoff is ingested on the first restart.
+- Removed the message-bearing JVM capture option and field, making throwable-message persistence
+  structurally unavailable rather than merely disabled by default.
 - Made the required host-readiness workflow cover every published AAR while keeping native/emulator
   qualification in bounded manual or scheduled lanes.
 

@@ -4,7 +4,6 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class JvmUncaughtCaptureTest {
@@ -21,7 +20,8 @@ class JvmUncaughtCaptureTest {
 
         assertEquals(1, previousCalls.get())
         assertEquals(1, records.size)
-        assertFalse(records.single().causes.any { it.message != null })
+        assertFalse(records.single().toString().contains("secret-message"))
+        assertFalse(records.single().toString().contains("nested"))
         assertTrue(records.single().causes.all { it.frames.size <= 3 })
     }
 
@@ -53,7 +53,7 @@ class JvmUncaughtCaptureTest {
         assertEquals(1, previousCalls.get())
     }
 
-    @Test fun class_method_and_optional_message_are_truncated_at_deterministic_utf8_boundaries() {
+    @Test fun class_and_method_are_truncated_at_deterministic_utf8_boundaries() {
         val records = mutableListOf<JvmCrashRecord>()
         val throwable = IllegalStateException("ééé")
         throwable.stackTrace = arrayOf(
@@ -62,10 +62,8 @@ class JvmUncaughtCaptureTest {
         val handler = TraceboxUncaughtExceptionHandler(
             null,
             JvmCapturePolicy(
-                includeMessage = true,
                 maxClassNameUtf8Bytes = 5,
                 maxMethodNameUtf8Bytes = 9,
-                maxMessageUtf8Bytes = 3,
             ),
             records::add,
         )
@@ -75,13 +73,12 @@ class JvmUncaughtCaptureTest {
         val cause = records.single().causes.single()
         val frame = cause.frames.single()
         assertTrue(cause.type.toByteArray(Charsets.UTF_8).size <= 5)
-        assertEquals("é", cause.message)
         assertEquals("éé", frame.declaringClass)
         assertEquals("method-é", frame.method)
         assertEquals(9, frame.method.toByteArray(Charsets.UTF_8).size)
         assertFalse(cause.type.contains('\uFFFD'))
         assertFalse(frame.declaringClass.contains('\uFFFD'))
         assertFalse(frame.method.contains('\uFFFD'))
-        assertNull(records.single().causes.singleOrNull { it.message == "ééé" })
+        assertFalse(records.single().toString().contains("ééé"))
     }
 }
