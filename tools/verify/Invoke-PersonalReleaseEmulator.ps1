@@ -70,11 +70,23 @@ $scenarioManifestSha256 =
 
 function Invoke-Adb {
     param([Parameter(ValueFromRemainingArguments)] [string[]] $Arguments)
-    $output = & adb -s $Serial @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "adb failed: $($Arguments -join ' ')`n$($output -join [Environment]::NewLine)"
+    $savedErrorActionPreference = $ErrorActionPreference
+    $exitCode = -1
+    try {
+        # Android's activity manager writes successful delivery warnings to stderr. Capture
+        # native stderr without letting Windows PowerShell promote it to a terminating error;
+        # the adb exit code remains the authoritative success boundary.
+        $ErrorActionPreference = 'Continue'
+        $output = @(& adb -s $Serial @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
     }
-    return $output
+    $outputText = @($output | ForEach-Object ToString)
+    if ($exitCode -ne 0) {
+        throw "adb failed: $($Arguments -join ' ')`n$($outputText -join [Environment]::NewLine)"
+    }
+    return $outputText
 }
 
 function Clear-DeviceLog {
