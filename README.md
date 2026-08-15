@@ -7,7 +7,7 @@ networking or upload path.
 The current alpha implementation includes:
 
 - generated typed logging contracts with explicit privacy classes;
-- durable encrypted segment storage and direct-boot recovery;
+- durable bounded segment storage and direct-boot recovery;
 - JVM uncaught-exception, ANR, `ApplicationExitInfo`, native Crashpad, and Rust capture paths;
 - deterministic `.tbdiag` package generation with disclosure, approval, save, and share flows;
 - an optional Compose diagnostics UI; and
@@ -25,16 +25,27 @@ Applications normally depend on `io.github.tracebox:tracebox` and add
 publishes the API, core, storage, direct-boot, ANR/exit, export, export UI, and Compose UI modules as
 separate AARs so consumers can keep optional surfaces out of their package.
 
+Tracker's normal integration uses:
+
+```kotlin
+implementation("io.github.tracebox:tracebox:0.1.0-alpha.4")
+implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.4")
+implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.4")
+```
+
+Configure the authenticated GitHub Packages repository as described in the
+[release instructions](docs/releasing.md); Maven Local is not part of the release path.
+
 ## Privacy boundary
 
 Tracebox must not receive credentials, precise location, free-form tracked content, URLs, or paths.
 Log templates are bounded, compile-time-constant `LogTemplate` values; runtime values are accepted
 only as privacy-classified `LogArgument`s. The API types and embedded lint check enforce that
 boundary before Logcat or storage. Tracebox does not request `INTERNET`, create an HTTP client, or
-automatically upload an export. A person must explicitly approve and invoke Android's local
-save/share surface. Each approved package is capped at 64 MiB and has an explicit disposable
-lifetime; replacement, policy change, deletion, runtime shutdown, or UI disposal wipes its owned
-bytes and removes Tracebox-owned staging.
+automatically upload an export. A person must explicitly approve the exact package before invoking
+Android save/share or an application-owned uploader. Each approved package is capped at 64 MiB and
+has an explicit disposable lifetime; replacement, policy change, deletion, runtime shutdown, or UI
+disposal wipes its owned bytes and removes Tracebox-owned staging.
 
 ## Development
 

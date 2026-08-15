@@ -5,8 +5,12 @@ once its public API stabilizes.
 
 ## Unreleased
 
+## [0.1.0-alpha.4] - 2026-08-16
+
 ### Changed
 
+- Aligned the build with Tracker's Gradle 9.6.1, AGP 9.3.1, Kotlin 2.4.10,
+  coroutines 1.11.0, JDK 21, Java 17, and Android SDK 37 toolchain.
 - Joined the complete diagnostics implementation history with the release-engineering history so
   the default branch, release automation, tags, and consumer source now describe one product.
 - Extended release verification from the original two-module bootstrap to all ten published
@@ -31,6 +35,27 @@ once its public API stabilizes.
 - Added host-run Compose tests for runtime policy and capture controls, review/approval,
   recreation, upload-disabled and retry behavior, save/share, deletion, RTL, large fonts,
   accessibility semantics, and staging cleanup.
+- Kept Crashpad database metadata outside the raw-artifact quota and reserved its bounded settings
+  bytes before native startup, so a full-size native handoff is ingested on the first restart.
+- Made the required host-readiness workflow cover every published AAR while keeping native/emulator
+  qualification in bounded manual or scheduled lanes.
+
+## [0.1.0-alpha.3] - 2026-08-03
+
+### Added
+
+- Added the casual-user-first diagnostics flow, configurable advanced controls, and host-owned
+  approved-package uploader contract without adding Tracebox networking.
+- Kept technical disclosure and exact package approval mandatory for save, share, and upload.
+
+## [0.1.0-alpha.2] - 2026-08-03
+
+### Added
+
+- Added the first Tracker-oriented durable runtime with privacy-aware logging, persisted policy,
+  managed/native crash capture, ANR and process-exit diagnostics, deterministic export, and the
+  optional Compose diagnostics UI.
+- Published separately selectable managed, native, and Compose artifacts.
 
 ## [0.1.0-alpha.1] - 2026-07-20
 

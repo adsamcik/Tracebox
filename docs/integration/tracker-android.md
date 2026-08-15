@@ -2,7 +2,7 @@
 
 ## Status
 
-Tracker is the reference personal-project host for `0.1.0-alpha.3`. The normal
+Tracker is the reference personal-project host for `0.1.0-alpha.4`. The normal
 `dev/v10` application is hard-migrated: Tracebox is the only production logging
 and crash-diagnostics backend, with no flavor gate or legacy compatibility
 writer.
@@ -15,9 +15,9 @@ emulator. Physical-device, OEM, battery, and broad API matrices are optional.
 Tracker declares the pieces it actually uses:
 
 ```kotlin
-implementation("io.github.tracebox:tracebox:0.1.0-alpha.3")
-implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.3")
-implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.3")
+implementation("io.github.tracebox:tracebox:0.1.0-alpha.4")
+implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.4")
+implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.4")
 ```
 
 `tracebox` does not transitively depend on `tracebox-native`. Apps that need
@@ -211,7 +211,7 @@ screen and package pipeline do not change.
   import state.
 - Tracker trip/data exports remain separate from `.tbdiag` packages.
 
-## Verified alpha integration
+## Tracker integration baseline
 
 For `0.1.0-alpha.3` the host compile, hard-migration architecture tests,
 Tracebox bootstrap tests, tracking resilience tests, affected OSM/activity/stats
@@ -222,3 +222,7 @@ policy/identity stores, and native emergency slots.
 The settings entry, casual screen, advanced disclosure, and exact-package
 review handoff are exercised on the representative emulator. Real user
 workloads remain alpha evaluation, not missing implementation.
+
+The `0.1.0-alpha.4` coordinates above are the immutable upgrade target. Tracker's
+catalog pin and downstream alpha4 verification follow publication; ADR-0010 keeps
+that downstream smoke separate from Tracebox's standalone release gate.
