@@ -23,6 +23,7 @@ include(
     ":android:tracebox-anr-exit",
     ":android:tracebox-native",
     ":android:tracebox-api",
+    ":android:tracebox-lint",
     ":android:tracebox-core",
     ":android:tracebox-storage",
     ":android:tracebox-export",

@@ -14,6 +14,7 @@ android {
 
 dependencies {
     api(libs.kotlinx.coroutines.core)
+    lintPublish(project(":android:tracebox-lint"))
     testImplementation(kotlin("test-junit"))
 }
 

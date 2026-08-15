@@ -28,8 +28,9 @@ separate AARs so consumers can keep optional surfaces out of their package.
 ## Privacy boundary
 
 Tracebox must not receive credentials, precise location, free-form tracked content, URLs, or paths.
-Log templates are public static text; values belong in generated arguments so their declared
-privacy class can be enforced. Tracebox does not request `INTERNET`, create an HTTP client, or
+Log templates are bounded, compile-time-constant `LogTemplate` values; runtime values are accepted
+only as privacy-classified `LogArgument`s. The API types and embedded lint check enforce that
+boundary before Logcat or storage. Tracebox does not request `INTERNET`, create an HTTP client, or
 automatically upload an export. A person must explicitly approve and invoke Android's local
 save/share surface.
 

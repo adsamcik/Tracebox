@@ -165,6 +165,7 @@ try {
             ':android:tracebox-anr-exit:testDebugUnitTest',
             ':android:tracebox-native:testDebugUnitTest',
             ':android:tracebox-api:testDebugUnitTest',
+            ':android:tracebox-lint:test',
             ':android:tracebox-core:testDebugUnitTest',
             ':android:tracebox-storage:testDebugUnitTest',
             ':android:tracebox-directboot:testDebugUnitTest',

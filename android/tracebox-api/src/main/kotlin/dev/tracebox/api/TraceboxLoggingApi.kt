@@ -35,10 +35,41 @@ class LogArgument internal constructor(
     internal val privacyOverride: Privacy?,
 )
 
+/**
+ * Immutable developer-authored text for a parameterized log event.
+ *
+ * Create templates once in an `object` or `companion object` with [of]. The Tracebox lint rule
+ * rejects runtime-computed values passed to [of], keeping user or tracked data out of the template
+ * and therefore subject to [LogArgument] privacy handling.
+ */
+class LogTemplate private constructor(
+    val value: String,
+) {
+    companion object {
+        const val MAX_ARGUMENTS: Int = 16
+        const val MAX_UTF8_BYTES: Int = 512
+
+        @JvmStatic
+        fun of(value: String): LogTemplate {
+            require(value.toByteArray(Charsets.UTF_8).size <= MAX_UTF8_BYTES) {
+                "log template exceeds $MAX_UTF8_BYTES UTF-8 bytes"
+            }
+            require(value.windowed(size = 2, step = 1).count { it == "{}" } <= MAX_ARGUMENTS) {
+                "log template exceeds $MAX_ARGUMENTS arguments"
+            }
+            require(value.none { it == '\r' || it == '\n' || (it.isISOControl() && it != '\t') }) {
+                "log template contains a forbidden control character"
+            }
+            return LogTemplate(value)
+        }
+    }
+}
+
 fun public(value: Any?): LogArgument = LogArgument(value, Privacy.PUBLIC)
 fun sensitive(value: Any?): LogArgument = LogArgument(value, Privacy.SENSITIVE)
 fun pii(value: Any?): LogArgument = LogArgument(value, Privacy.PII)
 fun secret(value: Any?): LogArgument = LogArgument(value, Privacy.SECRET)
+/** Classifies through the installed adapter, falling back to Tracebox's fail-closed defaults. */
 fun argument(value: Any?): LogArgument = LogArgument(value, null)
 
 /** Converts one registered domain value to bounded log text after classification. */
@@ -56,13 +87,12 @@ class PrivacyConfiguration private constructor(
         val transformed: Boolean,
     )
 
-    fun render(argument: Any?): Rendered {
-        val explicit = argument as? LogArgument
-        val value = explicit?.value ?: argument
+    fun render(argument: LogArgument): Rendered {
+        val value = argument.value
         val adapter = value?.let { candidate ->
             adapters.firstOrNull { it.type.isAssignableFrom(candidate.javaClass) }
         }
-        val classification = explicit?.privacyOverride
+        val classification = argument.privacyOverride
             ?: adapter?.privacy
             ?: defaultPrivacy(value)
         return when (classification) {
@@ -207,28 +237,28 @@ interface PerformanceMeasurement : Closeable {
 interface TraceboxLogger {
     fun isEnabled(level: LogLevel, category: LogCategory = LogCategory.GENERAL): Boolean
 
-    fun log(level: LogLevel, template: String, vararg arguments: Any?)
+    fun log(level: LogLevel, template: LogTemplate, vararg arguments: LogArgument)
 
-    fun verbose(template: String, vararg arguments: Any?) =
+    fun verbose(template: LogTemplate, vararg arguments: LogArgument) =
         log(LogLevel.VERBOSE, template, *arguments)
 
-    fun debug(template: String, vararg arguments: Any?) =
+    fun debug(template: LogTemplate, vararg arguments: LogArgument) =
         log(LogLevel.DEBUG, template, *arguments)
 
-    fun info(template: String, vararg arguments: Any?) =
+    fun info(template: LogTemplate, vararg arguments: LogArgument) =
         log(LogLevel.INFO, template, *arguments)
 
-    fun warn(template: String, vararg arguments: Any?) =
+    fun warn(template: LogTemplate, vararg arguments: LogArgument) =
         log(LogLevel.WARN, template, *arguments)
 
-    fun error(template: String, vararg arguments: Any?) =
+    fun error(template: LogTemplate, vararg arguments: LogArgument) =
         log(LogLevel.ERROR, template, *arguments)
 
-    fun error(throwable: Throwable, template: String, vararg arguments: Any?)
+    fun error(throwable: Throwable, template: LogTemplate, vararg arguments: LogArgument)
 
-    fun performanceStart(template: String, vararg arguments: Any?): PerformanceMeasurement
+    fun performanceStart(template: LogTemplate, vararg arguments: LogArgument): PerformanceMeasurement
 
-    fun <T> performance(template: String, vararg arguments: Any?, block: () -> T): T {
+    fun <T> performance(template: LogTemplate, vararg arguments: LogArgument, block: () -> T): T {
         val measurement = performanceStart(template, *arguments)
         return try {
             block().also { measurement.success() }
@@ -242,8 +272,8 @@ interface TraceboxLogger {
     }
 
     suspend fun <T> performanceSuspend(
-        template: String,
-        vararg arguments: Any?,
+        template: LogTemplate,
+        vararg arguments: LogArgument,
         block: suspend () -> T,
     ): T {
         val measurement = performanceStart(template, *arguments)
@@ -262,7 +292,7 @@ interface TraceboxLogger {
 /** Automatic fatal capture plus an explicit one-call handled-exception surface. */
 interface CrashReporter {
     fun record(throwable: Throwable)
-    fun record(throwable: Throwable, template: String, vararg arguments: Any?)
+    fun record(throwable: Throwable, template: LogTemplate, vararg arguments: LogArgument)
 
     fun coroutineExceptionHandler(): CoroutineExceptionHandler =
         CoroutineExceptionHandler { _: CoroutineContext, throwable: Throwable -> record(throwable) }

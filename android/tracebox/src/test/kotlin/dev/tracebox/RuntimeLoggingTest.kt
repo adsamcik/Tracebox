@@ -1,9 +1,11 @@
 package dev.tracebox
 
 import dev.tracebox.api.LogLevel
+import dev.tracebox.api.LogTemplate
 import dev.tracebox.api.Privacy
 import dev.tracebox.api.PrivacyConfiguration
 import dev.tracebox.api.TraceboxPolicy
+import dev.tracebox.api.argument
 import dev.tracebox.api.generated.GeneratedLogRecord
 import dev.tracebox.api.generated.GeneratedRecord
 import dev.tracebox.api.public
@@ -33,9 +35,9 @@ class RuntimeLoggingTest {
         )
 
         logger.info(
-            "Imported {} points from {} using {} for {}",
-            7,
-            "private-source",
+            IMPORTED_POINTS,
+            public(7),
+            argument("private-source"),
             secret("token"),
             sensitive("account"),
         )
@@ -71,7 +73,7 @@ class RuntimeLoggingTest {
             mirrorSink = { _, _ -> },
         )
 
-        logger.debug("Boundary {}", Boundary("not rendered"))
+        logger.debug(BOUNDARY, argument(Boundary("not rendered")))
 
         assertEquals(0, renderCount)
         assertTrue(records.isEmpty())
@@ -91,7 +93,7 @@ class RuntimeLoggingTest {
             mirrorSink = { _, _ -> },
         )
 
-        logger.info("Boundary {}", Boundary("must not leak"))
+        logger.info(BOUNDARY, argument(Boundary("must not leak")))
 
         assertEquals("Boundary [redacted]", (records.single() as GeneratedLogRecord).rendered_message)
     }
@@ -115,11 +117,11 @@ class RuntimeLoggingTest {
             mirrorSink = { _, _ -> },
         )
 
-        logger.performanceStart("Fast {}", public("path")).also {
+        logger.performanceStart(FAST, public("path")).also {
             now += 99L
             it.success()
         }
-        logger.performanceStart("Slow {}", public("path")).also {
+        logger.performanceStart(SLOW, public("path")).also {
             now += 100L
             it.failure()
             it.success()
@@ -144,11 +146,19 @@ class RuntimeLoggingTest {
             mirrorSink = { _, _ -> },
         )
 
-        logger.error(failure, "Operation {} failed", public("sync"))
+        logger.error(failure, OPERATION_FAILED, public("sync"))
 
         assertSame(failure, reported)
         assertEquals("Operation sync failed", (records.single() as GeneratedLogRecord).rendered_message)
     }
 
     private data class Boundary(val value: String)
+
+    private companion object {
+        val IMPORTED_POINTS = LogTemplate.of("Imported {} points from {} using {} for {}")
+        val BOUNDARY = LogTemplate.of("Boundary {}")
+        val FAST = LogTemplate.of("Fast {}")
+        val SLOW = LogTemplate.of("Slow {}")
+        val OPERATION_FAILED = LogTemplate.of("Operation {} failed")
+    }
 }

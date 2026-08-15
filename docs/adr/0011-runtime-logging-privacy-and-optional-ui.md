@@ -17,8 +17,8 @@ Crashpad or Compose must not inherit those dependencies.
 
 Tracebox provides:
 
-- `Tracebox.log` with `verbose`, `debug`, `info`, `warn`, and `error` template
-  methods using `{}` parameters;
+- `Tracebox.log` with `verbose`, `debug`, `info`, `warn`, and `error` methods
+  accepting bounded `LogTemplate` values and privacy-classified `LogArgument`s;
 - privacy classification before rendering, Logcat, or storage, with strings and
   unknown objects defaulting to PII;
 - explicit value wrappers and immutable host-registered domain renderers;
@@ -32,8 +32,9 @@ Tracebox provides:
   controls and export/deletion UI.
 
 All variable text fields have schema bounds. Arguments are not rendered when a
-call is disabled. Templates are treated as developer-authored format strings;
-runtime values belong in parameters. Generated structural records remain
+call is disabled. An AAR-embedded lint rule requires `LogTemplate.of` input to
+be compile-time constant developer-authored text; the Kotlin API rejects raw
+argument values. Generated structural records remain
 available for internal crash/storage protocols and specialized integrations.
 
 `tracebox-native` remains a separate explicit artifact and is `compileOnly`
@@ -44,8 +45,8 @@ dependency. Native capture also requires an explicit installation flag.
 
 Tracker can remove its logger and fixed-catalog facades entirely. Apps can use
 base managed diagnostics, opt into native capture, and opt into Compose UI
-independently. Privacy is simple at call sites, but templates containing runtime
-PII cannot be detected automatically and are prohibited by the API contract.
+independently. Template construction and each value classification are visible
+at call sites, and release lint fails if a template is computed from runtime data.
 
 This performance API records bounded diagnostic timings; it does not authorize
 the Phase 6 metrics/traces scope. ADR-0012 separately authorizes a host-owned,

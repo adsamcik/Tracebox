@@ -56,6 +56,8 @@ import dev.tracebox.api.CaptureKind
 import dev.tracebox.api.CrashReporter
 import dev.tracebox.api.DiagnosticSummary
 import dev.tracebox.api.LogLevel
+import dev.tracebox.api.LogArgument
+import dev.tracebox.api.LogTemplate
 import dev.tracebox.api.PrivacyConfiguration
 import dev.tracebox.api.PerformanceMeasurement
 import dev.tracebox.api.TraceboxLogger
@@ -337,9 +339,9 @@ object Tracebox {
 
 private object UninstalledTraceboxLogger : TraceboxLogger {
     override fun isEnabled(level: LogLevel, category: dev.tracebox.api.LogCategory): Boolean = false
-    override fun log(level: LogLevel, template: String, vararg arguments: Any?) = Unit
-    override fun error(throwable: Throwable, template: String, vararg arguments: Any?) = Unit
-    override fun performanceStart(template: String, vararg arguments: Any?): PerformanceMeasurement =
+    override fun log(level: LogLevel, template: LogTemplate, vararg arguments: LogArgument) = Unit
+    override fun error(throwable: Throwable, template: LogTemplate, vararg arguments: LogArgument) = Unit
+    override fun performanceStart(template: LogTemplate, vararg arguments: LogArgument): PerformanceMeasurement =
         UninstalledPerformanceMeasurement
 }
 
@@ -351,7 +353,7 @@ private object UninstalledPerformanceMeasurement : PerformanceMeasurement {
 
 private object UninstalledCrashReporter : CrashReporter {
     override fun record(throwable: Throwable) = Unit
-    override fun record(throwable: Throwable, template: String, vararg arguments: Any?) = Unit
+    override fun record(throwable: Throwable, template: LogTemplate, vararg arguments: LogArgument) = Unit
 }
 
 private data class NativeHandlerServiceBinding(

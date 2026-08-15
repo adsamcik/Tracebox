@@ -5,6 +5,7 @@ import dev.tracebox.api.generated.GeneratedEventId
 import dev.tracebox.api.generated.GeneratedRecord
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class TraceboxApiTest {
     @Test
@@ -27,6 +28,21 @@ class TraceboxApiTest {
         assertEquals(1, PolicyUpdateResult.LOCAL_ONLY_RESTRICTED.ordinal)
         assertEquals(2, PolicyUpdateResult.PARTIAL.ordinal)
         assertEquals(3, PolicyUpdateResult.FAILED.ordinal)
+    }
+
+    @Test
+    fun log_templates_enforce_the_public_bounds_at_construction() {
+        assertEquals("Static {}", LogTemplate.of("Static {}").value)
+
+        assertFailsWith<IllegalArgumentException> {
+            LogTemplate.of("x".repeat(LogTemplate.MAX_UTF8_BYTES + 1))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            LogTemplate.of("{}".repeat(LogTemplate.MAX_ARGUMENTS + 1))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            LogTemplate.of("line one\nline two")
+        }
     }
 
     private class FakeDiagnostics(private val enabled: Boolean) : Diagnostics {

@@ -5,7 +5,9 @@ import android.util.Log
 import dev.tracebox.api.CaptureKind
 import dev.tracebox.api.CrashReporter
 import dev.tracebox.api.LogCategory
+import dev.tracebox.api.LogArgument
 import dev.tracebox.api.LogLevel
+import dev.tracebox.api.LogTemplate
 import dev.tracebox.api.PerformanceMeasurement
 import dev.tracebox.api.Privacy
 import dev.tracebox.api.PrivacyConfiguration
@@ -29,18 +31,18 @@ internal class RuntimeTraceboxLogger(
     override fun isEnabled(level: LogLevel, category: LogCategory): Boolean =
         policy.value.accepts(level, category)
 
-    override fun log(level: LogLevel, template: String, vararg arguments: Any?) {
+    override fun log(level: LogLevel, template: LogTemplate, vararg arguments: LogArgument) {
         recordLog(level, LogCategory.GENERAL, template, arguments, durationNanos = 0L, outcome = OUTCOME_NONE)
     }
 
-    override fun error(throwable: Throwable, template: String, vararg arguments: Any?) {
+    override fun error(throwable: Throwable, template: LogTemplate, vararg arguments: LogArgument) {
         recordLog(LogLevel.ERROR, LogCategory.GENERAL, template, arguments, 0L, OUTCOME_FAILURE)
         reportCrash(throwable)
     }
 
     override fun performanceStart(
-        template: String,
-        vararg arguments: Any?,
+        template: LogTemplate,
+        vararg arguments: LogArgument,
     ): PerformanceMeasurement {
         val startingPolicy = policy.value
         if (!startingPolicy.accepts(LogLevel.DEBUG, LogCategory.PERFORMANCE)) {
@@ -66,8 +68,8 @@ internal class RuntimeTraceboxLogger(
     }
 
     internal fun recordContext(
-        template: String,
-        arguments: Array<out Any?>,
+        template: LogTemplate,
+        arguments: Array<out LogArgument>,
     ) {
         recordLog(LogLevel.ERROR, LogCategory.GENERAL, template, arguments, 0L, OUTCOME_FAILURE)
     }
@@ -75,8 +77,8 @@ internal class RuntimeTraceboxLogger(
     private fun recordLog(
         level: LogLevel,
         category: LogCategory,
-        template: String,
-        arguments: Array<out Any?>,
+        template: LogTemplate,
+        arguments: Array<out LogArgument>,
         durationNanos: Long,
         outcome: UInt,
     ) {
@@ -108,8 +110,8 @@ internal class RuntimeTraceboxLogger(
         )
     }
 
-    private fun prepare(template: String, arguments: Array<out Any?>): PreparedLog {
-        val boundedTemplate = truncateUtf8(template, MAX_TEMPLATE_BYTES)
+    private fun prepare(template: LogTemplate, arguments: Array<out LogArgument>): PreparedLog {
+        val boundedTemplate = template.value
         val rendered = arguments.take(MAX_ARGUMENTS).map(privacy::render)
         var privacyFlags = 0u
         rendered.forEach {
@@ -160,8 +162,7 @@ internal class RuntimeTraceboxLogger(
     )
 
     private companion object {
-        const val MAX_ARGUMENTS = 16
-        const val MAX_TEMPLATE_BYTES = 512
+        const val MAX_ARGUMENTS = LogTemplate.MAX_ARGUMENTS
         const val MAX_MESSAGE_BYTES = 1_024
         const val OUTCOME_NONE = 0u
         const val OUTCOME_SUCCESS = 1u
@@ -208,7 +209,7 @@ private fun mirrorToAndroidLog(level: LogLevel, message: String) {
 internal class RuntimeCrashReporter(
     private val policy: StateFlow<TraceboxPolicy>,
     private val record: (GeneratedExceptionRecord) -> Unit,
-    private val recordContext: (String, Array<out Any?>) -> Unit,
+    private val recordContext: (LogTemplate, Array<out LogArgument>) -> Unit,
 ) : CrashReporter {
     override fun record(throwable: Throwable) {
         if (!policy.value.enabled || CaptureKind.HANDLED_EXCEPTION !in policy.value.captures) return
@@ -217,8 +218,8 @@ internal class RuntimeCrashReporter(
 
     override fun record(
         throwable: Throwable,
-        template: String,
-        vararg arguments: Any?,
+        template: LogTemplate,
+        vararg arguments: LogArgument,
     ) {
         recordContext(template, arguments)
         record(throwable)

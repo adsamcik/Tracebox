@@ -57,13 +57,24 @@ persisted. A disabled user choice remains disabled after restart.
 
 ## Logging and privacy
 
-Call sites use a conventional template plus parameters:
+Declare templates once and pass only privacy-classified arguments:
 
 ```kotlin
-Tracebox.log.debug("Tracking stop requested: {}", reason)
-Tracebox.log.warn("OSM import rejected {} records", rejectedCount)
-Tracebox.log.error(error, "OSM import failed")
+private object DiagnosticLogs {
+    val TRACKING_STOP_REQUESTED = LogTemplate.of("Tracking stop requested: {}")
+    val OSM_IMPORT_REJECTED = LogTemplate.of("OSM import rejected {} records")
+    val OSM_IMPORT_FAILED = LogTemplate.of("OSM import failed")
+    val PROCESS_TRACKING_CYCLE = LogTemplate.of("Process tracking cycle")
+}
+
+Tracebox.log.debug(DiagnosticLogs.TRACKING_STOP_REQUESTED, sensitive(reason))
+Tracebox.log.warn(DiagnosticLogs.OSM_IMPORT_REJECTED, public(rejectedCount))
+Tracebox.log.error(error, DiagnosticLogs.OSM_IMPORT_FAILED)
 ```
+
+The `tracebox-api` AAR embeds a fatal lint rule for `LogTemplate.of`: its input
+must be a string literal or `const val`, never runtime text. The Kotlin API does
+not accept raw argument values.
 
 Formatting happens only after the runtime level gate. Parameters are classified
 before Logcat mirroring or durable storage:
@@ -83,7 +94,7 @@ with a throwable writes redacted context and one handled-exception record.
 Performance timings use the same logger and an independent runtime switch:
 
 ```kotlin
-Tracebox.log.performanceSuspend("Process tracking cycle") {
+Tracebox.log.performanceSuspend(DiagnosticLogs.PROCESS_TRACKING_CYCLE) {
     processCycle()
 }
 ```
