@@ -28,6 +28,9 @@ once its public API stabilizes.
 - Preserved pending review and deletion choices across recreation, exposed complete switch,
   heading, progress, and live-status semantics, and made advanced controls resilient to RTL and
   large-font layouts.
+- Added host-run Compose tests for runtime policy and capture controls, review/approval,
+  recreation, upload-disabled and retry behavior, save/share, deletion, RTL, large fonts,
+  accessibility semantics, and staging cleanup.
 
 ## [0.1.0-alpha.1] - 2026-07-20
 
