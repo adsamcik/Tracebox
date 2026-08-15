@@ -1234,8 +1234,6 @@ Invoke-Adb shell pm enable $hostNetworkPackage | Out-Null
 
 Invoke-CertScenario 'INSTALL.READINESS' {
     Reset-And-Launch -ClearData
-    Clear-DeviceLog
-    Start-LabAction $noInternetPackage 'INSTALL.READINESS' 'readiness'
     Wait-Log 'scenario_result id=INSTALL\.READINESS outcome=PASS'
 }
 

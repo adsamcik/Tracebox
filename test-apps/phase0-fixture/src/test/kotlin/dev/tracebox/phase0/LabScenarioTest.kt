@@ -160,6 +160,13 @@ class LabScenarioTest {
         assertTrue(runner.contains("anr_auto_terminated=true"))
         assertFalse(runner.contains("show_first_crash_dialog"))
         assertFalse(runner.contains("anr_show_background"))
+        val installReadiness = runner
+            .substringAfter("Invoke-CertScenario 'INSTALL.READINESS'")
+            .substringBefore("Invoke-CertScenario 'HANDLER.COLD_START'")
+        assertTrue(installReadiness.contains("Reset-And-Launch -ClearData"))
+        assertTrue(installReadiness.contains("Wait-Log 'scenario_result id=INSTALL\\.READINESS outcome=PASS'"))
+        assertFalse(installReadiness.contains("Start-LabAction"))
+        assertFalse(installReadiness.contains("Clear-DeviceLog"))
         val fatalRestart = runner
             .substringAfter("function Complete-FatalCaptureAndRestart")
             .substringBefore("function Assert-ProductionFixtureFaultCapture")
