@@ -4,6 +4,6 @@
         <activity
             android:name="dev.tracebox.ui.compose.TraceboxDiagnosticsActivity"
             android:exported="false"
-            android:label="Tracebox diagnostics" />
+            android:label="@string/tracebox_ui_activity_label" />
     </application>
 </manifest>

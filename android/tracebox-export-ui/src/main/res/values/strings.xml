@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tracebox_export_disclosure_activity_label">Review diagnostic package</string>
+    <string name="tracebox_export_disclosure_title">Review diagnostic package</string>
+    <string name="tracebox_export_disclosure_privacy_notice">Nothing leaves this device until you approve this exact package.</string>
+    <string name="tracebox_export_disclosure_included">Included: %1$d values, %2$d bytes</string>
+    <string name="tracebox_export_disclosure_privacy">Privacy: %1$s</string>
+    <string name="tracebox_export_disclosure_transforms">Transformations: %1$s</string>
+    <string name="tracebox_export_disclosure_omissions">Omissions: %1$s</string>
+    <string name="tracebox_export_disclosure_source_range">Source range: %1$s</string>
+    <string name="tracebox_export_disclosure_digest">Plaintext digest: %1$s</string>
+    <string name="tracebox_export_disclosure_entry_hashes">Entry hashes: %1$s</string>
+    <string name="tracebox_export_disclosure_raw_artifacts">Raw C2 artifacts: %1$s</string>
+    <string name="tracebox_export_disclosure_approve">Approve and continue</string>
+    <string name="tracebox_export_disclosure_cancel">Cancel</string>
+    <string name="tracebox_export_package_clip_label">Tracebox package</string>
+    <string name="tracebox_export_package_share_title">Share Tracebox package</string>
+</resources>

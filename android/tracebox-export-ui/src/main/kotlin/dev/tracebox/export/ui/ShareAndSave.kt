@@ -123,9 +123,15 @@ object Sharesheet {
         val send = Intent(Intent.ACTION_SEND)
             .setType("application/zip")
             .putExtra(Intent.EXTRA_STREAM, uri)
-        send.clipData = ClipData.newRawUri("Tracebox package", uri)
+        send.clipData = ClipData.newRawUri(
+            context.getString(R.string.tracebox_export_package_clip_label),
+            uri,
+        )
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        return Intent.createChooser(send, "Share Tracebox package")
+        return Intent.createChooser(
+            send,
+            context.getString(R.string.tracebox_export_package_share_title),
+        )
     }
 
     /** Android result data is optional; no result is honestly a delivery-unknown outcome. */

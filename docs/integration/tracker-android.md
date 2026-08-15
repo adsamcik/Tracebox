@@ -145,6 +145,11 @@ TraceboxDiagnosticsScreen(
 )
 ```
 
+Every visible label and outcome is resource-backed. An application can either override the
+library's `tracebox_ui_*` resources by name or supply its own localized resource IDs through
+`TraceboxDiagnosticsUiStrings`. `savedBytes` and `partialCopyBytes` must reference `plurals`
+resources; the remaining properties reference `string` resources.
+
 `defaultPolicy` is the explicit target for the optional reset control. The
 same value should be passed to `TraceboxConfiguration.setInitialPolicy` for
 fresh installs. Opening the UI never replaces a persisted user policy.

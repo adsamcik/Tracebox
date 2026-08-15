@@ -23,6 +23,8 @@ once its public API stabilizes.
 - Pinned `.tbdiag` package v1 to an explicit record ABI and schema fingerprint, generated the Rust
   decoder from the schema, and added strict canonical ZIP/CBOR validation plus an exact Kotlin/Rust
   package golden.
+- Moved every diagnostics, disclosure, approval, delivery, failure, and deletion message into
+  host-overridable Android string resources, including quantity-aware save results.
 
 ## [0.1.0-alpha.1] - 2026-07-20
 

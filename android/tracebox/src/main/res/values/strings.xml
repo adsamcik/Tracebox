@@ -2,6 +2,7 @@
 <resources>
     <string name="tracebox_package_clip_label">Tracebox package</string>
     <string name="tracebox_package_share_title">Share Tracebox package</string>
+    <string name="tracebox_disclosure_activity_label">Review diagnostic package</string>
     <string name="tracebox_disclosure_title">Review diagnostic package</string>
     <string name="tracebox_disclosure_privacy_notice">Nothing leaves this device until you approve this exact package.</string>
     <plurals name="tracebox_disclosure_item_count">
@@ -27,4 +28,18 @@
     <string name="tracebox_package_size_bytes">%1$d bytes</string>
     <string name="tracebox_package_size_kilobytes">%1$d KB</string>
     <string name="tracebox_package_size_megabytes">%1$d MB</string>
+    <string name="tracebox_disclosure_list_separator">,\u0020</string>
+    <string name="tracebox_disclosure_none">none</string>
+    <string name="tracebox_disclosure_privacy_c0">C0 (structural)</string>
+    <string name="tracebox_disclosure_privacy_c1">C1 (sensitive)</string>
+    <string name="tracebox_disclosure_privacy_c2">C2 (restricted)</string>
+    <string name="tracebox_disclosure_transformation_none">none</string>
+    <string name="tracebox_disclosure_transformation_parameter_redaction">parameter redaction</string>
+    <string name="tracebox_disclosure_omission_corrupt_record">corrupt record excluded</string>
+    <string name="tracebox_disclosure_warning_raw_excluded">raw crash artifacts excluded</string>
+    <string name="tracebox_disclosure_warning_os_exit_owned">Android retains OS exit history</string>
+    <string name="tracebox_disclosure_warning_recipient_retention">the selected recipient may retain bytes</string>
+    <string name="tracebox_disclosure_warning_delivery_unknown">delivery cannot be confirmed</string>
+    <string name="tracebox_disclosure_source_range_unavailable">not available</string>
+    <string name="tracebox_disclosure_source_range_millis">%1$d–%2$d ms</string>
 </resources>

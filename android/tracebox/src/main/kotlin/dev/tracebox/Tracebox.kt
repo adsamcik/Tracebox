@@ -5177,13 +5177,38 @@ class TraceboxPackageDisclosureActivity : Activity() {
         val technicalDetails = buildString {
             append(getString(R.string.tracebox_disclosure_included_values, disclosure.includedValueCount)).append('\n')
             append(getString(R.string.tracebox_disclosure_included_bytes, disclosure.includedBytes)).append('\n')
-            append(getString(R.string.tracebox_disclosure_privacy_classes, disclosure.privacyClasses)).append('\n')
-            append(getString(R.string.tracebox_disclosure_transformations, disclosure.transformations)).append('\n')
-            append(getString(R.string.tracebox_disclosure_omissions, disclosure.omissionReasons)).append('\n')
-            append(getString(R.string.tracebox_disclosure_source_range, disclosure.sourceTimeRangeMillis)).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_disclosure_privacy_classes,
+                    disclosure.privacyClasses.joinLocalized(::privacyClassLabel),
+                ),
+            ).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_disclosure_transformations,
+                    disclosure.transformations.joinLocalized(::transformationLabel),
+                ),
+            ).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_disclosure_omissions,
+                    disclosure.omissionReasons.joinLocalized(::omissionLabel),
+                ),
+            ).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_disclosure_source_range,
+                    sourceRangeLabel(disclosure.sourceTimeRangeMillis),
+                ),
+            ).append('\n')
             append(getString(R.string.tracebox_disclosure_source_processes, disclosure.sourceProcessCount)).append('\n')
             append(getString(R.string.tracebox_disclosure_raw_artifacts, disclosure.rawArtifactCount)).append('\n')
-            append(getString(R.string.tracebox_disclosure_warnings, disclosure.warnings)).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_disclosure_warnings,
+                    disclosure.warnings.joinLocalized(::warningLabel),
+                ),
+            ).append('\n')
             append(
                 getString(
                     R.string.tracebox_disclosure_digest,
@@ -5285,6 +5310,55 @@ class TraceboxPackageDisclosureActivity : Activity() {
             getString(R.string.tracebox_package_size_kilobytes, (bytes + 512L) / 1_024L)
         else ->
             getString(R.string.tracebox_package_size_megabytes, (bytes + 524_288L) / 1_048_576L)
+    }
+
+    private fun <T> Set<T>.joinLocalized(label: (T) -> String): String = if (isEmpty()) {
+        getString(R.string.tracebox_disclosure_none)
+    } else {
+        sortedBy { it.toString() }
+            .joinToString(getString(R.string.tracebox_disclosure_list_separator), transform = label)
+    }
+
+    private fun privacyClassLabel(value: PackagePrivacyClass): String = getString(
+        when (value) {
+            PackagePrivacyClass.C0 -> R.string.tracebox_disclosure_privacy_c0
+            PackagePrivacyClass.C1 -> R.string.tracebox_disclosure_privacy_c1
+            PackagePrivacyClass.C2 -> R.string.tracebox_disclosure_privacy_c2
+        },
+    )
+
+    private fun transformationLabel(value: PackageTransformation): String = getString(
+        when (value) {
+            PackageTransformation.NONE -> R.string.tracebox_disclosure_transformation_none
+            PackageTransformation.PARAMETER_REDACTION ->
+                R.string.tracebox_disclosure_transformation_parameter_redaction
+        },
+    )
+
+    private fun omissionLabel(value: PackageOmissionReason): String = getString(
+        when (value) {
+            PackageOmissionReason.CORRUPT_ORDINARY_RECORD ->
+                R.string.tracebox_disclosure_omission_corrupt_record
+        },
+    )
+
+    private fun warningLabel(value: PackageWarning): String = getString(
+        when (value) {
+            PackageWarning.RAW_CRASH_ARTIFACTS_EXCLUDED ->
+                R.string.tracebox_disclosure_warning_raw_excluded
+            PackageWarning.OS_EXIT_HISTORY_REMAINS_ANDROID_OWNED ->
+                R.string.tracebox_disclosure_warning_os_exit_owned
+            PackageWarning.SHARE_OR_SAF_RECIPIENT_MAY_RETAIN_BYTES ->
+                R.string.tracebox_disclosure_warning_recipient_retention
+            PackageWarning.DELIVERY_CANNOT_BE_PROVEN ->
+                R.string.tracebox_disclosure_warning_delivery_unknown
+        },
+    )
+
+    private fun sourceRangeLabel(range: LongRange?): String = if (range == null) {
+        getString(R.string.tracebox_disclosure_source_range_unavailable)
+    } else {
+        getString(R.string.tracebox_disclosure_source_range_millis, range.first, range.last)
     }
 
     companion object {

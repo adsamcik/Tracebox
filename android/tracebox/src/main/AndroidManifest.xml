@@ -4,6 +4,7 @@
     <application>
         <activity
             android:name=".TraceboxPackageDisclosureActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:label="@string/tracebox_disclosure_activity_label" />
     </application>
 </manifest>

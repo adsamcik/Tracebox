@@ -45,21 +45,55 @@ class TraceboxDisclosureActivity : Activity() {
 
     private fun showDisclosure(facts: DisclosureFacts) {
         val details = buildString {
-            append("Included: ${facts.includedCount} values, ${facts.includedBytes} bytes\n")
-            append("Privacy: ${facts.privacyClasses.sortedBy { it.name }}\n")
-            append("Transforms: ${facts.transformations.sorted()}\n")
-            append("Omissions: ${facts.omissions}\n")
-            append("Source range: ${facts.sourceRangeMillis}\n")
-            append("Plaintext digest: ${facts.plaintextDigest.toHex()}\n")
-            append("Entry hashes: ${facts.entries.joinToString { "${it.path}:${it.sha256.toHex()}" }}\n")
-            append("Raw C2 artifacts: ${facts.rawC2Artifacts.map(DisclosureEntry::path)}")
+            append(getString(R.string.tracebox_export_disclosure_included, facts.includedCount, facts.includedBytes))
+                .append('\n')
+            append(
+                getString(
+                    R.string.tracebox_export_disclosure_privacy,
+                    facts.privacyClasses.sortedBy { it.name },
+                ),
+            ).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_export_disclosure_transforms,
+                    facts.transformations.sorted(),
+                ),
+            ).append('\n')
+            append(getString(R.string.tracebox_export_disclosure_omissions, facts.omissions)).append('\n')
+            append(getString(R.string.tracebox_export_disclosure_source_range, facts.sourceRangeMillis)).append('\n')
+            append(getString(R.string.tracebox_export_disclosure_digest, facts.plaintextDigest.toHex())).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_export_disclosure_entry_hashes,
+                    facts.entries.joinToString { "${it.path}:${it.sha256.toHex()}" },
+                ),
+            ).append('\n')
+            append(
+                getString(
+                    R.string.tracebox_export_disclosure_raw_artifacts,
+                    facts.rawC2Artifacts.map(DisclosureEntry::path),
+                ),
+            )
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            addView(TextView(this@TraceboxDisclosureActivity).apply {
+                text = getString(R.string.tracebox_export_disclosure_title)
+            })
+            addView(TextView(this@TraceboxDisclosureActivity).apply {
+                text = getString(R.string.tracebox_export_disclosure_privacy_notice)
+            })
             addView(TextView(this@TraceboxDisclosureActivity).apply { text = details })
             addView(Button(this@TraceboxDisclosureActivity).apply {
-                text = "Confirm package"
+                text = getString(R.string.tracebox_export_disclosure_approve)
                 setOnClickListener { confirmFreshGesture() }
+            })
+            addView(Button(this@TraceboxDisclosureActivity).apply {
+                text = getString(R.string.tracebox_export_disclosure_cancel)
+                setOnClickListener {
+                    setResult(RESULT_CANCELED)
+                    finish()
+                }
             })
         })
     }
