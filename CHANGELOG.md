@@ -25,6 +25,9 @@ once its public API stabilizes.
   package golden.
 - Moved every diagnostics, disclosure, approval, delivery, failure, and deletion message into
   host-overridable Android string resources, including quantity-aware save results.
+- Preserved pending review and deletion choices across recreation, exposed complete switch,
+  heading, progress, and live-status semantics, and made advanced controls resilient to RTL and
+  large-font layouts.
 
 ## [0.1.0-alpha.1] - 2026-07-20
 

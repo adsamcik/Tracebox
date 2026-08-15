@@ -5,6 +5,7 @@ import android.content.res.Resources
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -40,6 +42,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.tracebox.api.ApprovalToken
@@ -101,11 +111,11 @@ fun TraceboxDiagnosticsScreen(
     var currentPackage by remember(handle) { mutableStateOf<DiagnosticPackage?>(null) }
     // Preserve the fail-closed delivery choice if Android recreates this screen while the
     // disclosure activity is open. Enums are directly saveable by Compose.
-    var pendingPrimaryAction by rememberSaveable {
+    var pendingPrimaryAction by rememberSaveable(handle) {
         mutableStateOf(ResolvedPrimaryAction.REVIEW_ONLY)
     }
     var advancedExpanded by rememberSaveable { mutableStateOf(advanced.initiallyExpanded) }
-    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(packageOwner) {
         onDispose { packageOwner.close() }
@@ -244,7 +254,11 @@ fun TraceboxDiagnosticsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (configuration.showHeading) {
-            Text(uiString(strings.title), style = MaterialTheme.typography.headlineSmall)
+            Text(
+                uiString(strings.title),
+                modifier = Modifier.semantics { heading() },
+                style = MaterialTheme.typography.headlineSmall,
+            )
             Text(uiString(strings.description), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
@@ -264,7 +278,11 @@ fun TraceboxDiagnosticsScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(uiString(strings.supportTitle), style = MaterialTheme.typography.titleLarge)
+                Text(
+                    uiString(strings.supportTitle),
+                    modifier = Modifier.semantics { heading() },
+                    style = MaterialTheme.typography.titleLarge,
+                )
                 Text(
                     uiString(strings.supportDescription),
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -322,7 +340,17 @@ fun TraceboxDiagnosticsScreen(
         if (advanced.visible) {
             OutlinedButton(
                 onClick = { advancedExpanded = !advancedExpanded },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        stateDescription = uiString(
+                            if (advancedExpanded) {
+                                strings.sectionExpanded
+                            } else {
+                                strings.sectionCollapsed
+                            },
+                        )
+                    },
             ) {
                 Text(
                     uiString(
@@ -344,7 +372,13 @@ fun TraceboxDiagnosticsScreen(
                     if (advanced.hasRuntimeControls()) {
                         ControlCard(uiString(strings.runtimeTitle)) {
                             if (advanced.diagnosticsEnabled) {
-                                ToggleRow(uiString(strings.diagnosticsEnabled), policy.enabled, !busy) {
+                                ToggleRow(
+                                    label = uiString(strings.diagnosticsEnabled),
+                                    checked = policy.enabled,
+                                    enabled = !busy,
+                                    onText = uiString(strings.controlOn),
+                                    offText = uiString(strings.controlOff),
+                                ) {
                                     applyPolicy(policy.copy(enabled = it))
                                 }
                             }
@@ -364,16 +398,20 @@ fun TraceboxDiagnosticsScreen(
                             }
                             if (advanced.logcatMirroring) {
                                 ToggleRow(
-                                    uiString(strings.mirrorToLogcat),
-                                    policy.mirrorToLogcat,
-                                    !busy && policy.enabled,
+                                    label = uiString(strings.mirrorToLogcat),
+                                    checked = policy.mirrorToLogcat,
+                                    enabled = !busy && policy.enabled,
+                                    onText = uiString(strings.controlOn),
+                                    offText = uiString(strings.controlOff),
                                 ) { applyPolicy(policy.copy(mirrorToLogcat = it)) }
                             }
                             if (advanced.performanceLogging) {
                                 ToggleRow(
-                                    uiString(strings.performanceTimings),
-                                    policy.performanceLoggingEnabled,
-                                    !busy && policy.enabled,
+                                    label = uiString(strings.performanceTimings),
+                                    checked = policy.performanceLoggingEnabled,
+                                    enabled = !busy && policy.enabled,
+                                    onText = uiString(strings.controlOn),
+                                    offText = uiString(strings.controlOff),
                                 ) { applyPolicy(policy.copy(performanceLoggingEnabled = it)) }
                                 if (advanced.performanceThresholdsNanos.isNotEmpty()) {
                                     CycleRow(
@@ -403,9 +441,11 @@ fun TraceboxDiagnosticsScreen(
                                 .filter(advanced.captureKinds::contains)
                                 .forEach { kind ->
                                     ToggleRow(
-                                        uiString(captureLabel(kind, strings)),
-                                        kind in policy.captures,
-                                        !busy && policy.enabled,
+                                        label = uiString(captureLabel(kind, strings)),
+                                        checked = kind in policy.captures,
+                                        enabled = !busy && policy.enabled,
+                                        onText = uiString(strings.controlOn),
+                                        offText = uiString(strings.controlOff),
                                     ) { enabled ->
                                         val captures = policy.captures.toMutableSet().apply {
                                             if (enabled) add(kind) else remove(kind)
@@ -439,15 +479,32 @@ fun TraceboxDiagnosticsScreen(
             ) { Text(uiString(strings.deleteAllData)) }
         }
 
-        if (busy) CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-        message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .semantics { contentDescription = uiString(strings.operationInProgress) },
+            )
+        }
+        message?.let {
+            Text(
+                it,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(Modifier.height(24.dp))
     }
 
     if (showDeleteConfirmation) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmation = false },
-            title = { Text(uiString(strings.deleteDialogTitle)) },
+            title = {
+                Text(
+                    uiString(strings.deleteDialogTitle),
+                    modifier = Modifier.semantics { heading() },
+                )
+            },
             text = { Text(uiString(strings.deleteDialogBody)) },
             confirmButton = {
                 TextButton(onClick = {
@@ -485,7 +542,9 @@ private fun CasualStatusCard(
     ) {
         Text(
             text = if (ready) readyText else unavailableText,
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .padding(16.dp)
+                .semantics { liveRegion = LiveRegionMode.Polite },
             style = MaterialTheme.typography.titleMedium,
         )
     }
@@ -513,7 +572,11 @@ private fun ControlCard(title: String, content: @Composable ColumnScope.() -> Un
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                title,
+                modifier = Modifier.semantics { heading() },
+                style = MaterialTheme.typography.titleMedium,
+            )
             HorizontalDivider()
             content()
         }
@@ -521,26 +584,61 @@ private fun ControlCard(title: String, content: @Composable ColumnScope.() -> Un
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onText: String,
+    offText: String,
+    onChange: (Boolean) -> Unit,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onChange,
+            )
+            .semantics(mergeDescendants = true) {
+                stateDescription = if (checked) onText else offText
+            }
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            enabled = enabled,
+            modifier = Modifier.clearAndSetSemantics { },
+        )
     }
 }
 
 @Composable
 private fun CycleRow(label: String, value: String, enabled: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) {}
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(label, modifier = Modifier.weight(1f))
-        TextButton(onClick = onClick, enabled = enabled) { Text(value) }
+        Text(label)
+        Text(
+            text = value,
+            modifier = Modifier.align(Alignment.End),
+            color = if (enabled) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            },
+            style = MaterialTheme.typography.labelLarge,
+        )
     }
 }
 
