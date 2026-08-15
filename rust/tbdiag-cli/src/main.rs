@@ -3,7 +3,7 @@ use std::path::Path;
 use tbdiag_cli::{
     RawFrame, RetraceResult, Symbolication, decode_package_records, filter_package_records,
     format_decoded_record, read_archive, read_generated_symbol_catalog, retrace_generated_catalog,
-    symbolize_generated_catalog,
+    symbolize_generated_catalog, validate_package,
 };
 
 fn main() {
@@ -33,10 +33,12 @@ fn run(args: impl AsRef<[String]>) -> Result<String, String> {
         }
         [command, archive] if command == "validate" => {
             let parsed = read_archive(Path::new(archive)).map_err(|error| error.to_string())?;
+            validate_package(&parsed).map_err(|error| error.to_string())?;
             Ok(format!("valid: {} entries", parsed.entries.len()))
         }
         [command, archive] if command == "decode" => {
             let parsed = read_archive(Path::new(archive)).map_err(|error| error.to_string())?;
+            validate_package(&parsed).map_err(|error| error.to_string())?;
             let records = decode_package_records(&parsed).map_err(|error| error.to_string())?;
             Ok(records
                 .iter()
@@ -46,6 +48,7 @@ fn run(args: impl AsRef<[String]>) -> Result<String, String> {
         }
         [command, archive, selector] if command == "filter" => {
             let parsed = read_archive(Path::new(archive)).map_err(|error| error.to_string())?;
+            validate_package(&parsed).map_err(|error| error.to_string())?;
             let records = decode_package_records(&parsed).map_err(|error| error.to_string())?;
             let filtered = filter_package_records(&records, selector).map_err(|error| error.to_string())?;
             Ok(filtered
@@ -177,7 +180,15 @@ mod tests {
         record.extend_from_slice(&42_u64.to_be_bytes());
         record.extend_from_slice(&7_u32.to_le_bytes());
         record.extend_from_slice(&9_u64.to_le_bytes());
-        std::fs::write(&path, stored_zip("records/000001.tbr", &record)).unwrap();
+        let manifest = compatible_manifest();
+        std::fs::write(
+            &path,
+            stored_zip_entries(&[
+                ("manifest.cbor", &manifest),
+                ("records/000001.tbr", &record),
+            ]),
+        )
+        .unwrap();
 
         let decoded = run(vec!["decode".into(), path.display().to_string()]).unwrap();
         assert!(decoded.contains("\"event_type\":\"Breadcrumb\""));
@@ -231,47 +242,54 @@ mod tests {
         assert_eq!(retraced, "a.b.c dev.tracebox.Original.method");
     }
 
-    fn stored_zip(name: &str, payload: &[u8]) -> Vec<u8> {
+    fn stored_zip_entries(entries: &[(&str, &[u8])]) -> Vec<u8> {
         const LOCAL_FILE_HEADER: u32 = 0x0403_4b50;
         const CENTRAL_DIRECTORY_HEADER: u32 = 0x0201_4b50;
         const END_OF_CENTRAL_DIRECTORY: u32 = 0x0605_4b50;
         let mut output = Vec::new();
-        let name = name.as_bytes();
-        let crc = crc32(payload);
-        let payload_len = u32::try_from(payload.len()).expect("test payload is ZIP32-sized");
-        let name_len = u16::try_from(name.len()).expect("test name is ZIP16-sized");
-        output.extend_from_slice(&LOCAL_FILE_HEADER.to_le_bytes());
-        output.extend_from_slice(&20_u16.to_le_bytes());
-        output.extend_from_slice(&0x0800_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&crc.to_le_bytes());
-        output.extend_from_slice(&payload_len.to_le_bytes());
-        output.extend_from_slice(&payload_len.to_le_bytes());
-        output.extend_from_slice(&name_len.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(name);
-        output.extend_from_slice(payload);
+        let mut central = Vec::new();
+        for (name, payload) in entries {
+            let name = name.as_bytes();
+            let crc = crc32(payload);
+            let payload_len = u32::try_from(payload.len()).expect("test payload is ZIP32-sized");
+            let name_len = u16::try_from(name.len()).expect("test name is ZIP16-sized");
+            let local_offset = u32::try_from(output.len()).expect("test offset is ZIP32-sized");
+            output.extend_from_slice(&LOCAL_FILE_HEADER.to_le_bytes());
+            output.extend_from_slice(&20_u16.to_le_bytes());
+            output.extend_from_slice(&0x0800_u16.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(&0x0021_u16.to_le_bytes());
+            output.extend_from_slice(&crc.to_le_bytes());
+            output.extend_from_slice(&payload_len.to_le_bytes());
+            output.extend_from_slice(&payload_len.to_le_bytes());
+            output.extend_from_slice(&name_len.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(name);
+            output.extend_from_slice(payload);
+            central.push((name, crc, payload_len, name_len, local_offset));
+        }
         let central_offset = output.len();
-        output.extend_from_slice(&CENTRAL_DIRECTORY_HEADER.to_le_bytes());
-        output.extend_from_slice(&20_u16.to_le_bytes());
-        output.extend_from_slice(&20_u16.to_le_bytes());
-        output.extend_from_slice(&0x0800_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&crc.to_le_bytes());
-        output.extend_from_slice(&payload_len.to_le_bytes());
-        output.extend_from_slice(&payload_len.to_le_bytes());
-        output.extend_from_slice(&name_len.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u32.to_le_bytes());
-        output.extend_from_slice(&0_u32.to_le_bytes());
-        output.extend_from_slice(name);
+        for (name, crc, payload_len, name_len, local_offset) in central {
+            output.extend_from_slice(&CENTRAL_DIRECTORY_HEADER.to_le_bytes());
+            output.extend_from_slice(&20_u16.to_le_bytes());
+            output.extend_from_slice(&20_u16.to_le_bytes());
+            output.extend_from_slice(&0x0800_u16.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(&0x0021_u16.to_le_bytes());
+            output.extend_from_slice(&crc.to_le_bytes());
+            output.extend_from_slice(&payload_len.to_le_bytes());
+            output.extend_from_slice(&payload_len.to_le_bytes());
+            output.extend_from_slice(&name_len.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(&0_u16.to_le_bytes());
+            output.extend_from_slice(&0_u32.to_le_bytes());
+            output.extend_from_slice(&local_offset.to_le_bytes());
+            output.extend_from_slice(name);
+        }
         let central_size = output.len() - central_offset;
         let central_size =
             u32::try_from(central_size).expect("test central directory is ZIP32-sized");
@@ -280,12 +298,28 @@ mod tests {
         output.extend_from_slice(&END_OF_CENTRAL_DIRECTORY.to_le_bytes());
         output.extend_from_slice(&0_u16.to_le_bytes());
         output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&1_u16.to_le_bytes());
-        output.extend_from_slice(&1_u16.to_le_bytes());
+        let entry_count = u16::try_from(entries.len()).expect("test entry count is ZIP16-sized");
+        output.extend_from_slice(&entry_count.to_le_bytes());
+        output.extend_from_slice(&entry_count.to_le_bytes());
         output.extend_from_slice(&central_size.to_le_bytes());
         output.extend_from_slice(&central_offset.to_le_bytes());
         output.extend_from_slice(&0_u16.to_le_bytes());
         output
+    }
+
+    fn compatible_manifest() -> Vec<u8> {
+        let mut manifest = vec![
+            0xa8, 0x61, b'v', 0x01, 0x65, b'e', b'p', b'o', b'c', b'h', 0x01, 0x65, b'r', b'a',
+            b'n', b'g', b'e', 0x80, 0x66, b'r', b'e', b'c', b'o', b'r', b'd', 0x01, 0x66, b's',
+            b'c', b'h', b'e', b'm', b'a', 0x58, 0x20,
+        ];
+        manifest.extend_from_slice(&tbdiag_cli::CURRENT_SCHEMA_FINGERPRINT);
+        manifest.extend_from_slice(&[
+            0x67, b'e', b'n', b't', b'r', b'i', b'e', b's', 0x80, 0x67, b'p', b'r', b'i', b'v',
+            b'a', b'c', b'y', 0x62, b'C', b'0', 0x69, b'o', b'm', b'i', b's', b's', b'i', b'o',
+            b'n', b's', 0x80,
+        ]);
+        manifest
     }
 
     fn crc32(bytes: &[u8]) -> u32 {

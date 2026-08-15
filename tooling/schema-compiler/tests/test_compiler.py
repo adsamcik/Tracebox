@@ -62,6 +62,7 @@ class SchemaCompilerTests(unittest.TestCase):
             "android/tracebox-api/src/main/kotlin/dev/tracebox/api/generated/GeneratedSchema.kt",
             "native/include/tracebox/generated_events.h",
             "rust/tracebox-sys/src/generated.rs",
+            "rust/tbdiag-cli/src/generated_schema.rs",
             "schema/generated/tracebox_records.proto",
         ]
         rendered = [(self.out / target).read_text(encoding="utf-8") for target in targets]
@@ -69,7 +70,8 @@ class SchemaCompilerTests(unittest.TestCase):
         self.assertIn("val signed_signal: Int", rendered[0])
         self.assertIn("int32_t signed_signal", rendered[1])
         self.assertIn("pub signed_signal: i32", rendered[2])
-        self.assertIn("int32 signed_signal", rendered[3])
+        self.assertIn('(\"signed_signal\".into(), reader.read_i32()?.to_string())', rendered[3])
+        self.assertIn("int32 signed_signal", rendered[4])
 
     def test_prohibited_type_fails_at_generation(self):
         schema = json.loads((ROOT / "schema" / "events.json").read_text(encoding="utf-8"))

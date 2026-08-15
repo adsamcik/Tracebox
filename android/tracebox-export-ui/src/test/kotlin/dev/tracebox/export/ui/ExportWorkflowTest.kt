@@ -2,7 +2,10 @@ package dev.tracebox.export.ui
 
 import dev.tracebox.api.generated.GeneratedEventId
 import dev.tracebox.api.generated.GeneratedBreadcrumb
+import dev.tracebox.export.CanonicalCbor
+import dev.tracebox.export.CborValue
 import dev.tracebox.export.DeterministicZip
+import dev.tracebox.export.ManifestEncoder
 import dev.tracebox.export.InternalIdentity
 import dev.tracebox.export.OrdinarySourceRecord
 import dev.tracebox.export.PackagePipelineResult
@@ -83,6 +86,33 @@ class ExportWorkflowTest {
 
         assertIs<DisclosureDecodeResult.Invalid>(
             DisclosureDecoder.decode(zip(mapOf("manifest.cbor" to nestedManifest))),
+        )
+    }
+
+    @Test fun disclosure_requires_exact_package_record_and_schema_versions() {
+        assertIs<DisclosureDecodeResult.Decoded>(
+            DisclosureDecoder.decode(zip(mapOf("manifest.cbor" to compatibleManifest()))),
+        )
+
+        assertIs<DisclosureDecodeResult.Invalid>(
+            DisclosureDecoder.decode(
+                zip(mapOf("manifest.cbor" to compatibleManifest(packageVersion = 2))),
+            ),
+        )
+        assertIs<DisclosureDecodeResult.Invalid>(
+            DisclosureDecoder.decode(
+                zip(mapOf("manifest.cbor" to compatibleManifest(recordVersion = 2))),
+            ),
+        )
+        assertIs<DisclosureDecodeResult.Invalid>(
+            DisclosureDecoder.decode(
+                zip(mapOf("manifest.cbor" to compatibleManifest(schema = ByteArray(32) { 0x5a }))),
+            ),
+        )
+        assertIs<DisclosureDecodeResult.Invalid>(
+            DisclosureDecoder.decode(
+                zip(mapOf("manifest.cbor" to compatibleManifest(extraField = true))),
+            ),
         )
     }
 
@@ -322,6 +352,26 @@ class ExportWorkflowTest {
             }
         }
         return output.toByteArray()
+    }
+
+    private fun compatibleManifest(
+        packageVersion: Long = 1,
+        recordVersion: Long = 1,
+        schema: ByteArray = ManifestEncoder.schemaFingerprint(),
+        extraField: Boolean = false,
+    ): ByteArray {
+        val fields = linkedMapOf<String, CborValue>(
+            "v" to CborValue.Unsigned(packageVersion),
+            "record" to CborValue.Unsigned(recordVersion),
+            "schema" to CborValue.Bytes(schema),
+            "epoch" to CborValue.Unsigned(1),
+            "privacy" to CborValue.Text(PackagePrivacyClass.C0.name),
+            "range" to CborValue.Array(emptyList()),
+            "entries" to CborValue.Array(emptyList()),
+            "omissions" to CborValue.Array(emptyList()),
+        )
+        if (extraField) fields["future"] = CborValue.Unsigned(1)
+        return CanonicalCbor.encode(CborValue.Map(fields))
     }
 
 }

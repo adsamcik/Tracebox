@@ -48,6 +48,15 @@ class PackagePipelineTest {
         }
         error("shared CBOR fixture not found")
     }
+    private fun packageGoldenPath(): Path {
+        var directory = Path.of("").toAbsolutePath()
+        while (directory.parent != null) {
+            val candidate = directory.resolve("tooling/fixtures/tbdiag-v1-golden.hex")
+            if (Files.exists(candidate)) return candidate
+            directory = directory.parent
+        }
+        error("package golden not found")
+    }
     private fun accounting(limit: Long = 1_000_000) =
         UidAccounting(UidQuota(mapOf(UidBucket.SNAPSHOTS to limit)), mapOf(UidBucket.SNAPSHOTS to 1))
 
@@ -442,6 +451,21 @@ class PackagePipelineTest {
         assertFailsWith<PackageConstructionFailure.Zip64> {
             writer.write(listOf(ZipEntryInput("zip64", byteArrayOf(), 0x1_0000_0000L)))
         }
+    }
+
+    @Test fun deterministic_v1_package_matches_the_cross_language_byte_golden() {
+        val snapshot = SnapshotPreparer(
+            accounting(),
+            Path.of("build", "phase4", UUID.randomUUID().toString()),
+        ).prepare(request())
+        val bytes = DeterministicZip().materialize(snapshot).exactBytes()
+        (System.getenv("TRACEBOX_PACKAGE_GOLDEN_OUTPUT"))?.let { output ->
+            Path.of(output).also { Files.createDirectories(it.parent) }.let { Files.write(it, bytes) }
+        }
+        val expectedHex = Files.readString(packageGoldenPath()).filterNot(Char::isWhitespace)
+        val actualHex = bytes.joinToString("") { byte -> "%02x".format(byte) }
+
+        assertEquals(expectedHex, actualHex)
     }
 
     @Test fun preview_and_approved_generation_use_the_actual_pipeline_and_have_the_same_digest() {

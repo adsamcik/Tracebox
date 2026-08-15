@@ -2,6 +2,7 @@ package dev.tracebox.export.ui
 
 import dev.tracebox.export.MaterializedPackage
 import dev.tracebox.export.DeterministicZip
+import dev.tracebox.export.ManifestEncoder
 import dev.tracebox.export.PackagePrivacyClass
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -83,6 +84,20 @@ object DisclosureDecoder {
             val manifest = files.remove(MANIFEST_PATH) ?: return DisclosureDecodeResult.Invalid("manifest missing")
             val root = CborReader(manifest).read() as? Cbor.Map
                 ?: return DisclosureDecodeResult.Invalid("manifest malformed")
+            if (root.value.keys != MANIFEST_FIELDS) {
+                return DisclosureDecodeResult.Invalid("manifest fields unsupported")
+            }
+            if ((root.value["v"] as? Cbor.UInt)?.value != ManifestEncoder.PACKAGE_FORMAT_VERSION) {
+                return DisclosureDecodeResult.Invalid("package version unsupported")
+            }
+            if ((root.value["record"] as? Cbor.UInt)?.value != ManifestEncoder.PACKAGE_RECORD_VERSION) {
+                return DisclosureDecodeResult.Invalid("record version unsupported")
+            }
+            val schemaFingerprint = (root.value["schema"] as? Cbor.Bytes)?.value
+                ?: return DisclosureDecodeResult.Invalid("schema fingerprint missing")
+            if (!MessageDigest.isEqual(schemaFingerprint, ManifestEncoder.schemaFingerprint())) {
+                return DisclosureDecodeResult.Invalid("schema fingerprint unsupported")
+            }
             val entries = (root.value["entries"] as? Cbor.Array)?.value?.map { decodeEntry(it, files) }
                 ?: return DisclosureDecodeResult.Invalid("entries malformed")
             if (entries.any { it == null }) return DisclosureDecodeResult.Invalid("entry mismatch")
@@ -158,6 +173,16 @@ object DisclosureDecoder {
         path.isNotEmpty() && !path.startsWith("/") && !path.contains('\\') && path.split('/').none { it == "." || it == ".." || it.isEmpty() }
 
     private const val MANIFEST_PATH = "manifest.cbor"
+    private val MANIFEST_FIELDS = setOf(
+        "v",
+        "record",
+        "schema",
+        "epoch",
+        "privacy",
+        "range",
+        "entries",
+        "omissions",
+    )
     private const val MAX_MANIFEST_BYTES = 4L * 1024 * 1024
     private const val MAX_ARCHIVE_OVERHEAD_BYTES = DeterministicZip.MAX_ENTRIES * 1024L
     private const val MAX_ARCHIVE_BYTES = DeterministicZip.HARD_PLAINTEXT_LIMIT + MAX_ARCHIVE_OVERHEAD_BYTES

@@ -20,6 +20,9 @@ once its public API stabilizes.
 - Enforced the released schema as an immutable append-only event prefix with a checksum-protected
   compatibility baseline; released event/field changes, removal, reordering, and ID unreservation
   now fail generation.
+- Pinned `.tbdiag` package v1 to an explicit record ABI and schema fingerprint, generated the Rust
+  decoder from the schema, and added strict canonical ZIP/CBOR validation plus an exact Kotlin/Rust
+  package golden.
 
 ## [0.1.0-alpha.1] - 2026-07-20
 

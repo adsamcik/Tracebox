@@ -10,6 +10,10 @@ Run `python tooling\schema-compiler\compile_schema.py` to update every generated
 consumer. Generated surfaces are the only recording contracts; there is no
 generic event, map, label, object, or text collection construct.
 
+The generated consumers include the offline Rust decoder and the shared schema
+fingerprint embedded in `.tbdiag` manifests. A reader must match that fingerprint
+before interpreting record payloads.
+
 `compatibility/v1.json` freezes the released event prefix as canonical hashes.
 The compiler requires every released event and field contract to remain exact;
 v1 can grow only by appending a new event with a fresh ID. Reserved IDs cannot be

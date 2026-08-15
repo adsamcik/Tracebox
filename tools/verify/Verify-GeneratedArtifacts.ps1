@@ -24,6 +24,10 @@ $pairs = @(
         golden = 'rust\tracebox-sys\src\generated.rs'
     },
     [pscustomobject]@{
+        checked_in = 'rust\tbdiag-cli\src\generated_schema.rs'
+        golden = 'rust\tbdiag-cli\src\generated_schema.rs'
+    },
+    [pscustomobject]@{
         checked_in = 'schema\generated\decoder-metadata.json'
         golden = 'schema\generated\decoder-metadata.json'
     },

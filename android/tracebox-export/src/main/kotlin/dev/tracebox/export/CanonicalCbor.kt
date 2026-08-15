@@ -1,5 +1,6 @@
 package dev.tracebox.export
 
+import dev.tracebox.api.generated.GeneratedSchemaFingerprint
 import java.io.ByteArrayOutputStream
 
 sealed interface CborValue {
@@ -79,7 +80,9 @@ object ManifestEncoder {
         val hashes = entries.associate { it.path to it.sha256() }
         val cbor = CborValue.Map(
             mapOf(
-                "v" to CborValue.Unsigned(1),
+                "v" to CborValue.Unsigned(PACKAGE_FORMAT_VERSION),
+                "record" to CborValue.Unsigned(PACKAGE_RECORD_VERSION),
+                "schema" to CborValue.Bytes(GeneratedSchemaFingerprint.bytes()),
                 "epoch" to CborValue.Unsigned(snapshot.policyEpoch),
                 "privacy" to CborValue.Text(snapshot.maximumPrivacyClass.name),
                 "range" to CborValue.Array(
@@ -115,4 +118,8 @@ object ManifestEncoder {
         )
         return EncodedPackageManifest(CanonicalCbor.encode(cbor), hashes)
     }
+
+    const val PACKAGE_FORMAT_VERSION = 1L
+    const val PACKAGE_RECORD_VERSION = 1L
+    fun schemaFingerprint(): ByteArray = GeneratedSchemaFingerprint.bytes()
 }
