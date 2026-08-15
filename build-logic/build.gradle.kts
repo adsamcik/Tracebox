@@ -9,6 +9,10 @@ dependencies {
 
 gradlePlugin {
     plugins {
+        register("releaseSupport") {
+            id = "tracebox.release-support"
+            implementationClass = "tracebox.buildlogic.TraceboxReleaseSupportPlugin"
+        }
         register("androidApplication") {
             id = "tracebox.android.application"
             implementationClass = "tracebox.buildlogic.TraceboxAndroidApplicationPlugin"

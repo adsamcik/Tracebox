@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import java.security.MessageDigest
-import java.util.zip.ZipFile
+import tracebox.buildlogic.TraceboxCreateReleaseChecksumsTask
+import tracebox.buildlogic.TraceboxPrintVersionTask
+import tracebox.buildlogic.TraceboxVerifyPublishedArtifactsTask
+import tracebox.buildlogic.TraceboxVerifyReleaseMetadataTask
 
 plugins {
     base
+    id("tracebox.release-support")
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false
     alias(libs.plugins.kotlin.compose) apply false
@@ -24,6 +27,9 @@ val publishedModules = listOf(
     "tracebox-ui-compose",
     "tracebox",
 )
+val releaseAarFiles = publishedModules.map { module ->
+    layout.projectDirectory.file("android/$module/build/outputs/aar/$module-release.aar")
+}
 
 allprojects {
     group = traceboxGroup
@@ -80,12 +86,10 @@ tasks.register("phase4CoreCheck") {
     dependsOn(":android:tracebox-export:testDebugUnitTest")
 }
 
-tasks.register("printVersion") {
+tasks.register<TraceboxPrintVersionTask>("printVersion") {
     group = "release"
     description = "Prints the version resolved for this build."
-    doLast {
-        println(traceboxVersion)
-    }
+    publicationVersion.set(traceboxVersion)
 }
 
 val noNetworkBoundaryFiles = files(
@@ -134,103 +138,31 @@ tasks.register("verifyNoNetworkBoundary") {
     }
 }
 
-tasks.register("verifyPublishedArtifacts") {
+tasks.register<TraceboxVerifyPublishedArtifactsTask>("verifyPublishedArtifacts") {
     group = "verification"
     description = "Checks every release AAR manifest for an INTERNET permission string."
     dependsOn(publishedModules.map { ":android:$it:assembleRelease" })
-
-    doLast {
-        val aars = publishedModules.map { module ->
-            file("android/$module/build/outputs/aar/$module-release.aar")
-        }
-        val missing = aars.filterNot { it.isFile }
-        check(missing.isEmpty()) {
-            "Missing release AARs: ${missing.joinToString { it.relativeTo(rootDir).path }}"
-        }
-        aars.forEach { aar ->
-            ZipFile(aar).use { archive ->
-                val manifest = archive.getEntry("AndroidManifest.xml")
-                    ?: error("${aar.relativeTo(rootDir)} has no AndroidManifest.xml")
-                val manifestBytes = archive.getInputStream(manifest).readBytes()
-                val manifestText = manifestBytes.toString(Charsets.ISO_8859_1)
-                check("android.permission.INTERNET" !in manifestText) {
-                    "${aar.relativeTo(rootDir)} declares android.permission.INTERNET"
-                }
-            }
-        }
-
-        val nativeAar = file(
-            "android/tracebox-native/build/outputs/aar/tracebox-native-release.aar",
-        )
-        val expectedNativeEntries = setOf(
-            "jni/armeabi-v7a/libtracebox_crashpad.so",
-            "jni/arm64-v8a/libtracebox_crashpad.so",
-            "jni/x86/libtracebox_crashpad.so",
-            "jni/x86_64/libtracebox_crashpad.so",
-        )
-        ZipFile(nativeAar).use { archive ->
-            val packagedNativeEntries = archive.entries().asSequence()
-                .map { it.name }
-                .filter { it.startsWith("jni/") && it.endsWith(".so") }
-                .toSet()
-            check(packagedNativeEntries == expectedNativeEntries) {
-                "Unexpected native payload in ${nativeAar.relativeTo(rootDir)}: " +
-                    "expected $expectedNativeEntries, found $packagedNativeEntries"
-            }
-        }
-    }
+    releaseAars.from(releaseAarFiles)
 }
 
-tasks.register("verifyReleaseMetadata") {
+tasks.register<TraceboxVerifyReleaseMetadataTask>("verifyReleaseMetadata") {
     group = "release"
     description = "Validates immutable metadata required before package publication."
-
-    doLast {
-        val versionPattern = Regex("""[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+""")
-        check(versionPattern.matches(traceboxVersion)) {
-            "Alpha publication version must be MAJOR.MINOR.PATCH-alpha.N, got $traceboxVersion"
-        }
-
-        val repository = providers.gradleProperty("traceboxGitHubRepository")
+    publicationVersion.set(traceboxVersion)
+    githubRepository.set(
+        providers.gradleProperty("traceboxGitHubRepository")
             .orElse(providers.environmentVariable("GITHUB_REPOSITORY"))
-            .orNull
-        check(repository?.matches(Regex("""[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+""")) == true) {
-            "Set traceboxGitHubRepository (or GITHUB_REPOSITORY) to OWNER/REPOSITORY before publishing."
-        }
-
-        providers.environmentVariable("TRACEBOX_RELEASE_TAG").orNull?.let { releaseTag ->
-            check(releaseTag == "v$traceboxVersion") {
-                "Release tag $releaseTag does not match version $traceboxVersion."
-            }
-        }
-    }
+            .orElse(""),
+    )
+    releaseTag.set(providers.environmentVariable("TRACEBOX_RELEASE_TAG").orElse(""))
 }
 
-tasks.register("createReleaseChecksums") {
+tasks.register<TraceboxCreateReleaseChecksumsTask>("createReleaseChecksums") {
     group = "release"
     description = "Creates SHA-256 checksums for all distributable Tracebox AARs."
     dependsOn(publishedModules.map { ":android:$it:assembleRelease" })
-
-    val outputFile = layout.buildDirectory.file("release/tracebox-$traceboxVersion-sha256sums.txt")
-    outputs.file(outputFile)
-
-    doLast {
-        val artifacts = publishedModules.map { module ->
-            file("android/$module/build/outputs/aar/$module-release.aar")
-        }
-        check(artifacts.all { it.isFile }) { "All Tracebox release AARs must exist before checksumming." }
-
-        val lines = artifacts.map { artifact ->
-            val digest = MessageDigest.getInstance("SHA-256")
-                .digest(artifact.readBytes())
-                .joinToString("") { byte -> "%02x".format(byte) }
-            "$digest  ${artifact.name}"
-        }
-        outputFile.get().asFile.apply {
-            parentFile.mkdirs()
-            writeText(lines.joinToString("\n", postfix = "\n"))
-        }
-    }
+    releaseAars.from(releaseAarFiles)
+    checksumFile.set(layout.buildDirectory.file("release/tracebox-$traceboxVersion-sha256sums.txt"))
 }
 
 tasks.named("check") {
