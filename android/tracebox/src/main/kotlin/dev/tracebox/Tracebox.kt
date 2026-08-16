@@ -3502,7 +3502,7 @@ internal class DefaultTraceboxHandle(
         }
 
         val adapter = ApplicationExitInfoAdapter()
-        val history = adapter.anrHistory(applicationContext, EXIT_HISTORY_LIMIT)
+        val history = adapter.exitHistory(applicationContext, EXIT_HISTORY_LIMIT)
             .associateBy { ExitSourceKey.derive(it) }
 
         journal.pending().forEach { pending ->
@@ -3520,7 +3520,8 @@ internal class DefaultTraceboxHandle(
         history.forEach { (key, exit) ->
             if (ledger.imported(key) || journal.read(key) != null) return@forEach
             val token = ExitPolicyToken.decode(exit.processStateSummary)
-            val provenance = if (token != null &&
+            val provenance = if (exit.artifactKind != ExitArtifactKind.NONE &&
+                token != null &&
                 rawExitTokenAuthorizes(token, policy, OS_EXIT_CATEGORY)
             ) {
                 try {
@@ -3688,6 +3689,7 @@ internal class DefaultTraceboxHandle(
         when (kind) {
             ExitArtifactKind.ANR_TRACE -> RawArtifactKind.OS_EXIT_ANR_TRACE
             ExitArtifactKind.NATIVE_TOMBSTONE -> RawArtifactKind.OS_EXIT_NATIVE_TOMBSTONE
+            ExitArtifactKind.NONE -> error("metadata-only exits do not have a raw artifact kind")
         }
 
     private fun prepareExitImport(

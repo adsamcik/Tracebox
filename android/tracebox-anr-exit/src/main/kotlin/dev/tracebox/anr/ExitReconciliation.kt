@@ -36,7 +36,13 @@ data class SyntheticApplicationExitInfo(
 }
 
 /** The documented raw source associated with an OS exit record. */
-enum class ExitArtifactKind { ANR_TRACE, NATIVE_TOMBSTONE }
+enum class ExitArtifactKind {
+    ANR_TRACE,
+    NATIVE_TOMBSTONE,
+
+    /** Structural exit metadata only; no OS-owned raw stream may be opened for this source. */
+    NONE,
+}
 
 /** Installation-lifetime exact OS source key; no bounded-history record is imported twice. */
 @JvmInline
@@ -182,6 +188,9 @@ class ExitRawArtifactProvenance(
     val originProcessInstanceId: ByteArray get() = processId.copyOf()
 
     init {
+        require(artifactKind != ExitArtifactKind.NONE) {
+            "raw artifact provenance requires an artifact-bearing exit"
+        }
         require(rawId.size == ExitSourceKey.SOURCE_KEY_BYTES && rawId.any { it != 0.toByte() })
         require(processId.size == ExitSourceKey.SOURCE_KEY_BYTES)
         require(acquisitionEpoch >= 0)

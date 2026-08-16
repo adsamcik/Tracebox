@@ -76,11 +76,18 @@ object ApplicationExitInfoMapper {
     }
 }
 
-/**
- * Capability-gated Android adapter. API 23-29 return no OS records; only ANR exits are surfaced
- * here because they are the documented API-30 raw trace source handled by the import journal.
- */
+/** Capability-gated Android adapter. API 23-29 return no OS-managed exit records. */
 class ApplicationExitInfoAdapter {
+    /**
+     * Returns bounded structural metadata for every documented UID process exit. Only ANRs are
+     * marked as having a raw artifact; all other reasons are metadata-only.
+     */
+    fun exitHistory(context: Context, maxEntries: Int): List<SyntheticApplicationExitInfo> {
+        require(maxEntries in 1..128)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
+        return Api30.exitHistory(context, maxEntries)
+    }
+
     fun anrHistory(context: Context, maxEntries: Int): List<SyntheticApplicationExitInfo> {
         require(maxEntries in 1..128)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
@@ -126,6 +133,12 @@ class ApplicationExitInfoAdapter {
 
     @TargetApi(Build.VERSION_CODES.R)
     private object Api30 {
+        fun exitHistory(context: Context, maxEntries: Int): List<SyntheticApplicationExitInfo> {
+            val activityManager = context.getSystemService(ActivityManager::class.java) ?: return emptyList()
+            return activityManager.getHistoricalProcessExitReasons(null, 0, maxEntries)
+                .mapNotNull { mapExit(context, it) }
+        }
+
         fun anrHistory(context: Context, maxEntries: Int): List<SyntheticApplicationExitInfo> {
             val activityManager = context.getSystemService(ActivityManager::class.java) ?: return emptyList()
             return activityManager.getHistoricalProcessExitReasons(null, 0, maxEntries)
@@ -191,7 +204,11 @@ class ApplicationExitInfoAdapter {
                     importance = exit.importance,
                     pid = exit.pid,
                     processStateSummary = exit.processStateSummary,
-                    artifactKind = ExitArtifactKind.ANR_TRACE,
+                    artifactKind = if (exit.reason == ApplicationExitInfo.REASON_ANR) {
+                        ExitArtifactKind.ANR_TRACE
+                    } else {
+                        ExitArtifactKind.NONE
+                    },
                 ),
             )
 

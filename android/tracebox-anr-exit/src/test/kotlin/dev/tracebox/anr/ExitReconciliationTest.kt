@@ -116,6 +116,47 @@ class ExitReconciliationTest {
         assertEquals(ExitArtifactKind.ANR_TRACE, mapped?.artifactKind)
     }
 
+    @Test fun repeated_low_memory_exits_from_multiple_processes_remain_distinct_metadata_sources() {
+        fun lowMemory(processName: String, timestampMillis: Long, pid: Int) =
+            requireNotNull(
+                ApplicationExitInfoMapper.map(
+                    "dev.tracebox.fixture",
+                    AndroidExitInfoFields(
+                        processName = processName,
+                        packageUid = 12_345,
+                        timestampMillis = timestampMillis,
+                        reason = 3,
+                        status = 0,
+                        importance = 400,
+                        pid = pid,
+                        processStateSummary = null,
+                        artifactKind = ExitArtifactKind.NONE,
+                    ),
+                ),
+            )
+
+        val firstMain = lowMemory("dev.tracebox.fixture", 100, 41)
+        val secondMain = lowMemory("dev.tracebox.fixture", 200, 42)
+        val worker = lowMemory("dev.tracebox.fixture:worker", 200, 43)
+        val keys = listOf(firstMain, secondMain, worker).map(ExitSourceKey::derive)
+
+        assertEquals(3, keys.toSet().size)
+        assertEquals(ExitArtifactKind.NONE, firstMain.artifactKind)
+        assertEquals("dev.tracebox.fixture:worker", worker.processName)
+    }
+
+    @Test fun metadata_only_exit_cannot_claim_raw_artifact_provenance() {
+        assertFailsWith<IllegalArgumentException> {
+            ExitRawArtifactProvenance(
+                artifactKind = ExitArtifactKind.NONE,
+                rawArtifactId = ByteArray(32) { 1 },
+                acquisitionEpoch = 1,
+                originProcessInstanceId = ByteArray(32) { 2 },
+                originRole = 1,
+            )
+        }
+    }
+
     @Test fun capture_time_policy_token_v2_round_trips_every_bound_field() {
         val processIdentity = ByteArray(32) { (it * 7).toByte() }
 
