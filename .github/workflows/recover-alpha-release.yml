@@ -149,7 +149,15 @@ jobs:
           gh release upload "$tag" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber \
+            android/tracebox-anr-exit/build/outputs/aar/tracebox-anr-exit-release.aar \
             android/tracebox-api/build/outputs/aar/tracebox-api-release.aar \
+            android/tracebox-core/build/outputs/aar/tracebox-core-release.aar \
+            android/tracebox-directboot/build/outputs/aar/tracebox-directboot-release.aar \
+            android/tracebox-export/build/outputs/aar/tracebox-export-release.aar \
+            android/tracebox-export-ui/build/outputs/aar/tracebox-export-ui-release.aar \
+            android/tracebox-native/build/outputs/aar/tracebox-native-release.aar \
+            android/tracebox-storage/build/outputs/aar/tracebox-storage-release.aar \
+            android/tracebox-ui-compose/build/outputs/aar/tracebox-ui-compose-release.aar \
             android/tracebox/build/outputs/aar/tracebox-release.aar \
             "build/release/tracebox-$version-sha256sums.txt" \
             LICENSE \

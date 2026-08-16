@@ -100,6 +100,10 @@ foreach ($workflow in @('.github\workflows\release.yml', '.github\workflows\reco
         if ($workflowText -notmatch "(?<![A-Za-z0-9-])$escapedArtifact(?![A-Za-z0-9-])") {
             throw "$workflow does not verify published artifact $artifact"
         }
+        $releaseAssetPath = "android/$artifact/build/outputs/aar/$artifact-release.aar"
+        if ($workflowText -notmatch [regex]::Escape($releaseAssetPath)) {
+            throw "$workflow does not attach published artifact $artifact to the GitHub release"
+        }
     }
 }
 Assert-FileContains '.github\workflows\release.yml' @(
