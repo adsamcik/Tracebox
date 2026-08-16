@@ -213,16 +213,20 @@ screen and package pipeline do not change.
 
 ## Tracker integration baseline
 
-For `0.1.0-alpha.3` the host compile, hard-migration architecture tests,
-Tracebox bootstrap tests, tracking resilience tests, affected OSM/activity/stats
-module tests, and debug APK assembly pass. A single x86_64 emulator launch also
-confirmed a live Tracker process, dedicated Tracebox handler, durable segment,
-policy/identity stores, and native emergency slots.
+Tracker `dev/v10` commit `63c0be268e0b1cbfb140c66cc079e56a39eabff6`
+consumes the immutable `0.1.0-alpha.5` coordinates above with strict dependency
+verification. Its host compile, hard-migration architecture tests, bootstrap and
+handler-isolation tests, tracking resilience tests, complete repository quality
+gates, and release validation pass against that package.
 
-The settings entry, casual screen, advanced disclosure, and exact-package
-review handoff are exercised on the representative emulator. Real user
-workloads remain alpha evaluation, not missing implementation.
+The post-release Tracker consumer smoke also passes on the representative API 36
+`x86_64`/4 KiB emulator. It confirms cold application startup, a separately live
+private Tracebox handler, the packaged native runtime, persisted policy across a
+force-stop/restart, durable owned storage, the localized settings entry and
+diagnostics screen, exact-byte review, upload-disabled Android sharing, and
+staging cleanup on screen disposal. The structured result is
+`evidence/personal-release/tracker-alpha5-integration.json`.
 
-The `0.1.0-alpha.5` coordinates above are the immutable upgrade target. Tracker's
-catalog pin and downstream alpha5 verification follow publication; ADR-0010 keeps
-that downstream smoke separate from Tracebox's standalone release gate.
+Real user workloads remain alpha evaluation. They are not unfinished
+implementation and do not replace the bounded deterministic host and emulator
+contracts.

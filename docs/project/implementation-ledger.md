@@ -77,7 +77,7 @@ personal-release readiness.
 |---|---|---|---|
 | `ENGINEERING_FEASIBILITY_PASS` | NOT REACHED | Explicitly superseded for implementation by ADR-0008 | Phases 1–5 may proceed at risk; Phase 0 results remain unchanged. |
 | `PERSONAL_RELEASE_FEASIBILITY_PASS` | PASS | Defined by ADR-0010 | All 13 required functional, privacy, lifecycle, UI, deletion, and no-network scenarios pass on the API 36 `x86_64`/4 KiB emulator in `evidence/personal-release/API36-x86_64-4096-alpha4.json`. |
-| `PERSONAL_RELEASE_READY` | PASS | Defined by ADR-0010 | Mandatory implementation, the 14-gate host/static run, all 13 representative emulator scenarios, current alpha5 documentation, deterministic release artifacts, and final review pass. Tracker's immutable package pin and downstream smoke follow publication and do not gate standalone readiness. |
+| `PERSONAL_RELEASE_READY` | PASS | Defined by ADR-0010 | Mandatory implementation, the 14-gate host/static run, all 13 representative emulator scenarios, current alpha5 documentation, deterministic release artifacts, final review pass, and Tracker's immutable alpha5 package pin plus post-release consumer smoke all pass. Evidence: `evidence/personal-release/tracker-alpha5-integration.json`. |
 | `FOUNDATION_CERTIFIED` | HISTORICAL_TERM | Superseded for personal release by ADR-0010 | No independent, physical-device, OEM, or broad-matrix certification claim is permitted. |
 
 ## Resume protocol

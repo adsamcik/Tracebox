@@ -1,0 +1,89 @@
+{
+  "schema": "tracebox-tracker-integration-result-v1",
+  "scope": "Post-release Tracker-Android consumer smoke for the immutable Tracebox 0.1.0-alpha.5 package.",
+  "observed_at_utc": "2026-08-16T04:22:35.6525005Z",
+  "tracebox": {
+    "version": "0.1.0-alpha.5",
+    "tag": "v0.1.0-alpha.5",
+    "tag_object": "d5aa7408ae8398d5b931b13e858943ef062c6ee2",
+    "source_commit": "75651a0f43ac7e8308cab3814e7e1f0241018cf4",
+    "source_tree": "b66944db50db1d70474ed34e28497d7bb7c1438e"
+  },
+  "tracker": {
+    "branch": "dev/v10",
+    "source_commit": "63c0be268e0b1cbfb140c66cc079e56a39eabff6",
+    "source_tree": "b6ac5945483703d4e403c72cf40f776352ebd73f",
+    "application_id": "com.adsamcik.tracker.debug",
+    "activity": "com.adsamcik.tracker.app.activity.MainActivityCompose"
+  },
+  "endpoint": {
+    "serial": "emulator-5554",
+    "avd": "Codex_Tracebox_Release_API36",
+    "api": 36,
+    "abi": "x86_64",
+    "page_size": 4096
+  },
+  "build": {
+    "command": ".\\gradlew.bat :app:installDebug --no-daemon --stacktrace --console=plain --dependency-verification=strict",
+    "result": "PASS",
+    "duration": "11m02s",
+    "actionable_tasks": 657,
+    "executed_tasks": 391,
+    "cached_tasks": 266,
+    "installed_devices": 1
+  },
+  "checks": [
+    {
+      "id": "STARTUP.COLD_LAUNCH",
+      "outcome": "PASS",
+      "evidence": "The launcher activity completed a cold start twice; the initial launch completed in 4271 ms and the restart completed in 2537 ms. No FATAL EXCEPTION entry was observed."
+    },
+    {
+      "id": "STARTUP.HANDLER_ISOLATION",
+      "outcome": "PASS",
+      "evidence": "The application and private com.adsamcik.tracker.debug:tracebox_handler processes were simultaneously live under the same application UID after both cold starts."
+    },
+    {
+      "id": "NATIVE.PACKAGED_RUNTIME",
+      "outcome": "PASS",
+      "evidence": "Android loaded libtracebox_crashpad.so from the installed alpha.5 APK's x86_64 library directory in both the application and handler processes."
+    },
+    {
+      "id": "POLICY.PERSISTED_RESTART",
+      "outcome": "PASS",
+      "evidence": "requested-policy-v2, requested-profile-v1, policy-control-v1, and identity-lifecycle-v1 existed under the Tracebox no-backup owned root before and after force-stop/cold restart; the diagnostics UI reported Readiness: durable and Health: ready after restart."
+    },
+    {
+      "id": "STORAGE.OWNED_ROOT",
+      "outcome": "PASS",
+      "evidence": "The marked no_backup/tracebox root contained bounded policy, identity, UID-quota, segment, raw-journal, native emergency, Rust panic, and handler-client state. No contents or Tracker user data were read."
+    },
+    {
+      "id": "UI.TRACKER_ENTRY",
+      "outcome": "PASS",
+      "evidence": "The Tracker Settings screen exposed the localized Crash diagnostics entry and opened Tracebox's localized diagnostics screen."
+    },
+    {
+      "id": "UI.EXACT_REVIEW",
+      "outcome": "PASS",
+      "evidence": "Review disclosed one diagnostic item and 109 exact bytes, stated that raw crash artifacts were excluded and privacy transformations were applied, and required explicit APPROVE AND CONTINUE."
+    },
+    {
+      "id": "UI.UPLOAD_DISABLED_SHARE_ENABLED",
+      "outcome": "PASS",
+      "evidence": "Approval opened Android's system chooser for one .tbdiag file. The Tracker screen exposed share and save actions and no upload action or endpoint."
+    },
+    {
+      "id": "PACKAGE.SCREEN_DISPOSAL_CLEANUP",
+      "outcome": "PASS",
+      "evidence": "The approved .tbdiag existed only in Tracebox export staging while the diagnostics screen retained the approved package; navigating away removed every staged .tbdiag match."
+    }
+  ],
+  "deterministic_contracts": {
+    "tracker_ci_unit_test": "PASS (994 actionable tasks)",
+    "tracker_ci_check": "PASS (1987 actionable tasks)",
+    "tracker_release_validation": "PASS (1172 actionable tasks)",
+    "tracebox_standalone_emulator": "PASS (13/13 required scenarios in API36-x86_64-4096-alpha4.json)"
+  },
+  "result": "PASS"
+}
