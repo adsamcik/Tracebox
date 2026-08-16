@@ -51,6 +51,7 @@ jobs:
             i686-linux-android x86_64-linux-android
           rustup override set 1.93.1
           cargo --version
+          cargo fetch --locked
 
       - name: Install Android SDK platform
         shell: bash
