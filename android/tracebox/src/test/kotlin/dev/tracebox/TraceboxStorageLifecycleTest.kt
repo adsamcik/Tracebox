@@ -297,6 +297,19 @@ class TraceboxStorageLifecycleTest {
     }
 
     @Test
+    fun undelivered_crash_tail_is_restored_in_order_within_the_fixed_bound() {
+        val buffer = BoundedManagedCrashBuffer<Int>(capacity = 3)
+        buffer.offer(1, sinkReady = false)
+        buffer.offer(2, sinkReady = false)
+        buffer.offer(3, sinkReady = false)
+        val firstAttempt = buffer.resolve(enabled = true, sinkReady = true)
+
+        buffer.restore(firstAttempt, fromIndex = 1)
+
+        assertEquals(listOf(2, 3), buffer.resolve(enabled = true, sinkReady = true))
+    }
+
+    @Test
     fun app_process_roles_are_positive_and_do_not_reuse_the_handler_role() {
         assertFailsWith<IllegalArgumentException> {
             TraceboxConfiguration.Builder().setProcessRole(0)

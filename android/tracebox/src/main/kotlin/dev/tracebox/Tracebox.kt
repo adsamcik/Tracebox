@@ -165,6 +165,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.CRC32
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -421,6 +422,55 @@ internal class PrimaryNativeReadinessRecovery {
     }
 }
 
+/** Coalesces binder-death callback storms into one serialized recovery request. */
+internal class CoalescingRecoveryGate {
+    private val pending = AtomicBoolean(false)
+
+    fun request(): Boolean = pending.compareAndSet(false, true)
+
+    fun complete() {
+        pending.set(false)
+    }
+
+    internal fun isPending(): Boolean = pending.get()
+}
+
+internal enum class StoragePressureState { HEALTHY, PRESSURED, RECOVERING }
+
+/**
+ * Stops repeated disk writes after physical storage becomes unavailable. Recovery is admitted only
+ * once per explicit trigger and a failure returns to the pressured state for a later trigger.
+ */
+internal class StoragePressureRecoveryGate {
+    private val state = AtomicReference(StoragePressureState.HEALTHY)
+
+    fun acceptsWrites(): Boolean = state.get() == StoragePressureState.HEALTHY
+
+    fun pressure() {
+        state.set(StoragePressureState.PRESSURED)
+    }
+
+    fun beginRecovery(): Boolean =
+        state.compareAndSet(StoragePressureState.PRESSURED, StoragePressureState.RECOVERING)
+
+    fun completeRecovery(success: Boolean): Boolean = if (success) {
+        state.compareAndSet(StoragePressureState.RECOVERING, StoragePressureState.HEALTHY)
+    } else {
+        state.compareAndSet(StoragePressureState.RECOVERING, StoragePressureState.PRESSURED)
+        false
+    }
+
+    fun reset() {
+        state.set(StoragePressureState.HEALTHY)
+    }
+
+    internal fun state(): StoragePressureState = state.get()
+}
+
+internal fun isStoragePressureFailure(failure: Throwable): Boolean =
+    failure is IOException ||
+        failure is UidWideQuotaCoordinator.UidQuotaLedgerException.Unavailable
+
 internal class DefaultTraceboxHandle(
     private val applicationContext: Context,
     val configuration: TraceboxConfiguration,
@@ -474,6 +524,18 @@ internal class DefaultTraceboxHandle(
         BoundedManagedCrashBuffer<GeneratedManagedCrash>(VOLATILE_CRASH_CAPACITY)
     private val volatileExceptionCrashes =
         BoundedManagedCrashBuffer<GeneratedExceptionRecord>(VOLATILE_CRASH_CAPACITY)
+    private val outOfMemoryCrashSummary = GeneratedManagedCrash(
+        primary_exception_code = "java.lang.OutOfMemoryError".hashCode().toUInt(),
+        cause_count = 1u.toUShort(),
+        frame_count = 0u.toUShort(),
+        flags = MANAGED_CRASH_OUT_OF_MEMORY or MANAGED_CRASH_REDUCED,
+    )
+    private val reducedStackOverflowCrashSummary = GeneratedManagedCrash(
+        primary_exception_code = "java.lang.StackOverflowError".hashCode().toUInt(),
+        cause_count = 1u.toUShort(),
+        frame_count = 0u.toUShort(),
+        flags = MANAGED_CRASH_STACK_OVERFLOW or MANAGED_CRASH_REDUCED,
+    )
     private val previousJvmHandler = Thread.getDefaultUncaughtExceptionHandler()
     private val installedJvmHandler = dev.tracebox.core.TraceboxUncaughtExceptionHandler(
         previousJvmHandler,
@@ -564,6 +626,8 @@ internal class DefaultTraceboxHandle(
 
     private val activityVisibility = ActivityVisibilityTracker()
     private val primaryNativeReadinessRecovery = PrimaryNativeReadinessRecovery()
+    private val handlerDeathRecoveryGate = CoalescingRecoveryGate()
+    private val storagePressureRecoveryGate = StoragePressureRecoveryGate()
     private var visibilityCallbacks: Application.ActivityLifecycleCallbacks? = null
     private var watchdog: AnrWatchdog? = null
     private val packageSurface = RuntimePackages(this)
@@ -1106,6 +1170,8 @@ internal class DefaultTraceboxHandle(
             // A previous process may have left a completed emergency/Rust slot. Opening native
             // capture resets those fixed slots, so create the gated writer and ingest them first.
             rotateWriter(snapshot)
+            storagePressureRecoveryGate.reset()
+            drainVolatileManagedCrashes()
             if (configuration.nativeCaptureEnabled) drainRustPanicRing()
             if (stableSecondaryPolicySnapshot() != snapshot ||
                 (configuration.nativeCaptureEnabled &&
@@ -1299,6 +1365,7 @@ internal class DefaultTraceboxHandle(
 
         if (profile == DiagnosticsProfile.DISABLED) {
             stopPrimaryNativeObserver()
+            storagePressureRecoveryGate.reset()
             publishDisabledExitPolicy(next.epoch)
             val managedStopped = quiesceManagedWriters()
             val nativeStopped = quiesceNativeClient()
@@ -1327,6 +1394,8 @@ internal class DefaultTraceboxHandle(
         return try {
             initializePersistentStores()
             rotateWriter(next)
+            storagePressureRecoveryGate.reset()
+            drainVolatileManagedCrashes()
             ensureNativeAndWatchdog()
             reconcileExitHistory()
             val nativeReadyForPolicy = !configuration.nativeCaptureEnabled ||
@@ -2320,15 +2389,36 @@ internal class DefaultTraceboxHandle(
             override fun onServiceConnected(name: ComponentName, service: IBinder) = Unit
 
             override fun onServiceDisconnected(name: ComponentName) {
-                // Android retains the binding and may reconnect it. Keep the connection token so
-                // the serialized stop/restart path can unbind it exactly once, but withdraw
-                // readiness immediately because the native transport process disappeared.
-                nativeReady = false
+                handleNativeHandlerDeath()
             }
+
+            override fun onBindingDied(name: ComponentName) = handleNativeHandlerDeath()
+
+            override fun onNullBinding(name: ComponentName) = handleNativeHandlerDeath()
         }
         return handlerServiceLifetime.startAndHold(
             NativeHandlerServiceBinding(intent, connection),
         )
+    }
+
+    private fun handleNativeHandlerDeath() {
+        nativeReady = false
+        if (closed.get() || activeProfile == DiagnosticsProfile.DISABLED) return
+        primaryNativeReadinessRecovery.begin(mutableReadiness.value, mutableHealth.value)
+        markDegraded()
+        if (!handlerDeathRecoveryGate.request()) return
+        val scheduled = enqueue {
+            try {
+                synchronized(profileLock) {
+                    if (!closed.get() && activeProfile != DiagnosticsProfile.DISABLED) {
+                        refreshPrimaryNativeParticipant()
+                    }
+                }
+            } finally {
+                handlerDeathRecoveryGate.complete()
+            }
+        }
+        if (!scheduled) handlerDeathRecoveryGate.complete()
     }
 
     private fun releaseNativeHandlerBinding(): Boolean = handlerServiceLifetime.release()
@@ -2615,6 +2705,73 @@ internal class DefaultTraceboxHandle(
     private fun markDegraded() {
         mutableHealth.value = TraceboxHealth.DEGRADED
         mutableReadiness.value = Readiness.DEGRADED
+    }
+
+    private fun enterStoragePressure() {
+        primaryNativeReadinessRecovery.begin(mutableReadiness.value, mutableHealth.value)
+        storagePressureRecoveryGate.pressure()
+        // Stop all ordinary producers from retaining a writer that just failed. The writer itself
+        // remains available for a bounded seal/recovery attempt after an explicit lifecycle event.
+        generatedAdapter = null
+        markDegraded()
+    }
+
+    private fun requestStoragePressureRecovery() {
+        if (closed.get() || activeProfile == DiagnosticsProfile.DISABLED ||
+            !storagePressureRecoveryGate.beginRecovery()
+        ) {
+            return
+        }
+        val scheduled = enqueue {
+            val recovered = synchronized(profileLock) {
+                val snapshot = if (coordinatesGlobalStorage) {
+                    stablePrimaryCaptureSnapshot()
+                } else {
+                    stableSecondaryPolicySnapshot()
+                }
+                if (closed.get() || activeProfile == DiagnosticsProfile.DISABLED || snapshot == null) {
+                    false
+                } else {
+                    try {
+                        rotateWriter(snapshot)
+                        true
+                    } catch (_: IOException) {
+                        false
+                    } catch (_: UidWideQuotaCoordinator.UidQuotaLedgerException.Unavailable) {
+                        false
+                    } catch (_: RuntimeException) {
+                        false
+                    }
+                }
+            }
+            if (storagePressureRecoveryGate.completeRecovery(recovered)) {
+                try {
+                    drainVolatileManagedCrashes()
+                    restoreReadyAfterFaultRecovery()
+                } catch (failure: Throwable) {
+                    if (isStoragePressureFailure(failure)) enterStoragePressure() else markDegraded()
+                }
+            }
+        }
+        if (!scheduled) storagePressureRecoveryGate.completeRecovery(success = false)
+    }
+
+    private fun restoreReadyAfterFaultRecovery() {
+        val nativeReadyForPolicy = !configuration.nativeCaptureEnabled ||
+            if (coordinatesGlobalStorage) {
+                nativeReady && nativeClientMode == NativeRuntime.CLIENT_MODE_CRASHPAD &&
+                    primaryNativeCaptureAlive()
+            } else {
+                nativeReady && nativeClientMode == NativeRuntime.CLIENT_MODE_EMERGENCY_RUST &&
+                    nativePolicyParticipantAlive()
+            }
+        val recovered = storagePressureRecoveryGate.acceptsWrites() &&
+            generatedAdapter != null && nativeReadyForPolicy &&
+            crashpadRecoveryReady && directBootRecoveryReady
+        if (primaryNativeReadinessRecovery.complete(recovered)) {
+            mutableHealth.value = TraceboxHealth.READY
+            mutableReadiness.value = Readiness.DURABLE
+        }
     }
 
     private fun rotateWriter(snapshot: PolicySnapshot) {
@@ -3015,9 +3172,8 @@ internal class DefaultTraceboxHandle(
         if (!recovered) {
             quiesceNativeClient()
             markDegraded()
-        } else if (primaryNativeReadinessRecovery.complete(recovered = true)) {
-            mutableHealth.value = TraceboxHealth.READY
-            mutableReadiness.value = Readiness.DURABLE
+        } else {
+            restoreReadyAfterFaultRecovery()
         }
     }
 
@@ -3352,11 +3508,21 @@ internal class DefaultTraceboxHandle(
     }
 
     private fun recordGenerated(value: GeneratedRecord, context: DiagnosticContext? = null) {
-        if (!accepts(value.eventId)) return
+        if (!accepts(value.eventId) || !storagePressureRecoveryGate.acceptsWrites()) return
         enqueue {
-            if (!accepts(value.eventId)) return@enqueue
+            if (!accepts(value.eventId) || !storagePressureRecoveryGate.acceptsWrites()) {
+                return@enqueue
+            }
             val adapter = generatedAdapter ?: return@enqueue
-            adapter.record(value, context)
+            try {
+                adapter.record(value, context)
+            } catch (failure: Throwable) {
+                if (isStoragePressureFailure(failure)) {
+                    enterStoragePressure()
+                    return@enqueue
+                }
+                throw failure
+            }
             if (adapter.latestResult() is GeneratedRecordAppendResult.Appended) {
                 mutableSummary.value = DiagnosticSummary(
                     recordedValueCount = mutableSummary.value.recordedValueCount + 1L,
@@ -3398,21 +3564,45 @@ internal class DefaultTraceboxHandle(
     }
 
     private fun captureManagedCrash(captured: dev.tracebox.core.JvmCrashRecord) {
-        val first = captured.causes.firstOrNull()
-        val record = GeneratedManagedCrash(
-            primary_exception_code = (first?.type?.hashCode() ?: 0).toUInt(),
-            cause_count = captured.causes.size.coerceAtMost(UShort.MAX_VALUE.toInt()).toUShort(),
-            frame_count = captured.causes.sumOf { it.frames.size }
-                .coerceAtMost(UShort.MAX_VALUE.toInt())
-                .toUShort(),
-            flags = if (captured.causes.any { it.cycle }) 1u else 0u,
-        )
+        val record = when {
+            captured.fatalKind == dev.tracebox.core.JvmFatalKind.OUT_OF_MEMORY ->
+                outOfMemoryCrashSummary
+            captured.fatalKind == dev.tracebox.core.JvmFatalKind.STACK_OVERFLOW && captured.reduced ->
+                reducedStackOverflowCrashSummary
+            else -> {
+                val first = captured.causes.firstOrNull()
+                var flags = if (captured.causes.any { it.cycle }) MANAGED_CRASH_CAUSE_CYCLE else 0u
+                if (captured.fatalKind == dev.tracebox.core.JvmFatalKind.STACK_OVERFLOW) {
+                    flags = flags or MANAGED_CRASH_STACK_OVERFLOW
+                }
+                if (captured.reduced) flags = flags or MANAGED_CRASH_REDUCED
+                GeneratedManagedCrash(
+                    primary_exception_code = (first?.type?.hashCode() ?: 0).toUInt(),
+                    cause_count = captured.causes.size
+                        .coerceAtMost(UShort.MAX_VALUE.toInt())
+                        .toUShort(),
+                    frame_count = captured.causes.sumOf { it.frames.size }
+                        .coerceAtMost(UShort.MAX_VALUE.toInt())
+                        .toUShort(),
+                    flags = flags,
+                )
+            }
+        }
         val adapter = generatedAdapter
-        when (volatileManagedCrashes.offer(record, sinkReady = adapter != null)) {
-            BoundedManagedCrashOffer.DELIVER -> checkNotNull(adapter).record(record, null)
+        val sinkReady = adapter != null && storagePressureRecoveryGate.acceptsWrites()
+        when (volatileManagedCrashes.offer(record, sinkReady = sinkReady)) {
+            BoundedManagedCrashOffer.DELIVER -> try {
+                checkNotNull(adapter).record(record, null)
+            } catch (failure: Throwable) {
+                if (isStoragePressureFailure(failure)) enterStoragePressure()
+                volatileManagedCrashes.offer(record, sinkReady = false)
+            }
             BoundedManagedCrashOffer.QUEUED,
             BoundedManagedCrashOffer.DROPPED,
             -> Unit
+        }
+        if (captured.fatalKind == dev.tracebox.core.JvmFatalKind.OUT_OF_MEMORY || captured.reduced) {
+            return
         }
         val firstCause = captured.causes.firstOrNull()
         val stack = truncateUtf8(
@@ -3431,8 +3621,13 @@ internal class DefaultTraceboxHandle(
             stack_trace = stack,
             monotonic_time_ns = android.os.SystemClock.elapsedRealtimeNanos().toULong(),
         )
-        when (volatileExceptionCrashes.offer(exceptionRecord, sinkReady = adapter != null)) {
-            BoundedManagedCrashOffer.DELIVER -> checkNotNull(adapter).record(exceptionRecord, null)
+        when (volatileExceptionCrashes.offer(exceptionRecord, sinkReady = sinkReady)) {
+            BoundedManagedCrashOffer.DELIVER -> try {
+                checkNotNull(adapter).record(exceptionRecord, null)
+            } catch (failure: Throwable) {
+                if (isStoragePressureFailure(failure)) enterStoragePressure()
+                volatileExceptionCrashes.offer(exceptionRecord, sinkReady = false)
+            }
             BoundedManagedCrashOffer.QUEUED,
             BoundedManagedCrashOffer.DROPPED,
             -> Unit
@@ -3449,9 +3644,23 @@ internal class DefaultTraceboxHandle(
             sinkReady = adapter != null,
         )
         if (!enabled) return
-        pending.forEach { record -> checkNotNull(adapter).record(record, null) }
+        pending.forEachIndexed { index, record ->
+            try {
+                checkNotNull(adapter).record(record, null)
+            } catch (failure: Throwable) {
+                volatileManagedCrashes.restore(pending, index)
+                throw failure
+            }
+        }
         if (detailedEnabled) {
-            detailed.forEach { record -> checkNotNull(adapter).record(record, null) }
+            detailed.forEachIndexed { index, record ->
+                try {
+                    checkNotNull(adapter).record(record, null)
+                } catch (failure: Throwable) {
+                    volatileExceptionCrashes.restore(detailed, index)
+                    throw failure
+                }
+            }
         }
     }
 
@@ -3460,7 +3669,10 @@ internal class DefaultTraceboxHandle(
         if (visibilityCallbacks != null) return
         val callbacks = object : Application.ActivityLifecycleCallbacks {
             override fun onActivityCreated(activity: Activity, savedInstanceState: android.os.Bundle?) = Unit
-            override fun onActivityStarted(activity: Activity) = activityVisibility.activityStarted()
+            override fun onActivityStarted(activity: Activity) {
+                activityVisibility.activityStarted()
+                requestStoragePressureRecovery()
+            }
 
             override fun onActivityResumed(activity: Activity) = Unit
             override fun onActivityPaused(activity: Activity) = Unit
@@ -4218,14 +4430,16 @@ internal class DefaultTraceboxHandle(
         }
     }
 
-    private fun enqueue(action: () -> Unit) {
-        if (closed.get()) return
-        try {
+    private fun enqueue(action: () -> Unit): Boolean {
+        if (closed.get()) return false
+        return try {
             executor.execute {
                 if (!closed.get()) action()
             }
+            true
         } catch (_: RejectedExecutionException) {
             mutableHealth.value = TraceboxHealth.DEGRADED
+            false
         }
     }
 
@@ -4315,6 +4529,10 @@ internal class DefaultTraceboxHandle(
         const val EXIT_IMPORT_DIRECTORY = "exit-import-journal"
         const val WORK_QUEUE_CAPACITY = 64
         const val VOLATILE_CRASH_CAPACITY = 8
+        const val MANAGED_CRASH_CAUSE_CYCLE = 1u
+        const val MANAGED_CRASH_OUT_OF_MEMORY = 2u
+        const val MANAGED_CRASH_STACK_OVERFLOW = 4u
+        const val MANAGED_CRASH_REDUCED = 8u
         const val BREADCRUMB_MASK = 4L
         const val HANDLED_ERROR_MASK = 8L
         const val MANAGED_CRASH_MASK = 16L
@@ -4817,6 +5035,17 @@ internal class BoundedManagedCrashBuffer<T>(
         val drained = ArrayList<T>(pending.size)
         while (pending.isNotEmpty()) drained += pending.removeFirst()
         return drained
+    }
+
+    /** Restores an undelivered tail after a sink failure without growing beyond the fixed bound. */
+    @Synchronized
+    fun restore(values: List<T>, fromIndex: Int) {
+        require(fromIndex in 0..values.size)
+        val available = capacity - pending.size
+        val lastToRestore = minOf(values.lastIndex, fromIndex + available - 1)
+        for (index in lastToRestore downTo fromIndex) {
+            pending.addFirst(values[index])
+        }
     }
 
     @Synchronized
