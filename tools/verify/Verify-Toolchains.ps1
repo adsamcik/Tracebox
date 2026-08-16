@@ -52,7 +52,11 @@ function Assert-FileContains {
 
 Assert-FileContains '.github\workflows\ci.yml' @(
     '(?m)^\s*host-readiness:',
+    '(?m)^\s*release-readiness:',
     'Invoke-Phase5HostReadiness\.ps1',
+    'required release readiness',
+    'ubuntu-24\.04',
+    'verifyReleaseMetadata check createReleaseChecksums',
     'java-version:\s*"21"',
     'build-tools;37\.0\.0'
 ) @('tools\\ci\\presubmit\.ps1')

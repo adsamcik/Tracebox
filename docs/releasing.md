@@ -26,7 +26,9 @@ Before the first tag, a repository administrator must:
    `packages: write` permissions required by the protected release environment.
 4. Create the `github-packages-alpha` environment and require an appropriate
    maintainer review; restrict it to protected alpha tags.
-5. Protect `main` and require the `CI / required host readiness` status check.
+5. Protect `main` and require both `CI / required host readiness` and
+   `CI / required release readiness`. The latter builds the exact release task set on the same
+   Ubuntu runner family used for publication, before any immutable tag is created.
 6. Create an active repository ruleset for `v*-alpha.*` that explicitly restricts
    tag creation, updates, and deletion. Keep any bypass list narrowly limited to
    authorized release maintainers.
@@ -72,7 +74,9 @@ exists.
 - If the workflow fails before a draft exists and every module POM URL returns HTTP 404,
   fix the failure on `main`, wait for required CI, then run **Publish alpha release** manually
   with the existing annotated tag. The workflow checks out and verifies the unchanged tag object;
-  it refuses recovery if a release exists or any package coordinate is already occupied.
+  it refuses recovery if a release exists or any package coordinate is already occupied. If the
+  fix changes tagged source or dependency-verification metadata, preserve the failed tag and roll
+  forward to a new alpha version instead.
 - If a draft exists and every module POM/AAR URL is resolvable, run **Finalize alpha release
   draft** from GitHub Actions with that
   exact tag. It rebuilds the tagged source, rechecks the consumer endpoints,

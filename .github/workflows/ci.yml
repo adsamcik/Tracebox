@@ -51,3 +51,42 @@ jobs:
           if (-not (Test-Path gradle/verification-metadata.xml)) { throw "Missing dependency verification metadata" }
           if (-not (Get-ChildItem -Recurse -Filter gradle.lockfile | Select-Object -First 1)) { throw "Missing dependency lockfiles" }
           if (git status --porcelain) { throw "Verification changed tracked files" }
+
+  release-readiness:
+    name: required release readiness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Android SDK platform
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37.0" "build-tools;37.0.0"
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - name: Verify exact Linux release contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^traceboxVersion=//p' gradle.properties)"
+          test -n "$version"
+          export TRACEBOX_RELEASE_TAG="v$version"
+          ./gradlew --no-daemon --stacktrace --dependency-verification=strict \
+            -PtraceboxGitHubRepository="${{ github.repository }}" \
+            -PtraceboxVersion="$version" \
+            verifyReleaseMetadata check createReleaseChecksums
+      - name: Ensure release verification leaves source unchanged
+        shell: bash
+        run: |
+          test -z "$(git status --porcelain)"
