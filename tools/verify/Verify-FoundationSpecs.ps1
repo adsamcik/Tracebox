@@ -102,11 +102,25 @@ if ($scopeRequirement.status -ne 'PASS') {
     throw 'PR-001 is not recorded as PASS'
 }
 
+$terminalChecklistStates = @('PASS', 'NOT_APPLICABLE_WITH_RATIONALE')
+$unfinishedRequirements = @(
+    $traceability | Where-Object { $_.status -notin $terminalChecklistStates }
+)
+if ($unfinishedRequirements.Count -gt 0) {
+    $unfinishedSummary = $unfinishedRequirements |
+        ForEach-Object { "$($_.requirement_id)=$($_.status)" }
+    throw "Personal-release checklist contains unfinished requirements: $($unfinishedSummary -join ', ')"
+}
+
 [pscustomobject]@{
     accepted_adrs = $resolvedAdrs.Count
     explicit_scope_adrs = 2
     open_decisions = 12
     personal_release_requirements = $traceability.Count
+    completed_personal_release_requirements =
+        @($traceability | Where-Object status -eq 'PASS').Count
+    not_applicable_personal_release_requirements =
+        @($traceability | Where-Object status -eq 'NOT_APPLICABLE_WITH_RATIONALE').Count
     emergency_record_bytes = 256
     result = 'PASS'
 } | ConvertTo-Json

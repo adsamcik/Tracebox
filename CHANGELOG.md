@@ -10,6 +10,8 @@ once its public API stabilizes.
 - Closed the downstream Tracker integration checklist with strict consumer-build and representative
   API 36 process, policy, native-runtime, review/share, and staging-cleanup evidence for the
   immutable alpha.5 package.
+- Made host readiness fail when any personal-release checklist item returns to an unfinished or
+  failed state.
 
 ## [0.1.0-alpha.5] - 2026-08-16
 
