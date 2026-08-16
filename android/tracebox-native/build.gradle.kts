@@ -27,21 +27,32 @@ extra["traceboxPublicationName"] = "Tracebox native capture"
 extra["traceboxPublicationDescription"] = "Capture-only Crashpad and emergency-native runtime."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
-val verifyCrashpadPrebuilt = tasks.register("verifyCrashpadPrebuilt") {
-    val required = listOf(
-        file("src/main/jniLibs/armeabi-v7a/libtracebox_crashpad.so"),
-        file("src/main/jniLibs/arm64-v8a/libtracebox_crashpad.so"),
-        file("src/main/jniLibs/x86/libtracebox_crashpad.so"),
-        file("src/main/jniLibs/x86_64/libtracebox_crashpad.so"),
-    )
-    inputs.files(required)
-    doLast {
-        required.forEach {
-            check(it.isFile) {
-                "Missing ${it.path}; run tools\\crashpad\\Build-Crashpad.ps1"
-            }
-        }
+val crashpadPrebuiltLock = file("crashpad-prebuilt-lock.properties")
+val crashpadAbis = listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+val crashpadPrebuilts = crashpadAbis.associateWith { abi ->
+    file("src/main/jniLibs/$abi/libtracebox_crashpad.so")
+}
+val crashpadPrebuiltVerifier = rootProject.file("tools/crashpad/Verify-CrashpadPrebuilt.ps1")
+
+val verifyCrashpadPrebuilt = tasks.register<Exec>("verifyCrashpadPrebuilt") {
+    inputs.file(crashpadPrebuiltLock)
+    inputs.file(crashpadPrebuiltVerifier)
+    inputs.files(crashpadPrebuilts.values)
+    val executable = if (System.getProperty("os.name").startsWith("Windows")) {
+        "pwsh.exe"
+    } else {
+        "pwsh"
     }
+    commandLine(
+        executable,
+        "-NoProfile",
+        "-File",
+        crashpadPrebuiltVerifier,
+        "-RepositoryRoot",
+        rootProject.projectDir,
+        "-LockFile",
+        crashpadPrebuiltLock,
+    )
 }
 
 tasks.configureEach {

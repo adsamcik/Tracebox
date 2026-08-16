@@ -16,6 +16,13 @@ Release automation checks coordinate availability and post-publication POM/AAR r
 all ten modules. The clean consumer also hashes each downloaded AAR against the exact locally
 verified release build before a draft can be published.
 
+The four qualified Crashpad ABI libraries are versioned release inputs. Their byte counts and
+SHA-256 values, plus a deterministic digest of every first-party native build input, are recorded
+in `android/tracebox-native/crashpad-prebuilt-lock.properties`. A clean checkout verifies that lock
+before packaging. The bounded manual/scheduled native qualification lane is the only routine that
+rebuilds these libraries; any resulting byte or input change requires an explicit lock review and
+its own commit before a release candidate can pass.
+
 ## One-time repository setup
 
 Before the first tag, a repository administrator must:
@@ -46,22 +53,25 @@ authenticated classic PAT with `read:packages`.
 
 1. Ensure the final commit is merged to `main` and CI is green.
 2. Confirm `CHANGELOG.md` and dependency notices accurately describe the release.
-3. Create and verify an annotated tag:
+3. Confirm the required host-readiness and release-readiness jobs both passed on the exact commit.
+   Release readiness consumes only the four reviewed, hash-locked native inputs committed at that
+   SHA; it does not silently substitute a workstation build.
+4. Create and verify an annotated tag:
 
    ```bash
    git tag -a v0.1.0-alpha.5 -m "Tracebox 0.1.0-alpha.5"
    git push origin v0.1.0-alpha.5
    ```
 
-4. Approve the protected release environment when GitHub prompts for it. The
+5. Approve the protected release environment when GitHub prompts for it. The
    workflow validates the tag, test suite, AARs, checksums, and unused package
    coordinates before creating a draft release and publishing immutable packages.
-5. Verify that GitHub Packages contains all ten AARs and that the GitHub release is
+6. Verify that GitHub Packages contains all ten AARs and that the GitHub release is
    marked as a prerelease.
-6. Resolve the packages using the consumer snippet in `README.md`.
-7. Download the ten AARs and the checksum asset, then run
+7. Resolve the packages using the consumer snippet in `README.md`.
+8. Download the ten AARs and the checksum asset, then run
    `sha256sum -c tracebox-0.1.0-alpha.5-sha256sums.txt` from that directory.
-8. Never delete or overwrite a published version. Correct mistakes with a new
+9. Never delete or overwrite a published version. Correct mistakes with a new
    alpha version and a new tag.
 
 ## Failure recovery

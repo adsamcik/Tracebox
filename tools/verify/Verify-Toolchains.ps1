@@ -74,6 +74,20 @@ Assert-FileContains '.github\workflows\emulator-qualification.yml' @(
     'self-hosted',
     'Invoke-PersonalReleaseEmulator\.ps1'
 ) @('(?m)^\s*schedule:')
+Assert-FileContains '.gitignore' @(
+    '!android/tracebox-native/src/main/jniLibs/\*/libtracebox_crashpad\.so'
+)
+Assert-FileContains 'android\tracebox-native\build.gradle.kts' @(
+    'crashpad-prebuilt-lock\.properties',
+    'Verify-CrashpadPrebuilt\.ps1',
+    'verifyCrashpadPrebuilt'
+)
+Assert-FileContains 'tools\crashpad\Verify-CrashpadPrebuilt.ps1' @(
+    'input_tree_sha256',
+    "@\('arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'\)",
+    'exactly four libraries',
+    'Get-FileHash.+SHA256'
+)
 
 $allPublishedArtifacts = @(
     'tracebox-api',

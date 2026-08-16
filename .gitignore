@@ -14,10 +14,10 @@ __pycache__/
 *.pyc
 .bootstrap/
 third_party/crashpad/checkout/
-android/tracebox-native/src/main/jniLibs/
 tracebox.local.properties
 
 *.so
+!android/tracebox-native/src/main/jniLibs/*/libtracebox_crashpad.so
 *.dylib
 *.dll
 
