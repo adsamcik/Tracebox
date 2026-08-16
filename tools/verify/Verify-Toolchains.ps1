@@ -50,6 +50,14 @@ function Assert-FileContains {
     }
 }
 
+Assert-FileContains 'rust-toolchain.toml' @(
+    'channel\s*=\s*"1\.93\.1"',
+    'aarch64-linux-android',
+    'armv7-linux-androideabi',
+    'i686-linux-android',
+    'x86_64-linux-android'
+)
+
 Assert-FileContains '.github\workflows\ci.yml' @(
     '(?m)^\s*host-readiness:',
     '(?m)^\s*release-readiness:',
@@ -58,7 +66,15 @@ Assert-FileContains '.github\workflows\ci.yml' @(
     'ubuntu-24\.04',
     'verifyReleaseMetadata check createReleaseChecksums',
     'java-version:\s*"21"',
-    'build-tools;37\.0\.0'
+    'build-tools;37\.0\.0',
+    'ndk;28\.2\.13676358',
+    'cmake;4\.1\.2',
+    'rustup toolchain install 1\.93\.1',
+    'rustup target add --toolchain 1\.93\.1',
+    'aarch64-linux-android',
+    'armv7-linux-androideabi',
+    'i686-linux-android',
+    'x86_64-linux-android'
 ) @('tools\\ci\\presubmit\.ps1')
 Assert-FileContains '.github\workflows\native-qualification.yml' @(
     '(?m)^\s*workflow_dispatch:',
@@ -105,8 +121,16 @@ foreach ($workflow in @('.github\workflows\release.yml', '.github\workflows\reco
     Assert-FileContains $workflow @(
         'java-version:\s*"21"',
         'build-tools;37\.0\.0',
+        'ndk;28\.2\.13676358',
+        'cmake;4\.1\.2',
         'cmdline-tools/latest/bin/sdkmanager',
-        'traceboxExpectedArtifactRoot'
+        'traceboxExpectedArtifactRoot',
+        'rustup toolchain install 1\.93\.1',
+        'rustup target add --toolchain 1\.93\.1',
+        'aarch64-linux-android',
+        'armv7-linux-androideabi',
+        'i686-linux-android',
+        'x86_64-linux-android'
     )
     $workflowText = Get-Content $workflow -Raw
     foreach ($artifact in $allPublishedArtifacts) {

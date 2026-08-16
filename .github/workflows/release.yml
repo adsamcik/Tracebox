@@ -42,11 +42,22 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Install pinned Rust Android targets
+        shell: bash
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal --component clippy,rustfmt
+          rustup target add --toolchain 1.93.1 \
+            aarch64-linux-android armv7-linux-androideabi \
+            i686-linux-android x86_64-linux-android
+          rustup override set 1.93.1
+          cargo --version
+
       - name: Install Android SDK platform
         shell: bash
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-37.0" "build-tools;37.0.0"
+            "platforms;android-37.0" "build-tools;37.0.0" \
+            "ndk;28.2.13676358" "cmake;4.1.2"
 
       - name: Set up Gradle and validate wrapper
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
