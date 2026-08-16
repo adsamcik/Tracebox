@@ -5,6 +5,25 @@ once its public API stabilizes.
 
 ## Unreleased
 
+## [0.1.0-alpha.7] - 2026-08-16
+
+### Added
+
+- Added allocation-lean repeated OOM capture, explicitly classified and bounded stack-overflow
+  capture, and structural metadata import for every bounded `ApplicationExitInfo` reason across
+  the app UID's processes.
+- Added immediate handler-death degradation with coalesced serialized recovery for disconnect,
+  dead-binding, and null-binding callbacks.
+- Added a storage-pressure circuit that detaches a failed sink, retains bounded fatal summaries in
+  memory, and admits one recovery attempt only on an explicit foreground or policy trigger.
+
+### Changed
+
+- Extended `JvmCrashRecord` with `JvmFatalKind` and a reduced-capture marker. OOM records use a
+  prebuilt type-only value and never inspect messages or stack frames.
+- Kept non-ANR OS exits metadata-only; only an ANR source with a matching capture-time policy token
+  may open an OS-owned raw trace. Existing package and schema fingerprints are unchanged.
+
 ## [0.1.0-alpha.6] - 2026-08-16
 
 ### Added

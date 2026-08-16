@@ -1235,7 +1235,7 @@ evaluation host after Tracebox reaches `PERSONAL_RELEASE_READY`.
 - Main and secondary processes.
 - Simultaneous clients.
 - Handler cold, running, killed, restarted, hung, and storage constrained.
-- Recursive crash and stack overflow.
+- Repeated OOM, recursive crash, and stack overflow.
 - Competing handler policies.
 - Debugger attached.
 - Origin quota attribution.
@@ -1243,6 +1243,20 @@ evaluation host after Tracebox reaches `PERSONAL_RELEASE_READY`.
 - No uploader or network code.
 
 Oracle: exactly one valid origin-attributed capture or explicit fallback; Android crash behavior remains observable.
+
+### 23.2.1 Managed and degraded-runtime fault corpus
+
+- Repeated OOM uses one prebuilt type-only structural record and chains the prior uncaught handler
+  for every sequential failure.
+- Stack overflow is iterative and frame-bounded, with a prebuilt type-only fallback if capture
+  cannot proceed.
+- `ApplicationExitInfo` census is UID-wide and bounded. Process name and documented structural
+  fields participate in the internal source key; only ANR is eligible for a raw stream.
+- Service disconnect, dead binding, and null binding withdraw native readiness immediately and
+  share one coalesced serialized recovery gate.
+- Physical write failure and an unavailable UID quota ledger detach the generated sink. Ordinary
+  producers remain stopped; the fixed fatal-summary queue stays memory-only. Recovery is attempted
+  once on a later foreground transition or explicit policy application, never by a new poller.
 
 ### 23.3 ANR
 
@@ -1304,6 +1318,10 @@ Hard process-role and UID-wide storage bounds are not exceeded.
 Mismatched symbols never produce resolved frames.
 Watchdog evidence alone never becomes ConfirmedAnr, and an ambiguous OS exit never upgrades a candidate.
 Crashpad failure leaves the emergency path available.
+OOM capture does not walk a throwable graph and every fatal path still invokes the prior handler.
+A metadata-only OS exit can never acquire or open a raw artifact.
+Handler-death callbacks coalesce into one serialized recovery attempt.
+Physical storage failure opens a write circuit until an explicit bounded recovery trigger.
 ```
 
 ## 25. Key risks

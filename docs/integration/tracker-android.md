@@ -2,7 +2,7 @@
 
 ## Status
 
-Tracker is the reference personal-project host for `0.1.0-alpha.6`. The normal
+Tracker is the reference personal-project host for `0.1.0-alpha.7`. The normal
 `dev/v10` application is hard-migrated: Tracebox is the only production logging
 and crash-diagnostics backend, with no flavor gate or legacy compatibility
 writer.
@@ -15,9 +15,9 @@ emulator. Physical-device, OEM, battery, and broad API matrices are optional.
 Tracker declares the pieces it actually uses:
 
 ```kotlin
-implementation("io.github.tracebox:tracebox:0.1.0-alpha.6")
-implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.6")
-implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.6")
+implementation("io.github.tracebox:tracebox:0.1.0-alpha.7")
+implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.7")
+implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.7")
 ```
 
 `tracebox` does not transitively depend on `tracebox-native`. Apps that need
@@ -232,12 +232,20 @@ verification. Its host compile, hard-migration architecture tests, bootstrap and
 handler-isolation tests, tracking resilience tests, complete repository quality
 gates, and release validation pass against that package.
 
-The alpha.6 API delta is additionally validated through an isolated ten-module candidate consumed
+The alpha.6 API delta was additionally validated through an isolated ten-module candidate consumed
 by Tracker's ARM64-only integration branch. Focused host tests cover startup clocks,
 lifecycle-bound battery/power and memory observations, source-timer wakeup counters, static
 templates, classified arguments, policy gating, unsupported properties, and sampling failures.
-Tracker's production catalog moves to alpha.6 only after the immutable package is published and
-strict verification metadata is updated.
+Tracker's production catalog moved to alpha.6 only after the immutable package was published and
+strict verification metadata was updated.
+
+Alpha.7 adds bounded fault-scenario coverage without broadening Tracker's supported ABI set.
+Tracebox records repeated low-memory exits from the OS history across UID processes, while Tracker
+counts only its main-process low-memory exits in a 24-hour startup window and emits the count/window
+as public primitives through a static template. OOM and stack-overflow fatal capture, immediate
+handler-death degradation, and foreground-triggered storage recovery remain Tracebox-owned. The
+private handler stays isolated from Hilt and Tracker does not invent a secondary product process;
+any future host process must install Tracebox with its own stable positive process role.
 
 The post-release Tracker consumer smoke also passes on the representative API 36
 `x86_64`/4 KiB emulator. It confirms cold application startup, a separately live
