@@ -11,6 +11,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** The only events permitted to initiate handler reconnection; ordinary polling is forbidden. */
 enum class HandlerConnectTrigger { INSTALL, LIFECYCLE, CAPTURE, NONE }
@@ -408,7 +409,12 @@ private class InstanceLease private constructor(
 /** C1 structural JVM exception representation; throwable messages are never captured. */
 data class JvmCrashCause(val type: String, val frames: List<JvmCrashFrame>, val cycle: Boolean)
 data class JvmCrashFrame(val declaringClass: String, val method: String, val line: Int)
-data class JvmCrashRecord(val causes: List<JvmCrashCause>)
+enum class JvmFatalKind { ORDINARY, OUT_OF_MEMORY, STACK_OVERFLOW }
+data class JvmCrashRecord(
+    val causes: List<JvmCrashCause>,
+    val fatalKind: JvmFatalKind = JvmFatalKind.ORDINARY,
+    val reduced: Boolean = false,
+)
 data class JvmCapturePolicy(
     val maxCauses: Int = 8,
     val maxFramesPerCause: Int = 64,
@@ -429,13 +435,35 @@ class TraceboxUncaughtExceptionHandler(
     private val policy: JvmCapturePolicy,
     private val record: (JvmCrashRecord) -> Unit,
 ) : Thread.UncaughtExceptionHandler {
-    private val handling = ThreadLocal.withInitial { false }
+    /*
+     * A process-wide guard avoids ThreadLocal initialization on the thread that is already dying.
+     * Concurrent failures still reach the previously installed handler, but only one of them may
+     * enter Tracebox's bounded recorder at a time.
+     */
+    private val handling = AtomicBoolean(false)
+    private val outOfMemoryFallback = reducedRecord(
+        type = "java.lang.OutOfMemoryError",
+        fatalKind = JvmFatalKind.OUT_OF_MEMORY,
+    )
+    private val stackOverflowFallback = reducedRecord(
+        type = "java.lang.StackOverflowError",
+        fatalKind = JvmFatalKind.STACK_OVERFLOW,
+    )
 
     override fun uncaughtException(thread: Thread, throwable: Throwable) {
-        if (handling.get() != true) {
-            handling.set(true)
+        if (handling.compareAndSet(false, true)) {
             try {
-                record(capture(throwable))
+                record(
+                    when (throwable) {
+                        is OutOfMemoryError -> outOfMemoryFallback
+                        is StackOverflowError -> try {
+                            capture(throwable, JvmFatalKind.STACK_OVERFLOW)
+                        } catch (_: Throwable) {
+                            stackOverflowFallback
+                        }
+                        else -> capture(throwable, JvmFatalKind.ORDINARY)
+                    },
+                )
             } catch (_: Throwable) {
                 // Failure capture must not obstruct the application's installed termination path.
             } finally {
@@ -445,7 +473,7 @@ class TraceboxUncaughtExceptionHandler(
         previous?.uncaughtException(thread, throwable)
     }
 
-    private fun capture(root: Throwable): JvmCrashRecord {
+    private fun capture(root: Throwable, fatalKind: JvmFatalKind): JvmCrashRecord {
         val seen = java.util.IdentityHashMap<Throwable, Unit>()
         val causes = ArrayList<JvmCrashCause>(policy.maxCauses)
         var current: Throwable? = root
@@ -466,8 +494,15 @@ class TraceboxUncaughtExceptionHandler(
             if (cycle) break
             current = current.cause
         }
-        return JvmCrashRecord(causes)
+        return JvmCrashRecord(causes, fatalKind)
     }
+
+    private fun reducedRecord(type: String, fatalKind: JvmFatalKind): JvmCrashRecord =
+        JvmCrashRecord(
+            causes = listOf(JvmCrashCause(type = type, frames = emptyList(), cycle = false)),
+            fatalKind = fatalKind,
+            reduced = true,
+        )
 
     private fun truncateUtf8(value: String, maximumBytes: Int): String {
         val encoded = value.toByteArray(StandardCharsets.UTF_8)

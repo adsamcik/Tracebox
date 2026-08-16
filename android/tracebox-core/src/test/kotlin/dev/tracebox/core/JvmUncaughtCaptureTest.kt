@@ -53,6 +53,50 @@ class JvmUncaughtCaptureTest {
         assertEquals(1, previousCalls.get())
     }
 
+    @Test fun repeated_out_of_memory_failures_use_the_prebuilt_reduced_record_and_chain_every_time() {
+        val previousCalls = AtomicInteger()
+        val records = mutableListOf<JvmCrashRecord>()
+        val handler = TraceboxUncaughtExceptionHandler(
+            Thread.UncaughtExceptionHandler { _, _ -> previousCalls.incrementAndGet() },
+            JvmCapturePolicy(),
+            records::add,
+        )
+
+        repeat(32) {
+            handler.uncaughtException(Thread.currentThread(), OutOfMemoryError("must not persist"))
+        }
+
+        assertEquals(32, previousCalls.get())
+        assertEquals(32, records.size)
+        assertTrue(records.all { it === records.first() })
+        assertEquals(JvmFatalKind.OUT_OF_MEMORY, records.first().fatalKind)
+        assertTrue(records.first().reduced)
+        assertTrue(records.first().causes.single().frames.isEmpty())
+        assertFalse(records.first().toString().contains("must not persist"))
+    }
+
+    @Test fun stack_overflow_capture_is_bounded_and_classified() {
+        val records = mutableListOf<JvmCrashRecord>()
+        val overflow = StackOverflowError("must not persist").apply {
+            stackTrace = Array(512) { index ->
+                StackTraceElement("example.Type$index", "call", "Source.kt", index)
+            }
+        }
+        val handler = TraceboxUncaughtExceptionHandler(
+            null,
+            JvmCapturePolicy(maxFramesPerCause = 7),
+            records::add,
+        )
+
+        handler.uncaughtException(Thread.currentThread(), overflow)
+
+        val record = records.single()
+        assertEquals(JvmFatalKind.STACK_OVERFLOW, record.fatalKind)
+        assertFalse(record.reduced)
+        assertEquals(7, record.causes.single().frames.size)
+        assertFalse(record.toString().contains("must not persist"))
+    }
+
     @Test fun class_and_method_are_truncated_at_deterministic_utf8_boundaries() {
         val records = mutableListOf<JvmCrashRecord>()
         val throwable = IllegalStateException("ééé")
