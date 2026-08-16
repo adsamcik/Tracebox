@@ -87,6 +87,7 @@ foreach ($workflow in @('.github\workflows\release.yml', '.github\workflows\reco
     Assert-FileContains $workflow @(
         'java-version:\s*"21"',
         'build-tools;37\.0\.0',
+        'cmdline-tools/latest/bin/sdkmanager',
         'traceboxExpectedArtifactRoot'
     )
     $workflowText = Get-Content $workflow -Raw
@@ -97,6 +98,13 @@ foreach ($workflow in @('.github\workflows\release.yml', '.github\workflows\reco
         }
     }
 }
+Assert-FileContains '.github\workflows\release.yml' @(
+    '(?m)^\s*workflow_dispatch:',
+    'inputs\.tag \|\| github\.ref',
+    'inputs\.tag \|\| github\.sha',
+    'inputs\.tag \|\| github\.ref_name',
+    'TRACEBOX_EVENT_NAME'
+)
 
 $savedErrorActionPreference = $ErrorActionPreference
 try {

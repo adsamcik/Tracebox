@@ -4,17 +4,23 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated alpha tag with no GitHub release or published packages
+        required: true
+        type: string
 
 permissions: {}
 
 concurrency:
-  group: alpha-release-${{ github.ref }}
+  group: alpha-release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
   publish:
     name: publish GitHub Packages alpha
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     environment:
       name: github-packages-alpha
@@ -28,7 +34,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.tag || github.sha }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -39,7 +45,8 @@ jobs:
       - name: Install Android SDK platform
         shell: bash
         run: |
-          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Set up Gradle and validate wrapper
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
@@ -49,17 +56,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TRACEBOX_EVENT_COMMIT: ${{ github.sha }}
+          TRACEBOX_EVENT_NAME: ${{ github.event_name }}
+          TRACEBOX_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="$TRACEBOX_TAG"
           version="${tag#v}"
 
           [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]
           test "$(git cat-file -t "refs/tags/$tag")" = "tag"
           tag_object="$(git rev-parse "refs/tags/$tag")"
           release_commit="$(git rev-list -n 1 "$tag")"
-          test "$release_commit" = "$TRACEBOX_EVENT_COMMIT"
+          if [[ "$TRACEBOX_EVENT_NAME" == "push" ]]; then
+            test "$release_commit" = "$TRACEBOX_EVENT_COMMIT"
+          fi
           test "$(git rev-parse HEAD)" = "$release_commit"
           test "$(./gradlew -q --dependency-verification=strict -PtraceboxVersion="$version" printVersion)" = "$version"
           git merge-base --is-ancestor "$release_commit" origin/main
@@ -86,11 +97,11 @@ jobs:
 
       - name: Verify, test, and checksum release contents
         env:
-          TRACEBOX_RELEASE_TAG: ${{ github.ref_name }}
+          TRACEBOX_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${TRACEBOX_RELEASE_TAG#v}"
           ./gradlew --no-daemon --stacktrace --dependency-verification=strict \
             -PtraceboxGitHubRepository="${{ github.repository }}" \
             -PtraceboxVersion="$version" \
@@ -99,10 +110,11 @@ jobs:
       - name: Confirm GitHub Packages coordinates are unused
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          TRACEBOX_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${TRACEBOX_TAG#v}"
           maven_repository="${GITHUB_REPOSITORY,,}"
           maven_base="https://maven.pkg.github.com/$maven_repository/io/github/tracebox"
           artifacts=(
@@ -126,10 +138,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TRACEBOX_EXPECTED_TAG_OBJECT: ${{ steps.preflight.outputs.tag_object }}
+          TRACEBOX_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="$TRACEBOX_TAG"
           version="${tag#v}"
           remote_tag_object="$(git ls-remote --refs origin "refs/tags/$tag" | awk '{print $1}')"
           test "$remote_tag_object" = "$TRACEBOX_EXPECTED_TAG_OBJECT"
@@ -144,11 +157,11 @@ jobs:
       - name: Publish immutable GitHub Packages artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TRACEBOX_RELEASE_TAG: ${{ github.ref_name }}
+          TRACEBOX_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${TRACEBOX_RELEASE_TAG#v}"
           ./gradlew --no-daemon --stacktrace --dependency-verification=strict \
             -PtraceboxGitHubRepository="${{ github.repository }}" \
             -PtraceboxVersion="$version" \
@@ -157,10 +170,11 @@ jobs:
       - name: Verify GitHub Packages consumer endpoints
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          TRACEBOX_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${TRACEBOX_TAG#v}"
           maven_repository="${GITHUB_REPOSITORY,,}"
           maven_base="https://maven.pkg.github.com/$maven_repository/io/github/tracebox"
 
@@ -192,10 +206,11 @@ jobs:
       - name: Resolve GitHub Packages as a clean Gradle consumer
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          TRACEBOX_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${TRACEBOX_TAG#v}"
           ./gradlew --no-daemon --stacktrace \
             -p integration/consumer-smoke \
             -PtraceboxGitHubRepository="${{ github.repository }}" \
@@ -207,10 +222,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TRACEBOX_EXPECTED_TAG_OBJECT: ${{ steps.preflight.outputs.tag_object }}
+          TRACEBOX_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="$TRACEBOX_TAG"
           version="${tag#v}"
           remote_tag_object="$(git ls-remote --refs origin "refs/tags/$tag" | awk '{print $1}')"
           test "$remote_tag_object" = "$TRACEBOX_EXPECTED_TAG_OBJECT"
@@ -228,10 +244,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TRACEBOX_EXPECTED_TAG_OBJECT: ${{ steps.preflight.outputs.tag_object }}
+          TRACEBOX_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="$TRACEBOX_TAG"
           remote_tag_object="$(git ls-remote --refs origin "refs/tags/$tag" | awk '{print $1}')"
           test "$remote_tag_object" = "$TRACEBOX_EXPECTED_TAG_OBJECT"
           gh release edit "$tag" \

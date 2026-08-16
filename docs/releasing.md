@@ -70,7 +70,9 @@ has passed, and it refuses to publish a coordinate whose Maven POM already
 exists.
 
 - If the workflow fails before a draft exists and every module POM URL returns HTTP 404,
-  fix the failure and rerun the tag workflow.
+  fix the failure on `main`, wait for required CI, then run **Publish alpha release** manually
+  with the existing annotated tag. The workflow checks out and verifies the unchanged tag object;
+  it refuses recovery if a release exists or any package coordinate is already occupied.
 - If a draft exists and every module POM/AAR URL is resolvable, run **Finalize alpha release
   draft** from GitHub Actions with that
   exact tag. It rebuilds the tagged source, rechecks the consumer endpoints,
