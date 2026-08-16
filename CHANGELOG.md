@@ -5,6 +5,21 @@ once its public API stabilizes.
 
 ## Unreleased
 
+## [0.1.0-alpha.5] - 2026-08-16
+
+### Changed
+
+- Rolled the fully qualified alpha.4 implementation forward without runtime, API, schema, or
+  privacy-contract changes after the alpha.4 publication tag failed before creating a release,
+  draft, or package.
+- Made Linux release readiness a required pre-tag CI job using the exact release task set and the
+  same Ubuntu runner family as publication.
+- Completed strict cross-platform dependency verification for cold Windows and Linux runners.
+- Added a fail-closed manual release path for an unchanged annotated tag when a workflow-only
+  failure occurs before any immutable publication state exists.
+- Resolved Android SDK command-line tools from the hosted runner's declared SDK root in both alpha
+  publication workflows.
+
 ## [0.1.0-alpha.4] - 2026-08-16
 
 ### Changed

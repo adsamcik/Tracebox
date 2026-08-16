@@ -49,8 +49,8 @@ authenticated classic PAT with `read:packages`.
 3. Create and verify an annotated tag:
 
    ```bash
-   git tag -a v0.1.0-alpha.4 -m "Tracebox 0.1.0-alpha.4"
-   git push origin v0.1.0-alpha.4
+   git tag -a v0.1.0-alpha.5 -m "Tracebox 0.1.0-alpha.5"
+   git push origin v0.1.0-alpha.5
    ```
 
 4. Approve the protected release environment when GitHub prompts for it. The
@@ -60,7 +60,7 @@ authenticated classic PAT with `read:packages`.
    marked as a prerelease.
 6. Resolve the packages using the consumer snippet in `README.md`.
 7. Download the ten AARs and the checksum asset, then run
-   `sha256sum -c tracebox-0.1.0-alpha.4-sha256sums.txt` from that directory.
+   `sha256sum -c tracebox-0.1.0-alpha.5-sha256sums.txt` from that directory.
 8. Never delete or overwrite a published version. Correct mistakes with a new
    alpha version and a new tag.
 
@@ -96,8 +96,8 @@ versioned candidate to an explicit disposable repository instead:
 
 ```text
 ./gradlew.bat \
-  -PtraceboxVersion=0.1.0-alpha.4-<commit> \
-  -PtraceboxLocalRepository=C:\tmp\tracebox-0.1.0-alpha.4-<commit> \
+  -PtraceboxVersion=0.1.0-alpha.5-<commit> \
+  -PtraceboxLocalRepository=C:\tmp\tracebox-0.1.0-alpha.5-<commit> \
   publishFoundation
 ```
 
@@ -115,7 +115,7 @@ environment:
   -PtraceboxGitHubRepository=OWNER/REPOSITORY \
   -Pgpr.user=YOUR_GITHUB_USERNAME \
   -Pgpr.key=YOUR_CLASSIC_PAT \
-  -PtraceboxVersion=0.1.0-alpha.4 \
+  -PtraceboxVersion=0.1.0-alpha.5 \
   verifyReleaseMetadata publishFoundation
 ```
 
