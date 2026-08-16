@@ -40,6 +40,17 @@ internal class RuntimeTraceboxLogger(
         reportCrash(throwable)
     }
 
+    override fun performanceEvent(template: LogTemplate, vararg arguments: LogArgument) {
+        recordLog(
+            level = LogLevel.DEBUG,
+            category = LogCategory.PERFORMANCE,
+            template = template,
+            arguments = arguments,
+            durationNanos = 0L,
+            outcome = OUTCOME_NONE,
+        )
+    }
+
     override fun performanceStart(
         template: LogTemplate,
         vararg arguments: LogArgument,

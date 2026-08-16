@@ -1,5 +1,6 @@
 package dev.tracebox
 
+import dev.tracebox.api.LogCategory
 import dev.tracebox.api.LogLevel
 import dev.tracebox.api.LogTemplate
 import dev.tracebox.api.Privacy
@@ -133,6 +134,47 @@ class RuntimeLoggingTest {
     }
 
     @Test
+    fun performanceEventIsIndependentlyGatedAndNotDurationFiltered() {
+        var renderCount = 0
+        val privacy = PrivacyConfiguration.Builder()
+            .register(Boundary::class.java, Privacy.PUBLIC) {
+                renderCount += 1
+                it.value
+            }
+            .build()
+        val policy = MutableStateFlow(
+            TraceboxPolicy(
+                minimumLogLevel = LogLevel.OFF,
+                performanceLoggingEnabled = false,
+                minimumPerformanceDurationNanos = Long.MAX_VALUE,
+            ),
+        )
+        val records = mutableListOf<GeneratedRecord>()
+        val logger = RuntimeTraceboxLogger(
+            policy = policy,
+            privacy = privacy,
+            record = records::add,
+            reportCrash = {},
+            monotonicNanos = { 42L },
+            mirrorSink = { _, _ -> },
+        )
+
+        logger.performanceEvent(OBSERVATION, argument(Boundary("disabled")))
+        assertEquals(0, renderCount)
+        assertTrue(records.isEmpty())
+
+        policy.value = policy.value.copy(performanceLoggingEnabled = true)
+        logger.performanceEvent(OBSERVATION, argument(Boundary("sample")))
+
+        val record = records.single() as GeneratedLogRecord
+        assertEquals("Observation sample", record.rendered_message)
+        assertEquals(LogCategory.PERFORMANCE.wireCode, record.category)
+        assertEquals(0uL, record.duration_ns)
+        assertEquals(0u, record.outcome)
+        assertEquals(1, renderCount)
+    }
+
+    @Test
     fun throwableErrorRecordsContextAndDelegatesCrashOnce() {
         val failure = IllegalStateException("must never be formatted")
         val records = mutableListOf<GeneratedRecord>()
@@ -159,6 +201,7 @@ class RuntimeLoggingTest {
         val BOUNDARY = LogTemplate.of("Boundary {}")
         val FAST = LogTemplate.of("Fast {}")
         val SLOW = LogTemplate.of("Slow {}")
+        val OBSERVATION = LogTemplate.of("Observation {}")
         val OPERATION_FAILED = LogTemplate.of("Operation {} failed")
     }
 }

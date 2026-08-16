@@ -263,6 +263,23 @@ interface TraceboxLogger {
 
     fun error(throwable: Throwable, template: LogTemplate, vararg arguments: LogArgument)
 
+    /**
+     * Records one low-volume instantaneous performance observation.
+     *
+     * This is intended for bounded host-owned facts such as a lifecycle-boundary memory or battery
+     * sample. It uses the independently gated [LogCategory.PERFORMANCE] category but is not filtered
+     * by [TraceboxPolicy.minimumPerformanceDurationNanos], because it does not represent an elapsed
+     * duration. Tracebox performs no aggregation, polling, or scheduling for these events.
+     *
+     * Runtime values remain subject to the same explicit privacy classification and bounded static
+     * [LogTemplate] contract as ordinary logs. Hosts should emit at lifecycle boundaries rather than
+     * turning this surface into an unbounded time series.
+     */
+    fun performanceEvent(template: LogTemplate, vararg arguments: LogArgument) {
+        if (!isEnabled(LogLevel.DEBUG, LogCategory.PERFORMANCE)) return
+        performanceStart(template, *arguments).success()
+    }
+
     fun performanceStart(template: LogTemplate, vararg arguments: LogArgument): PerformanceMeasurement
 
     fun <T> performance(template: LogTemplate, vararg arguments: LogArgument, block: () -> T): T {

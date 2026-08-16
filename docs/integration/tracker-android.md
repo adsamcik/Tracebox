@@ -102,6 +102,19 @@ Tracebox.log.performanceSuspend(DiagnosticLogs.PROCESS_TRACKING_CYCLE) {
 The switch is checked before rendering parameters or starting a useful
 measurement, and an optional minimum duration suppresses short samples.
 
+Instantaneous host observations use the same independent switch without the
+duration threshold:
+
+```kotlin
+Tracebox.log.performanceEvent(
+    DiagnosticLogs.PROCESS_MEMORY,
+    public(pssKiB),
+)
+```
+
+This surface is for bounded lifecycle-boundary facts. Tracebox neither polls nor
+aggregates these events, and hosts must not turn it into an unbounded time series.
+
 ## Runtime controls and UI
 
 `TraceboxPolicy` provides one persisted control surface for:

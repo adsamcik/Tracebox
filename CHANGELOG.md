@@ -5,6 +5,11 @@ once its public API stabilizes.
 
 ## Unreleased
 
+### Added
+
+- Added independently gated, low-volume `performanceEvent` observations for bounded host-owned
+  battery, wakeup, startup, and memory facts without enabling a metrics/traces subsystem.
+
 ### Changed
 
 - Closed the downstream Tracker integration checklist with strict consumer-build and representative

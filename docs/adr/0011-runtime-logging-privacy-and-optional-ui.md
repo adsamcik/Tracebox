@@ -26,6 +26,8 @@ Tracebox provides:
   exception capture without messages;
 - synchronous, suspending, and manual performance measurements on the same
   logger, independently runtime-gated and optionally duration-filtered;
+- low-volume instantaneous performance events for bounded host-owned observations,
+  independently runtime-gated but not duration-filtered;
 - one persisted `TraceboxPolicy` for log level, Logcat, performance, and capture
   sources; and
 - a separately declared `tracebox-ui-compose` artifact containing reusable
@@ -48,6 +50,8 @@ base managed diagnostics, opt into native capture, and opt into Compose UI
 independently. Template construction and each value classification are visible
 at call sites, and release lint fails if a template is computed from runtime data.
 
-This performance API records bounded diagnostic timings; it does not authorize
-the Phase 6 metrics/traces scope. ADR-0012 separately authorizes a host-owned,
-post-approval uploader contract without adding transport to Tracebox.
+This performance API records bounded diagnostic timings and explicit low-volume
+host observations. Tracebox does not schedule sampling, aggregate measurements,
+or create a time-series store, so this does not authorize the Phase 6
+metrics/traces scope. ADR-0012 separately authorizes a host-owned, post-approval
+uploader contract without adding transport to Tracebox.
