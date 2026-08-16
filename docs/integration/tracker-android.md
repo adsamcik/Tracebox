@@ -2,7 +2,7 @@
 
 ## Status
 
-Tracker is the reference personal-project host for `0.1.0-alpha.5`. The normal
+Tracker is the reference personal-project host for `0.1.0-alpha.6`. The normal
 `dev/v10` application is hard-migrated: Tracebox is the only production logging
 and crash-diagnostics backend, with no flavor gate or legacy compatibility
 writer.
@@ -15,9 +15,9 @@ emulator. Physical-device, OEM, battery, and broad API matrices are optional.
 Tracker declares the pieces it actually uses:
 
 ```kotlin
-implementation("io.github.tracebox:tracebox:0.1.0-alpha.5")
-implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.5")
-implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.5")
+implementation("io.github.tracebox:tracebox:0.1.0-alpha.6")
+implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.6")
+implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.6")
 ```
 
 `tracebox` does not transitively depend on `tracebox-native`. Apps that need
@@ -227,10 +227,17 @@ screen and package pipeline do not change.
 ## Tracker integration baseline
 
 Tracker `dev/v10` commit `63c0be268e0b1cbfb140c66cc079e56a39eabff6`
-consumes the immutable `0.1.0-alpha.5` coordinates above with strict dependency
+provides the immutable `0.1.0-alpha.5` integration baseline with strict dependency
 verification. Its host compile, hard-migration architecture tests, bootstrap and
 handler-isolation tests, tracking resilience tests, complete repository quality
 gates, and release validation pass against that package.
+
+The alpha.6 API delta is additionally validated through an isolated ten-module candidate consumed
+by Tracker's ARM64-only integration branch. Focused host tests cover startup clocks,
+lifecycle-bound battery/power and memory observations, source-timer wakeup counters, static
+templates, classified arguments, policy gating, unsupported properties, and sampling failures.
+Tracker's production catalog moves to alpha.6 only after the immutable package is published and
+strict verification metadata is updated.
 
 The post-release Tracker consumer smoke also passes on the representative API 36
 `x86_64`/4 KiB emulator. It confirms cold application startup, a separately live

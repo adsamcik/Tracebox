@@ -5,6 +5,8 @@ once its public API stabilizes.
 
 ## Unreleased
 
+## [0.1.0-alpha.6] - 2026-08-16
+
 ### Added
 
 - Added independently gated, low-volume `performanceEvent` observations for bounded host-owned

@@ -28,9 +28,9 @@ separate AARs so consumers can keep optional surfaces out of their package.
 Tracker's normal integration uses:
 
 ```kotlin
-implementation("io.github.tracebox:tracebox:0.1.0-alpha.5")
-implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.5")
-implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.5")
+implementation("io.github.tracebox:tracebox:0.1.0-alpha.6")
+implementation("io.github.tracebox:tracebox-native:0.1.0-alpha.6")
+implementation("io.github.tracebox:tracebox-ui-compose:0.1.0-alpha.6")
 ```
 
 Configure the authenticated GitHub Packages repository as described in the
