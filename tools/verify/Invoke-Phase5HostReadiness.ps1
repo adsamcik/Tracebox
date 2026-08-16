@@ -1,5 +1,6 @@
 param(
     [switch] $RunBlockedEgress,
+    [switch] $PrimeDependencies,
     [string] $Output
 )
 
@@ -9,6 +10,37 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $androidSdkRoot = Get-TraceboxAndroidSdkRoot -RepositoryRoot $root
 $gradle = Join-Path $root 'gradlew.bat'
+$androidContractTasks = @(
+    ':android:tracebox-anr-exit:testDebugUnitTest',
+    ':android:tracebox-native:testDebugUnitTest',
+    ':android:tracebox-api:testDebugUnitTest',
+    ':android:tracebox-lint:test',
+    ':android:tracebox-core:testDebugUnitTest',
+    ':android:tracebox-storage:testDebugUnitTest',
+    ':android:tracebox-directboot:testDebugUnitTest',
+    ':android:tracebox-export:testDebugUnitTest',
+    ':android:tracebox-export-ui:testDebugUnitTest',
+    ':android:tracebox-ui-compose:testDebugUnitTest',
+    ':android:tracebox:testDebugUnitTest',
+    ':test-apps:phase0-fixture:testNoInternetDebugUnitTest',
+    ':test-apps:phase0-fixture:testHostNetworkDebugUnitTest',
+    'verifyNoNetworkBoundary'
+)
+$androidReleaseLintTasks = @(
+    ':android:tracebox-anr-exit:lintRelease',
+    ':android:tracebox-native:lintRelease',
+    ':android:tracebox-api:lintRelease',
+    ':android:tracebox-core:lintRelease',
+    ':android:tracebox-storage:lintRelease',
+    ':android:tracebox-export:lintRelease',
+    ':android:tracebox-export-ui:lintRelease',
+    ':android:tracebox-ui-compose:lintRelease',
+    ':android:tracebox-directboot:lintRelease',
+    ':android:tracebox:lintRelease',
+    ':test-apps:phase0-fixture:lintNoInternetRelease',
+    ':test-apps:phase0-fixture:lintHostNetworkRelease',
+    ':benchmarks:phase0-benchmark:lintRelease'
+)
 $started = (Get-Date).ToUniversalTime()
 $checks = [Collections.Generic.List[object]]::new()
 $script:hostGateFailed = $false
@@ -86,6 +118,26 @@ function Get-WindowsVcVars64 {
     return (Resolve-Path -LiteralPath $vcvars).Path
 }
 
+if ($PrimeDependencies) {
+    Write-Host '[tracebox-host] Priming locked dependencies before offline readiness checks'
+    Push-Location $root
+    try {
+        & cargo fetch --locked
+        Assert-LastExitCode 'cargo fetch'
+        & $gradle `
+            -p tooling/tracebox-gradle-plugin `
+            test `
+            --no-daemon
+        Assert-LastExitCode 'Gradle plugin dependency prime'
+        & $gradle @androidContractTasks @androidReleaseLintTasks `
+            --no-daemon `
+            --dependency-verification strict
+        Assert-LastExitCode 'Android dependency prime'
+    } finally {
+        Pop-Location
+    }
+}
+
 Invoke-HostCheck 'foundation_contracts' {
     & (Join-Path $PSScriptRoot 'Verify-FoundationSpecs.ps1')
 }
@@ -161,45 +213,14 @@ try {
         }
     }
     Invoke-HostCheck 'android_jvm_and_fixture_contracts' {
-        $tasks = @(
-            ':android:tracebox-anr-exit:testDebugUnitTest',
-            ':android:tracebox-native:testDebugUnitTest',
-            ':android:tracebox-api:testDebugUnitTest',
-            ':android:tracebox-lint:test',
-            ':android:tracebox-core:testDebugUnitTest',
-            ':android:tracebox-storage:testDebugUnitTest',
-            ':android:tracebox-directboot:testDebugUnitTest',
-            ':android:tracebox-export:testDebugUnitTest',
-            ':android:tracebox-export-ui:testDebugUnitTest',
-            ':android:tracebox-ui-compose:testDebugUnitTest',
-            ':android:tracebox:testDebugUnitTest',
-            ':test-apps:phase0-fixture:testNoInternetDebugUnitTest',
-            ':test-apps:phase0-fixture:testHostNetworkDebugUnitTest',
-            'verifyNoNetworkBoundary'
-        )
-        & $gradle @tasks `
+        & $gradle @androidContractTasks `
             --offline `
             --no-daemon `
             --dependency-verification strict
         Assert-LastExitCode 'Android JVM and fixture contract checks'
     }
     Invoke-HostCheck 'android_release_lint' {
-        $lintTasks = @(
-            ':android:tracebox-anr-exit:lintRelease',
-            ':android:tracebox-native:lintRelease',
-            ':android:tracebox-api:lintRelease',
-            ':android:tracebox-core:lintRelease',
-            ':android:tracebox-storage:lintRelease',
-            ':android:tracebox-export:lintRelease',
-            ':android:tracebox-export-ui:lintRelease',
-            ':android:tracebox-ui-compose:lintRelease',
-            ':android:tracebox-directboot:lintRelease',
-            ':android:tracebox:lintRelease',
-            ':test-apps:phase0-fixture:lintNoInternetRelease',
-            ':test-apps:phase0-fixture:lintHostNetworkRelease',
-            ':benchmarks:phase0-benchmark:lintRelease'
-        )
-        & $gradle @lintTasks `
+        & $gradle @androidReleaseLintTasks `
             --offline `
             --no-daemon `
             --dependency-verification strict

@@ -43,6 +43,7 @@ jobs:
         shell: pwsh
         run: >-
           tools\verify\Invoke-Phase5HostReadiness.ps1
+          -PrimeDependencies
           -Output build\reports\host-readiness.json
       - name: Ensure dependency integrity files are committed
         shell: pwsh
