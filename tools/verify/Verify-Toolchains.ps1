@@ -59,9 +59,9 @@ Assert-FileContains 'rust-toolchain.toml' @(
 )
 
 Assert-FileContains '.github\workflows\ci.yml' @(
-    '(?m)^\s*host-readiness:',
     '(?m)^\s*release-readiness:',
-    'Invoke-Phase5HostReadiness\.ps1',
+    'Verify-Toolchains\.ps1',
+    'classify_changes\.py',
     'required release readiness',
     'ubuntu-24\.04',
     'verifyReleaseMetadata check createReleaseChecksums',
@@ -77,20 +77,11 @@ Assert-FileContains '.github\workflows\ci.yml' @(
     'i686-linux-android',
     'x86_64-linux-android'
 ) @('tools\\ci\\presubmit\.ps1')
-Assert-FileContains '.github\workflows\native-qualification.yml' @(
-    '(?m)^\s*workflow_dispatch:',
-    '(?m)^\s*schedule:',
-    'timeout-minutes:\s*90',
-    'tools\\ci\\presubmit\.ps1',
-    'identityCaptureTest',
-    'verifyFixtureRustPanicProbeIsolation'
-)
-Assert-FileContains '.github\workflows\emulator-qualification.yml' @(
-    '(?m)^\s*workflow_dispatch:',
-    'timeout-minutes:\s*90',
-    'self-hosted',
-    'Invoke-PersonalReleaseEmulator\.ps1'
-) @('(?m)^\s*schedule:')
+foreach ($workflow in Get-ChildItem '.github/workflows' -Filter '*.yml') {
+    if ((Get-Content $workflow.FullName -Raw) -match '(?im)^\s*runs-on:.*windows') {
+        throw "Windows CI runner is not part of the supported release gate: $($workflow.Name)"
+    }
+}
 Assert-FileContains '.gitignore' @(
     '!android/tracebox-native/src/main/jniLibs/\*/libtracebox_crashpad\.so'
 )

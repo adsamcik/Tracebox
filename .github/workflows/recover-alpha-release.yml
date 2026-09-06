@@ -18,6 +18,10 @@ jobs:
   finalize:
     name: verify package and finalize draft
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      GRADLE_OPTS: -Dorg.gradle.workers.max=2
+      CARGO_BUILD_JOBS: "2"
     environment:
       name: github-packages-alpha
     permissions:

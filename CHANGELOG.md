@@ -24,6 +24,10 @@ once its public API stabilizes.
 
 ### Build and validation
 
+- Consolidated CI into one Linux release-readiness job, removed all Windows and scheduled native
+  jobs, skipped compilation for documentation-only changes, and bounded build concurrency.
+- Corrected the AGP toolchain lock and reviewed its metadata-only native provenance refresh;
+  all four native prebuilt byte counts and hashes remain unchanged.
 - Aligned AGP/lint with 9.3.2/32.3.2 for coordinated source consumers and verified AAPT2 artifacts
   for Windows and Linux.
 - Passed the full local Tracebox check and Stream Ferry debug/release builds, lint, and app/UI

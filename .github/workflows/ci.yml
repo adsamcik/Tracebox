@@ -12,63 +12,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  host-readiness:
-    name: required host readiness
-    runs-on: windows-2025
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set up JDK 21
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        with:
-          distribution: temurin
-          java-version: "21"
-      - name: Set up Gradle and validate wrapper
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-      - name: Install pinned Rust
-        shell: pwsh
-        run: |
-          rustup toolchain install 1.93.1 --profile minimal --component clippy,rustfmt
-          rustup override set 1.93.1
-      - name: Install pinned Android tools
-        shell: pwsh
-        run: |
-          & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "platforms;android-37.0" "build-tools;37.0.0" "ndk;28.2.13676358" "cmake;4.1.2"
-      - name: Run complete bounded host readiness
-        shell: pwsh
-        run: >-
-          tools\verify\Invoke-Phase5HostReadiness.ps1
-          -PrimeDependencies
-          -Output build\reports\host-readiness.json
-      - name: Ensure dependency integrity files are committed
-        shell: pwsh
-        run: |
-          if (-not (Test-Path gradle/verification-metadata.xml)) { throw "Missing dependency verification metadata" }
-          if (-not (Get-ChildItem -Recurse -Filter gradle.lockfile | Select-Object -First 1)) { throw "Missing dependency lockfiles" }
-          if (git status --porcelain) { throw "Verification changed tracked files" }
-
   release-readiness:
     name: required release readiness
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 40
     permissions:
       contents: read
+    env:
+      GRADLE_OPTS: -Dorg.gradle.workers.max=2
+      CARGO_BUILD_JOBS: "2"
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Classify changed files
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tools/ci -p 'test_*.py'
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            echo 'build=true' >> "$GITHUB_OUTPUT"
+          else
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            git diff --name-only -z "$BASE_SHA" HEAD | python tools/ci/classify_changes.py >> "$GITHUB_OUTPUT"
+          fi
+      - name: Documentation-only change
+        if: steps.changes.outputs.build == 'false'
+        run: echo 'No build inputs changed; compilation and SDK setup skipped.'
       - name: Set up JDK 21
+        if: steps.changes.outputs.build == 'true'
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: "21"
       - name: Install pinned Rust Android targets
+        if: steps.changes.outputs.build == 'true'
         shell: bash
         run: |
           rustup toolchain install 1.93.1 --profile minimal --component clippy,rustfmt
@@ -79,14 +61,48 @@ jobs:
           cargo --version
           cargo fetch --locked
       - name: Install Android SDK platform
+        if: steps.changes.outputs.build == 'true'
         shell: bash
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-37.0" "build-tools;37.0.0" \
             "ndk;28.2.13676358" "cmake;4.1.2"
       - name: Set up Gradle and validate wrapper
+        if: steps.changes.outputs.build == 'true'
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - name: Verify source and toolchain contracts
+        if: steps.changes.outputs.build == 'true'
+        shell: pwsh
+        run: |
+          tools/verify/Verify-FoundationSpecs.ps1
+          tools/verify/Verify-Toolchains.ps1
+          tools/verify/Verify-GeneratedArtifacts.ps1
+          tools/verify/Verify-PersonalReleaseLab.ps1
+          tools/verify/Verify-NoNetworkStatic.ps1
+      - name: Test schema compiler, Rust, and native host code
+        if: steps.changes.outputs.build == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tooling/schema-compiler/tests -p 'test_*.py'
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+          cargo test --workspace --locked --offline
+          cmake_root="$ANDROID_HOME/cmake/4.1.2/bin"
+          "$cmake_root/cmake" -S native -B build/native-host -G Ninja \
+            -DCMAKE_MAKE_PROGRAM="$cmake_root/ninja" -DCMAKE_BUILD_TYPE=Release
+          "$cmake_root/cmake" --build build/native-host --parallel 2
+          "$cmake_root/ctest" --test-dir build/native-host --output-on-failure
+      - name: Verify malicious diagnostic corpora
+        if: steps.changes.outputs.build == 'true'
+        shell: pwsh
+        run: tools/verify/Verify-MaliciousCorpora.ps1
+      - name: Test Gradle integration tooling
+        if: steps.changes.outputs.build == 'true'
+        shell: bash
+        run: ./gradlew --no-daemon --dependency-verification=strict -p tooling/tracebox-gradle-plugin test
       - name: Verify exact Linux release contents
+        if: steps.changes.outputs.build == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -98,6 +114,7 @@ jobs:
             -PtraceboxVersion="$version" \
             verifyReleaseMetadata check createReleaseChecksums
       - name: Ensure release verification leaves source unchanged
+        if: steps.changes.outputs.build == 'true'
         shell: bash
         run: |
           test -z "$(git status --porcelain)"

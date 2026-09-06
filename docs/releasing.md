@@ -19,8 +19,7 @@ verified release build before a draft can be published.
 The four qualified Crashpad ABI libraries are versioned release inputs. Their byte counts and
 SHA-256 values, plus a deterministic digest of every first-party native build input, are recorded
 in `android/tracebox-native/crashpad-prebuilt-lock.properties`. A clean checkout verifies that lock
-before packaging. The bounded manual/scheduled native qualification lane is the only routine that
-rebuilds these libraries; any resulting byte or input change requires an explicit lock review and
+before packaging. Explicit local native qualification is the only routine that rebuilds these libraries; any resulting byte or input change requires an explicit lock review and
 its own commit before a release candidate can pass.
 
 ## One-time repository setup
@@ -33,9 +32,10 @@ Before the first tag, a repository administrator must:
    `packages: write` permissions required by the protected release environment.
 4. Create the `github-packages-alpha` environment and require an appropriate
    maintainer review; restrict it to protected alpha tags.
-5. Protect `main` and require both `CI / required host readiness` and
-   `CI / required release readiness`. The latter builds the exact release task set on the same
-   Ubuntu runner family used for publication, before any immutable tag is created.
+5. Protect `main` and require `CI / required release readiness`. This single Linux job checks
+   source integrity, toolchains, schema/Rust/native-host contracts, Gradle integration, and the exact
+   Android release task set before tagging. Remove any obsolete `required host readiness` status
+   requirement. Documentation-only changes skip compilation while the required job still completes.
 6. Create an active repository ruleset for `v*-alpha.*` that explicitly restricts
    tag creation, updates, and deletion. Keep any bypass list narrowly limited to
    authorized release maintainers.
@@ -53,7 +53,7 @@ authenticated classic PAT with `read:packages`.
 
 1. Ensure the final commit is merged to `main` and CI is green.
 2. Confirm `CHANGELOG.md` and dependency notices accurately describe the release.
-3. Confirm the required host-readiness and release-readiness jobs both passed on the exact commit.
+3. Confirm the required Linux release-readiness job passed on the exact commit.
    Release readiness consumes only the four reviewed, hash-locked native inputs committed at that
    SHA; it does not silently substitute a workstation build.
 4. Create and verify an annotated tag:

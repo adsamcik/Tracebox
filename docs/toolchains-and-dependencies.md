@@ -4,8 +4,8 @@ Normative machine-readable pins are in `gradle/toolchains.lock.toml`, `gradle/ve
 
 | Component | Pin | Provenance | License | Rationale |
 |---|---|---|---|---|
-| Gradle | 9.6.1 | services.gradle.org, distribution SHA-256 locked | Apache-2.0 | Tracker-aligned wrapper for AGP 9.3.1 |
-| AGP | 9.3.1 | Google Maven | Apache-2.0 | Tracker-aligned API 37 toolchain |
+| Gradle | 9.6.1 | services.gradle.org, distribution SHA-256 locked | Apache-2.0 | Tracker-aligned wrapper for AGP 9.3.2 |
+| AGP | 9.3.2 | Google Maven | Apache-2.0 | Tracker-aligned API 37 toolchain |
 | Kotlin | 2.4.10 | Maven Central | Apache-2.0 | Tracker-aligned Kotlin and Compose compiler plugin |
 | Coroutines | 1.11.0 | Maven Central | Apache-2.0 | Tracker-aligned public `StateFlow` and coroutine handler ABI |
 | Robolectric | 4.16.1 | Maven Central | MIT | Bounded host-side Compose UI and Android lifecycle verification |
@@ -29,7 +29,13 @@ no-network scans. Runtime-affecting updates rerun the representative emulator
 smoke. Crashpad updates additionally require a clean patch rebase; the
 historical full feasibility/matrix campaign is optional diagnostics.
 
-Every push and pull request must pass `.github/workflows/ci.yml`'s bounded full host-readiness
-job. Android cross-native/Crashpad qualification runs only in the scheduled or manually dispatched
-`native-qualification.yml` job. The rootable representative emulator is intentionally isolated in
-the manually dispatched, 90-minute `emulator-qualification.yml` job.
+Every push and pull request reports one required Linux release-readiness job. Build changes run
+source/toolchain integrity, schema, Rust, native host, Gradle tooling, and Android release checks.
+Ordinary documentation-only changes skip SDK/toolchain setup and compilation. Unknown paths and
+integrity inputs always run the full check; the required status is never omitted by a workflow
+path filter. Gradle, Cargo, and native builds use at most two workers, obsolete CI runs cancel,
+and jobs time out after 40 minutes. Gradle caching remains enabled.
+
+No Windows, scheduled native rebuild, or self-hosted emulator CI jobs remain. Cross-native/Crashpad
+rebuilds and rootable-emulator qualification remain explicit local procedures. Publication rebuilds
+the immutable tag and verifies all ten package endpoints and checksums before exposing the release.

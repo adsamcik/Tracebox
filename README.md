@@ -59,8 +59,9 @@ disposal wipes its owned bytes and removes Tracebox-owned staging.
 ## Development
 
 The build uses JDK 21, targets Java 17 bytecode, compiles against Android SDK 37, and supports API
-23 and newer. The native build is pinned through the repository toolchain manifests. On Windows,
-run the same bounded host-readiness contract required by CI with:
+23 and newer. The native build is pinned through the repository toolchain manifests. CI uses one
+Linux release-readiness job; ordinary documentation-only changes skip compilation and SDK setup.
+For optional local Windows development checks, run:
 
 ```powershell
 tools\verify\Invoke-Phase5HostReadiness.ps1
@@ -74,8 +75,8 @@ tools\ci\presubmit.ps1
 tools\verify\Verify-Phase5NoNetworkStatic.ps1 -SkipBuild
 ```
 
-The representative rootable emulator suite is a bounded manual qualification job rather than a
-pull-request prerequisite.
+Native rebuilds and representative rootable-emulator qualification run manually with the local
+scripts. No Windows runner, scheduled native rebuild, or self-hosted emulator job runs in CI.
 
 See [toolchain policy](docs/toolchains-and-dependencies.md), [release instructions](docs/releasing.md),
 [contributing](CONTRIBUTING.md), and [security reporting](SECURITY.md).

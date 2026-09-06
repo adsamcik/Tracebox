@@ -6,7 +6,7 @@ $hostControlRoot = (
 ).Path
 $hostControlManifest = Join-Path $hostControlRoot 'AndroidManifest.xml'
 $manifests = Get-ChildItem $root -Recurse -File -Filter AndroidManifest.xml |
-    Where-Object { $_.FullName -notmatch '\\build\\|\\third_party\\crashpad\\checkout\\' }
+    Where-Object { $_.FullName -notmatch '[/\\]build[/\\]|[/\\]third_party[/\\]crashpad[/\\]checkout[/\\]' }
 foreach ($manifest in $manifests) {
     $text = Get-Content $manifest.FullName -Raw
     $isHostControl = $manifest.FullName.Equals(
@@ -28,7 +28,7 @@ $sourceFiles = Get-ChildItem @(
     (Join-Path $root 'native'),
     (Join-Path $root 'rust')
 ) -Recurse -File | Where-Object {
-    $_.FullName -notmatch '\\build\\|\\target\\' -and
+    $_.FullName -notmatch '[/\\]build[/\\]|[/\\]target[/\\]' -and
     -not $_.FullName.StartsWith(
         $hostControlRoot + [IO.Path]::DirectorySeparatorChar,
         [StringComparison]::OrdinalIgnoreCase
