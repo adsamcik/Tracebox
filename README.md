@@ -38,6 +38,15 @@ Configure the authenticated GitHub Packages repository as described in the
 
 ## Privacy boundary
 
+Hosts can browse existing ordinary evidence with `handle.recentDiagnostics(DiagnosticHistoryQuery(...))`
+on an IO dispatcher. The query caps results at 2,000 records, supports event-type and earliest-observation
+filters, and returns an explicit unavailable result when storage cannot be read. Reads use the current
+policy epoch and storage deletion fence, include queued writes from this process, and never expose raw
+crash artifacts or private storage identities. Observation time is the segment's durable timestamp,
+not an exact per-event wall clock. Local browsing does not approve sharing; use the package workflow
+for save/share. Event-type filtering occurs before bounded selection, so busy logs do not displace
+crash-only query results.
+
 Tracebox must not receive credentials, precise location, free-form tracked content, URLs, or paths.
 Log templates are bounded, compile-time-constant `LogTemplate` values; runtime values are accepted
 only as privacy-classified `LogArgument`s. The API types and embedded lint check enforce that

@@ -649,6 +649,33 @@ internal class DefaultTraceboxHandle(
 
     override val packages: DiagnosticPackages = packageSurface
 
+    override fun recentDiagnostics(query: dev.tracebox.api.DiagnosticHistoryQuery): dev.tracebox.api.DiagnosticHistory {
+        if (!coordinatesGlobalStorage || isMainThread() || closed.get()) {
+            return dev.tracebox.api.DiagnosticHistory.Unavailable
+        }
+        return call {
+            synchronized(profileLock) {
+                val policy = controlPage?.committed()
+                val quota = uidQuota
+                if (policy == null || quota == null || policy.disabled || closed.get()) {
+                    return@synchronized dev.tracebox.api.DiagnosticHistory.Unavailable
+                }
+                try {
+                    when (val guarded = quota.mutateStorageIfEligible(captureStorageEligibility(policy.epoch)) {
+                        dev.tracebox.api.DiagnosticHistory.Available(readRecentDiagnostics(root, policy.epoch, query))
+                    }) {
+                        is StorageMutationBarrierResult.Applied -> guarded.value
+                        StorageMutationBarrierResult.Rejected -> dev.tracebox.api.DiagnosticHistory.Unavailable
+                    }
+                } catch (_: IOException) {
+                    dev.tracebox.api.DiagnosticHistory.Unavailable
+                } catch (_: RuntimeException) {
+                    dev.tracebox.api.DiagnosticHistory.Unavailable
+                }
+            }
+        } ?: dev.tracebox.api.DiagnosticHistory.Unavailable
+    }
+
     init {
         installVisibilityCallbacks()
         Thread.setDefaultUncaughtExceptionHandler(installedJvmHandler)

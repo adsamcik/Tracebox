@@ -232,7 +232,35 @@ interface TraceboxHandle : Closeable {
     val health: StateFlow<TraceboxHealth>
     val packages: DiagnosticPackages
 
+    /**
+     * Bounded local browsing of ordinary, already privacy-transformed evidence, oldest first.
+     * Call off the main thread. Raw crash artifacts and private storage identities are never exposed.
+     * A read drains earlier queued writes but does not prepare or approve an export. Hosts must use
+     * [packages] for sharing. Disabled, closed, or unavailable storage returns [DiagnosticHistory.Unavailable].
+     */
+    fun recentDiagnostics(query: DiagnosticHistoryQuery = DiagnosticHistoryQuery()): DiagnosticHistory =
+        DiagnosticHistory.Unavailable
+
     fun updateProfile(profile: DiagnosticsProfile): PolicyUpdateResult
     fun updatePolicy(policy: TraceboxPolicy): PolicyUpdateResult
     fun delete(request: DeleteRequest): DeleteReport
+}
+
+data class DiagnosticHistoryQuery(
+    val limit: Int = 1_000,
+    val sinceMillis: Long = 0L,
+    val eventIds: Set<GeneratedEventId> = GeneratedEventId.entries.toSet(),
+) {
+    init {
+        require(limit in 1..2_000)
+        require(sinceMillis >= 0L)
+    }
+}
+
+/** Time is the durable segment observation time, not an exact event wall-clock timestamp. */
+data class DiagnosticHistoryEntry(val observedAtMillis: Long, val record: GeneratedRecord)
+
+sealed interface DiagnosticHistory {
+    data class Available(val entries: List<DiagnosticHistoryEntry>) : DiagnosticHistory
+    data object Unavailable : DiagnosticHistory
 }

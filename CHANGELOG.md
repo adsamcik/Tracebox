@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add bounded, policy-fenced local diagnostic history queries for host event/crash browsers.
+- Filter requested event types before snapshot selection; retain the existing reviewed package and
+  raw-artifact privacy boundaries. Validated with managed runtime and export unit suites.
+
 All notable changes are documented here. Tracebox follows Semantic Versioning
 once its public API stabilizes.
 

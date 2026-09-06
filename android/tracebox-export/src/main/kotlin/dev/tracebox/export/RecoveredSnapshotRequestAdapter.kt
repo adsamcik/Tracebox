@@ -15,6 +15,7 @@ class RecoveredSnapshotRequestAdapter {
         policyEpoch: Long,
         sequenceCutoff: Long,
         segmentPaths: Collection<Path>,
+        eventIds: Set<GeneratedEventId> = GeneratedEventId.entries.toSet(),
     ): StandardSnapshotRequest {
         require(policyEpoch >= 0 && sequenceCutoff >= 0)
         val recent = BoundedRecentStandardRecordSelection()
@@ -39,6 +40,7 @@ class RecoveredSnapshotRequestAdapter {
                                 failure.message,
                         )
                     }
+                    if (generated.eventId !in eventIds) return@forEach
                     recent.offer(
                         processIdentity,
                         segmentIdentity,
