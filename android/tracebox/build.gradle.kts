@@ -5,6 +5,9 @@ plugins {
 
 android {
     namespace = "dev.tracebox"
+    defaultConfig {
+        consumerProguardFiles("consumer-rules.pro")
+    }
     publishing {
         singleVariant("release") {
             withSourcesJar()

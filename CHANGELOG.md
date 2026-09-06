@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Package narrowly scoped consumer rules for minified apps that omit optional native capture.
 - Retain bounded cause and suppressed-exception structure without messages or source paths.
 - Record historical Android exit PSS/RSS and timestamp observations using static numeric logging.
 - Align AGP/lint with 9.3.2/32.3.2 for coordinated source consumers; verify AAPT2 on Windows/Linux.
