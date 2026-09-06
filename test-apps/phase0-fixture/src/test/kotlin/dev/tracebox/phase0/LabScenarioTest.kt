@@ -277,13 +277,17 @@ class LabScenarioTest {
     }
 
     @Test
-    fun native_and_emulator_qualification_verify_fixture_rust_panic_probe_isolation() {
+    fun linux_ci_and_local_emulator_verify_fixture_rust_panic_probe_isolation() {
         val root = repositoryRoot()
         val isolationTask = ":test-apps:phase0-fixture:verifyFixtureRustPanicProbeIsolation"
-        val nativeQualification = Files.readString(
-            root.resolve(".github/workflows/native-qualification.yml"),
+        val ci = Files.readString(
+            root.resolve(".github/workflows/ci.yml"),
         )
-        assertTrue(nativeQualification.contains(isolationTask))
+        assertTrue(ci.contains("verifyReleaseMetadata check createReleaseChecksums"))
+        val fixtureBuild = Files.readString(root.resolve("test-apps/phase0-fixture/build.gradle.kts"))
+        val fixtureChecks = fixtureBuild.substringAfter("tasks.named(\"check\").configure {")
+            .substringBefore("}")
+        assertTrue(fixtureChecks.contains("dependsOn(verifyFixtureRustPanicProbeIsolation)"))
 
         val emulator = Files.readString(
             root.resolve("tools/verify/Invoke-PersonalReleaseEmulator.ps1"),
