@@ -7,8 +7,8 @@ sha256 = "9c0f7faeeb306cb14e4279a3e084ca6b596894089a0638e68a07c945a32c9e14"
 license = "Apache-2.0"
 
 [agp]
-version = "9.3.1"
-provenance = "https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/9.3.1/"
+version = "9.3.2"
+provenance = "https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/9.3.2/"
 license = "Apache-2.0"
 
 [kotlin]
