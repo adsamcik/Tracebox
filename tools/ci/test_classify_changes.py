@@ -11,7 +11,8 @@ class ChangeClassificationTest(unittest.TestCase):
 
     def test_unknown_and_integrity_inputs_build(self):
         for path in [".github/workflows/ci.yml", "gradle/toolchains.lock.toml", "Cargo.lock",
-                     "specs/schema.md", "docs/traceability/work-packages.csv", "new-file"]:
+                     "specs/schema.md", "docs/traceability/work-packages.csv",
+                     "docs/generated/schema-reference.md", "docs/adr/0007-open-decision-closure.md", "new-file"]:
             self.assertTrue(needs_build([path]), path)
 
     def test_empty_change_list_fails_closed(self):

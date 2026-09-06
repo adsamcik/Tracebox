@@ -8,7 +8,10 @@ def needs_build(paths):
         "SECURITY.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md",
     }
     return not paths or any(
-        path not in documentation and not (path.startswith("docs/") and path.endswith(".md"))
+        path not in documentation and not (
+            path.startswith("docs/") and path.endswith(".md")
+            and not path.startswith(("docs/generated/", "docs/adr/"))
+        )
         for path in paths
     )
 
