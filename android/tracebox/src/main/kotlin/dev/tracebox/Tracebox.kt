@@ -3632,18 +3632,12 @@ internal class DefaultTraceboxHandle(
             return
         }
         val firstCause = captured.causes.firstOrNull()
-        val stack = truncateUtf8(
-            firstCause?.frames.orEmpty().joinToString("\n") { frame ->
-                "${frame.declaringClass}.${frame.method}:${frame.line}"
-            },
-            2_048,
-        )
+        val structure = fatalExceptionStructure(captured.causes)
+        val stack = structure.stack
         val exceptionRecord = GeneratedExceptionRecord(
             kind = 1u,
             exception_type = truncateUtf8(firstCause?.type ?: "java.lang.Throwable", 256),
-            frame_count = firstCause?.frames.orEmpty().size
-                .coerceAtMost(UShort.MAX_VALUE.toInt())
-                .toUShort(),
+            frame_count = structure.frameCount.toUShort(),
             stack_fingerprint = fingerprint64("${firstCause?.type}\n$stack").toULong(),
             stack_trace = stack,
             monotonic_time_ns = android.os.SystemClock.elapsedRealtimeNanos().toULong(),
@@ -3743,6 +3737,9 @@ internal class DefaultTraceboxHandle(
         val adapter = ApplicationExitInfoAdapter()
         val history = adapter.exitHistory(applicationContext, EXIT_HISTORY_LIMIT)
             .associateBy { ExitSourceKey.derive(it) }
+        // Bounded startup observation preserves memory-pressure evidence without exporting OS
+        // descriptions, process names, PIDs, or assigning historical exits to the current build.
+        history.values.forEach { logExitResources(loggerSurface, it) }
 
         journal.pending().forEach { pending ->
             val recovered = reconcileExitRawArtifact(

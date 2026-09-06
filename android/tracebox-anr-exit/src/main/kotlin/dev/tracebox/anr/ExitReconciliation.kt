@@ -25,6 +25,8 @@ data class SyntheticApplicationExitInfo(
     val pid: Int,
     val processStateSummary: ByteArray?,
     val artifactKind: ExitArtifactKind,
+    val pssKilobytes: Long = 0L,
+    val rssKilobytes: Long = 0L,
 ) {
     init {
         require(packageName.isNotBlank() && packageName.toByteArray(StandardCharsets.UTF_8).size <= 256)

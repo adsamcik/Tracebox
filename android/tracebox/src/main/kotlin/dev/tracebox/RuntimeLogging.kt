@@ -238,19 +238,56 @@ internal class RuntimeCrashReporter(
 }
 
 internal fun exceptionRecord(throwable: Throwable, fatal: Boolean): GeneratedExceptionRecord {
-    val frames = throwable.stackTrace.take(MAX_EXCEPTION_FRAMES)
-    val stack = frames.joinToString("\n") { frame ->
-        "${frame.className}.${frame.methodName}:${frame.lineNumber}"
-    }
-    val boundedStack = truncateUtf8(stack, MAX_STACK_BYTES)
+    val structure = exceptionStructure(throwable)
+    val boundedStack = structure.stack
     return GeneratedExceptionRecord(
         kind = if (fatal) 1u else 0u,
         exception_type = truncateUtf8(throwable.javaClass.name, MAX_EXCEPTION_TYPE_BYTES),
-        frame_count = frames.size.toUShort(),
+        frame_count = structure.frameCount.toUShort(),
         stack_fingerprint = fingerprint64("${throwable.javaClass.name}\n$boundedStack").toULong(),
         stack_trace = boundedStack,
         monotonic_time_ns = SystemClock.elapsedRealtimeNanos().toULong(),
     )
+}
+
+internal data class ExceptionStructure(val frameCount: Int, val stack: String)
+
+internal fun fatalExceptionStructure(causes: List<dev.tracebox.core.JvmCrashCause>): ExceptionStructure {
+    val bounded = causes.take(8)
+    val framesPerCause = MAX_EXCEPTION_FRAMES / bounded.size.coerceAtLeast(1)
+    var frameCount = 0
+    val stack = bounded.mapIndexed { index, cause ->
+        val frames = cause.frames.take(framesPerCause)
+        frameCount += frames.size
+        "${if (index == 0) "exception" else "cause"} ${cause.type}${if (cause.cycle) " [cycle]" else ""}\n" +
+            frames.joinToString("\n") { "${it.declaringClass}.${it.method}:${it.line}" }
+    }.joinToString("\n")
+    return ExceptionStructure(frameCount, truncateUtf8(stack, MAX_STACK_BYTES))
+}
+
+/** Retains bounded cause/suppressed structure without Throwable messages, paths, or thread names. */
+internal fun exceptionStructure(throwable: Throwable): ExceptionStructure {
+    val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+    val pending = java.util.ArrayDeque<Pair<String, Throwable>>()
+    val chain = mutableListOf<Pair<String, Throwable>>()
+    pending.addLast("exception" to throwable)
+    while (pending.isNotEmpty() && chain.size < 8) {
+        val item = pending.removeFirst()
+        if (!seen.add(item.second)) continue
+        chain += item
+        item.second.cause?.let { pending.addLast("cause" to it) }
+        item.second.suppressed.take(4).forEach { pending.addLast("suppressed" to it) }
+    }
+    val framesPerException = MAX_EXCEPTION_FRAMES / chain.size
+    var frameCount = 0
+    val stack = chain.joinToString("\n") { (relation, error) ->
+        val frames = error.stackTrace.take(framesPerException)
+        frameCount += frames.size
+        "$relation ${error.javaClass.name}\n" + frames.joinToString("\n") { frame ->
+            "${frame.className}.${frame.methodName}:${frame.lineNumber}"
+        }
+    }
+    return ExceptionStructure(frameCount, truncateUtf8(stack, MAX_STACK_BYTES))
 }
 
 internal fun truncateUtf8(value: String, maximumBytes: Int): String {

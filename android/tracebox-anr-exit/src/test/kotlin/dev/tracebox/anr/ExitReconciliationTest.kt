@@ -106,6 +106,8 @@ class ExitReconciliationTest {
                 status = 7,
                 importance = 100,
                 pid = 42,
+                pssKilobytes = 1_024,
+                rssKilobytes = 2_048,
                 processStateSummary = byteArrayOf(1, 2),
                 artifactKind = ExitArtifactKind.ANR_TRACE,
             ),
@@ -113,6 +115,8 @@ class ExitReconciliationTest {
 
         assertEquals("dev.tracebox.fixture:worker", mapped?.processName)
         assertEquals(42, mapped?.pid)
+        assertEquals(1_024L, mapped?.pssKilobytes)
+        assertEquals(2_048L, mapped?.rssKilobytes)
         assertEquals(ExitArtifactKind.ANR_TRACE, mapped?.artifactKind)
     }
 

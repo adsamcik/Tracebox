@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Retain bounded cause and suppressed-exception structure without messages or source paths.
+- Record historical Android exit PSS/RSS and timestamp observations using static numeric logging.
+- Align AGP/lint with 9.3.2/32.3.2 for coordinated source consumers; verify AAPT2 on Windows/Linux.
 - Add bounded, policy-fenced local diagnostic history queries for host event/crash browsers.
 - Filter requested event types before snapshot selection; retain the existing reviewed package and
   raw-artifact privacy boundaries. Validated with managed runtime and export unit suites.

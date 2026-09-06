@@ -55,6 +55,8 @@ data class AndroidExitInfoFields(
     val pid: Int,
     val processStateSummary: ByteArray?,
     val artifactKind: ExitArtifactKind,
+    val pssKilobytes: Long = 0L,
+    val rssKilobytes: Long = 0L,
 )
 
 /** Converts documented Android values to the stable source-key input without assigning PID identity. */
@@ -72,6 +74,8 @@ object ApplicationExitInfoMapper {
             pid = fields.pid,
             processStateSummary = fields.processStateSummary?.copyOf(),
             artifactKind = fields.artifactKind,
+            pssKilobytes = fields.pssKilobytes.coerceAtLeast(0L),
+            rssKilobytes = fields.rssKilobytes.coerceAtLeast(0L),
         )
     }
 }
@@ -203,6 +207,8 @@ class ApplicationExitInfoAdapter {
                     status = exit.status,
                     importance = exit.importance,
                     pid = exit.pid,
+                    pssKilobytes = exit.pss,
+                    rssKilobytes = exit.rss,
                     processStateSummary = exit.processStateSummary,
                     artifactKind = if (exit.reason == ApplicationExitInfo.REASON_ANR) {
                         ExitArtifactKind.ANR_TRACE
