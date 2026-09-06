@@ -1,19 +1,34 @@
 # Changelog
 
-## Unreleased
-
-- Package narrowly scoped consumer rules for minified apps that omit optional native capture.
-- Retain bounded cause and suppressed-exception structure without messages or source paths.
-- Record historical Android exit PSS/RSS and timestamp observations using static numeric logging.
-- Align AGP/lint with 9.3.2/32.3.2 for coordinated source consumers; verify AAPT2 on Windows/Linux.
-- Add bounded, policy-fenced local diagnostic history queries for host event/crash browsers.
-- Filter requested event types before snapshot selection; retain the existing reviewed package and
-  raw-artifact privacy boundaries. Validated with managed runtime and export unit suites.
-
 All notable changes are documented here. Tracebox follows Semantic Versioning
 once its public API stabilizes.
 
 ## Unreleased
+
+## [0.1.0-alpha.8] - 2026-09-06
+
+### Added
+
+- Added bounded, policy-fenced local diagnostic history queries for host event and crash browsers.
+  Reads support event-type and observation-time filters, include queued writes, and exclude raw
+  crash artifacts and private storage identities. Sharing still requires package review.
+- Retained bounded fatal and handled exception cause structure, including handled suppressed
+  exceptions, without raw messages or source paths.
+- Recorded historical Android exit PSS/RSS and timestamp observations using static numeric logging.
+
+### Fixed
+
+- Filtered requested event types before bounded snapshot selection so busy logs cannot displace
+  crash-only query results.
+- Packaged narrowly scoped consumer rules for minified apps that omit optional native capture.
+
+### Build and validation
+
+- Aligned AGP/lint with 9.3.2/32.3.2 for coordinated source consumers and verified AAPT2 artifacts
+  for Windows and Linux.
+- Passed the full local Tracebox check and Stream Ferry debug/release builds, lint, and app/UI
+  tests. No new connected-device qualification was performed; native inputs and diagnostic
+  package schemas are unchanged.
 
 ## [0.1.0-alpha.7] - 2026-08-16
 
