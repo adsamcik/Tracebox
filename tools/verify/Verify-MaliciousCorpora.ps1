@@ -111,3 +111,7 @@ try {
         Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force
     }
 }
+
+# Rejection probes intentionally leave a nonzero native exit code. GitHub's pwsh
+# wrapper propagates LASTEXITCODE, so report the successful verifier outcome.
+exit 0
