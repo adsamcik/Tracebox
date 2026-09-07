@@ -241,6 +241,8 @@ pub fn take_panic_record_v1() -> Option<PanicRecordV1> {
 mod tests {
     use super::*;
 
+    static PANIC_RECORD_TESTS: Mutex<()> = Mutex::new(());
+
     #[test]
     fn exported_c_abi_boundary_contains_bridge_panic() {
         let result = tb_tracebox_panic_containment_probe_v1(PanicProbeV1 {
@@ -269,6 +271,9 @@ mod tests {
 
     #[test]
     fn structured_panic_bridge_accepts_only_bounded_metadata() {
+        let _test_guard = PANIC_RECORD_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = drain_panic_records_v1();
         assert_eq!(
             tb_tracebox_record_panic_v1(PanicRecordV1 {
@@ -301,6 +306,9 @@ mod tests {
 
     #[test]
     fn structured_panic_bridge_drops_immediately_when_the_ring_is_reentered() {
+        let _test_guard = PANIC_RECORD_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let guard = PANIC_RECORDS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
