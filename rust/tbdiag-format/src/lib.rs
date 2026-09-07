@@ -89,15 +89,25 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::PathBuf;
     use std::process::Command;
 
     #[test]
     fn canonical_cbor_encoder_matches_actual_kotlin_encoder_output_for_shared_fixture() {
-        let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(|path| path.parent())
-            .expect("workspace root")
+        let repository = std::env::current_dir()
+            .expect("current working directory")
+            .ancestors()
+            .find(|path| {
+                path.join("tooling/fixtures/canonical-cbor-single-map.fixture")
+                    .is_file()
+                    && path
+                        .join(if cfg!(windows) {
+                            "gradlew.bat"
+                        } else {
+                            "gradlew"
+                        })
+                        .is_file()
+            })
+            .expect("repository root containing the Gradle wrapper and shared fixture")
             .to_path_buf();
         let fixture_path = repository.join("tooling/fixtures/canonical-cbor-single-map.fixture");
         let fixture: BTreeMap<_, _> = fs::read_to_string(&fixture_path)
