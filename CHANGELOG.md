@@ -5,6 +5,13 @@ once its public API stabilizes.
 
 ## Unreleased
 
+### Changed
+
+- Updated the Gradle wrapper to 9.7.1 and Android Gradle Plugin to 9.4.0, with matching
+  toolchain locks, wrapper hashes, dependency locks, and verification metadata.
+- Updated the Compose BOM to 2026.08.00, `actions/setup-java` to 6.0.0, and
+  `gradle/actions/setup-gradle` to 6.3.0.
+
 ## [0.1.0-alpha.8] - 2026-09-06
 
 ### Added

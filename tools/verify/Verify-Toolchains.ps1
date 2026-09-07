@@ -170,7 +170,7 @@ if ($java -notmatch 'version "21(?:\.|\")') { throw "Unexpected Java: $java" }
 if ($rust -notmatch '^rustc 1\.93\.1 ') { throw "Unexpected Rust: $rust" }
 if ($cargo -notmatch '^cargo 1\.93\.1 ') { throw "Unexpected Cargo: $cargo" }
 if ($cmake -ne 'cmake version 4.1.2') { throw "Unexpected CMake: $cmake" }
-if ($wrapper -ne '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7') {
+if ($wrapper -ne '7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d') {
     throw 'Unexpected Gradle wrapper JAR'
 }
 

@@ -1,14 +1,14 @@
 format = 1
 
 [gradle]
-version = "9.6.1"
-url = "https://services.gradle.org/distributions/gradle-9.6.1-bin.zip"
-sha256 = "9c0f7faeeb306cb14e4279a3e084ca6b596894089a0638e68a07c945a32c9e14"
+version = "9.7.1"
+url = "https://services.gradle.org/distributions/gradle-9.7.1-bin.zip"
+sha256 = "acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a"
 license = "Apache-2.0"
 
 [agp]
-version = "9.3.2"
-provenance = "https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/9.3.2/"
+version = "9.4.0"
+provenance = "https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/9.4.0/"
 license = "Apache-2.0"
 
 [kotlin]
