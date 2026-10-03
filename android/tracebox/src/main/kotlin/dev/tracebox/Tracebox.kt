@@ -124,6 +124,7 @@ import dev.tracebox.storage.RawArtifactStore
 import dev.tracebox.storage.RoleQuotaLedger
 import dev.tracebox.storage.RoleQuotaPolicy
 import dev.tracebox.storage.RustPanicStartupIngestor
+import dev.tracebox.storage.SegmentException
 import dev.tracebox.storage.SegmentHeader
 import dev.tracebox.storage.SegmentWriter
 import dev.tracebox.storage.StorageDeletionDenyCommit
@@ -1146,10 +1147,11 @@ internal class DefaultTraceboxHandle(
         if (secondaryPolicySnapshot == confirmed) {
             if (confirmed.disabled) return
             if (
-                drainRustPanicRingIfHealthy(
+                maintainSecondaryCaptureIfHealthy(
+                    configuration.nativeCaptureEnabled,
+                    writer != null,
                     nativeClientMode == NativeRuntime.CLIENT_MODE_EMERGENCY_RUST &&
-                        nativePolicyParticipantAlive() &&
-                        writer != null,
+                        nativePolicyParticipantAlive(),
                     ::drainRustPanicRing,
                 )
             ) return
@@ -2843,20 +2845,22 @@ internal class DefaultTraceboxHandle(
         val segmentIdentity = allocateJournaledIdentity(ORDINARY_SEGMENT_IDENTITY_KIND)
         val segmentPath = segments.resolve("${encode(segmentIdentity)}.tbseg")
         val roleLedger = RoleQuotaLedger(RoleQuotaPolicy(mapOf(configuration.processRole to ROLE_SEGMENT_LIMIT)), segments)
-        val created = SegmentWriter.create(
-            segmentPath,
-            SegmentHeader(
-                PersistedSegmentIdentity(segmentIdentity, processIdentity),
-                configuration.generatedSchemaFingerprint,
-                snapshot.epoch,
-                0,
-                configuration.processRole,
-            ),
-            checkNotNull(policyGate),
-            roleLedger,
-            quota,
-            eligibility,
-        )
+        val created = createSegmentWithEmptyRecovery(root, quota, eligibility) {
+            SegmentWriter.create(
+                segmentPath,
+                SegmentHeader(
+                    PersistedSegmentIdentity(segmentIdentity, processIdentity),
+                    configuration.generatedSchemaFingerprint,
+                    snapshot.epoch,
+                    0,
+                    configuration.processRole,
+                ),
+                checkNotNull(policyGate),
+                roleLedger,
+                quota,
+                eligibility,
+            )
+        }
         writer = created
         generatedAdapter = GeneratedRecordSegmentAdapter(created, checkNotNull(policyGate))
         currentProcessIdentity = processIdentity.copyOf()
@@ -4434,7 +4438,7 @@ internal class DefaultTraceboxHandle(
             },
         )
         val alreadyOwned = quota.owns(journal, UidBucket.METADATA, IDENTITY_JOURNAL_MAX_BYTES)
-        check(alreadyOwned || quota.reserve(journal, UidBucket.METADATA, IDENTITY_JOURNAL_MAX_BYTES)) {
+        check(ensureIdentityJournalReservation(quota, journal)) {
             "Tracebox identity journal quota exhausted"
         }
         return try {
@@ -4852,12 +4856,19 @@ internal fun credentialProtectedReservationBytes(
     path: OwnedStoragePath,
     physicalBytes: Long,
 ): Long = when {
-    path.relativePath == "identity-lifecycle-v1" -> 64L * 1024
+    path.relativePath == "identity-lifecycle-v1" ||
+        path.relativePath == "identity-lifecycle-managed-v1" -> 64L * 1024
     path.relativePath == "exit-tombstones-v1" ||
         path.relativePath == "exit-tombstones-v1.new" -> 64L * 1024
     EXIT_IMPORT_PATH.matches(path.relativePath) -> ExitImportJournal.ENTRY_BYTES.toLong()
     else -> physicalBytes
 }
+
+/** Repairs reservations shrunk by older startup reconciliation without replacing the journal. */
+internal fun ensureIdentityJournalReservation(quota: UidWideQuotaCoordinator, journal: Path): Boolean =
+    quota.owns(journal, UidBucket.METADATA, 64L * 1024) ||
+        quota.resize(journal, UidBucket.METADATA, 64L * 1024) ||
+        quota.reserve(journal, UidBucket.METADATA, 64L * 1024)
 
 internal fun classifyDeviceProtectedStorage(path: OwnedStoragePath): UidBucket? {
     if (path.rootId != "de" || !isSafeOwnedRelative(path.relativePath)) return null
@@ -4932,6 +4943,76 @@ internal fun drainRustPanicRingIfHealthy(
     if (!healthy) return false
     drain()
     return true
+}
+
+/** An unchanged managed-only policy needs no native liveness check or writer rotation. */
+internal fun maintainSecondaryCaptureIfHealthy(
+    nativeCaptureEnabled: Boolean,
+    writerReady: Boolean,
+    nativeParticipantHealthy: Boolean,
+    drain: () -> Unit,
+): Boolean {
+    if (!writerReady) return false
+    if (!nativeCaptureEnabled) return true
+    return drainRustPanicRingIfHealthy(nativeParticipantHealthy, drain)
+}
+
+/** Recover the file slots leaked by earlier managed policy polling; retain every record. */
+internal fun createSegmentWithEmptyRecovery(
+    root: Path,
+    quota: UidWideQuotaCoordinator,
+    eligibility: StorageMutationEligibility,
+    create: () -> SegmentWriter,
+): SegmentWriter = try {
+    create()
+} catch (full: SegmentException.Quota) {
+    val retired = quota.mutateStorageIfEligible(eligibility) {
+        retireEmptySealedSegments(root, quota)
+    }
+    if (retired !is StorageMutationBarrierResult.Applied || retired.value == 0) throw full
+    create()
+}
+
+/** Called only under the UID mutation barrier. Never repairs or deletes ambiguous data. */
+private fun retireEmptySealedSegments(root: Path, quota: UidWideQuotaCoordinator): Int {
+    if (!TraceboxOwnedStorageRoot.isEligible(root)) return 0
+    val instances = root.resolve("instances")
+    if (!Files.isDirectory(instances, LinkOption.NOFOLLOW_LINKS)) return 0
+    val candidates = Files.walk(instances, 3).use { paths ->
+        paths.filter { path ->
+            SEGMENT_PATH.matches(root.relativize(path).joinToString("/")) &&
+                Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+        }.limit(64).toList()
+    }
+    var retired = 0
+    for (path in candidates) {
+        // An empty v1 segment is exactly its 124-byte header and 52-byte seal.
+        if (Files.size(path) != 176L || !quota.owns(path, UidBucket.ROLE_SEGMENTS, 176L)) continue
+        val recovered = try {
+            SegmentWriter.recover(path, repair = false)
+        } catch (_: IOException) {
+            continue
+        } catch (_: IllegalStateException) {
+            continue
+        }
+        if (!recovered.sealed || recovered.corruptionDetected || recovered.frames.isNotEmpty() ||
+            recovered.validBytes != 176L
+        ) continue
+        val identity = recovered.header.identity
+        val encoder = Base64.getUrlEncoder().withoutPadding()
+        val instance = path.parent.parent
+        val identityFile = instance.resolve("process-instance-id")
+        if (path.fileName.toString() != "${encoder.encodeToString(identity.segmentId)}.tbseg" ||
+            instance.fileName.toString() != encoder.encodeToString(identity.processInstanceId) ||
+            !Files.isRegularFile(identityFile, LinkOption.NOFOLLOW_LINKS) ||
+            Files.size(identityFile) != 32L ||
+            !Files.readAllBytes(identityFile).contentEquals(identity.processInstanceId)
+        ) continue
+        Files.delete(path)
+        quota.release(path)
+        retired++
+    }
+    return retired
 }
 
 internal enum class BoundedManagedCrashOffer {
