@@ -504,7 +504,7 @@ RegistrationOutcome WaitForSocket(int socket_fd,
   }
 }
 
-constexpr char kHandlerSocketFileName[] = "tracebox-handler.sock";
+using tracebox::kHandlerSocketFileNameV1;
 
 enum class HandlerSocketEntry {
   kAbsent,
@@ -512,22 +512,9 @@ enum class HandlerSocketEntry {
   kInvalid,
 };
 
-bool LockDirectory(int directory_fd, bool nonblocking) {
-  const int operation = LOCK_EX | (nonblocking ? LOCK_NB : 0);
-  while (flock(directory_fd, operation) != 0) {
-    if (errno != EINTR || nonblocking) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool OpenLockedHandlerSocketParent(const std::string& socket_path,
-                                   bool nonblocking,
-                                   int* directory_fd) {
-  if (!tracebox::IsCanonicalHandlerSocketPathV1(socket_path) ||
-      socket_path.size() >= sizeof(sockaddr_un::sun_path)) {
-    return false;
+int OpenHandlerSocketParent(const std::string& socket_path) {
+  if (!tracebox::IsCanonicalHandlerSocketPathV1(socket_path)) {
+    return -1;
   }
   const std::string parent = ParentDirectory(socket_path);
   std::array<char, PATH_MAX> resolved_parent{};
@@ -535,8 +522,8 @@ bool OpenLockedHandlerSocketParent(const std::string& socket_path,
       realpath(parent.c_str(), resolved_parent.data()) == nullptr ||
       !tracebox::IsCanonicalHandlerSocketPathV1(
           std::string(resolved_parent.data()) + "/" +
-          kHandlerSocketFileName)) {
-    return false;
+          kHandlerSocketFileNameV1)) {
+    return -1;
   }
   const int opened =
       open(parent.c_str(),
@@ -546,22 +533,29 @@ bool OpenLockedHandlerSocketParent(const std::string& socket_path,
       fstat(opened, &parent_status) != 0 ||
       !S_ISDIR(parent_status.st_mode) ||
       parent_status.st_uid != geteuid() ||
-      (parent_status.st_mode & (S_IWGRP | S_IWOTH)) != 0 ||
-      !LockDirectory(opened, nonblocking)) {
+      (parent_status.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
     if (opened >= 0) {
       close(opened);
     }
-    return false;
+    return -1;
   }
-  *directory_fd = opened;
-  return true;
+  return opened;
+}
+
+int OpenLockedHandlerSocketParent(const std::string& socket_path) {
+  const int directory_fd = OpenHandlerSocketParent(socket_path);
+  if (directory_fd >= 0 && flock(directory_fd, LOCK_EX | LOCK_NB) != 0) {
+    close(directory_fd);
+    return -1;
+  }
+  return directory_fd;
 }
 
 HandlerSocketEntry ReadHandlerSocketEntry(int directory_fd,
                                           struct stat* status) {
   std::memset(status, 0, sizeof(*status));
   if (fstatat(directory_fd,
-              kHandlerSocketFileName,
+              kHandlerSocketFileNameV1,
               status,
               AT_SYMLINK_NOFOLLOW) != 0) {
     return errno == ENOENT ? HandlerSocketEntry::kAbsent
@@ -585,17 +579,15 @@ bool SameHandlerSocketEntry(const struct stat& left,
 }
 
 tracebox::HandlerSocketProbeV1 ProbeHandlerSocket(
-    const std::string& socket_path,
+    int directory_fd,
     int timeout_millis) {
   const int probe =
       socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
   if (probe < 0) {
     return tracebox::HandlerSocketProbeV1::kAmbiguous;
   }
-  sockaddr_un address{};
-  address.sun_family = AF_UNIX;
-  std::memcpy(
-      address.sun_path, socket_path.c_str(), socket_path.size() + 1);
+  const sockaddr_un address =
+      tracebox::HandlerSocketAddressForDirectoryV1(directory_fd);
   int connect_error = 0;
   if (connect(probe,
               reinterpret_cast<const sockaddr*>(&address),
@@ -644,8 +636,7 @@ tracebox::HandlerSocketProbeV1 ProbeHandlerSocket(
   return tracebox::HandlerSocketProbeV1::kAmbiguous;
 }
 
-bool RemoveStaleHandlerSocketLocked(const std::string& socket_path,
-                                    int directory_fd) {
+bool RemoveStaleHandlerSocketLocked(int directory_fd) {
   struct stat initial {};
   const HandlerSocketEntry initial_entry =
       ReadHandlerSocketEntry(directory_fd, &initial);
@@ -656,7 +647,7 @@ bool RemoveStaleHandlerSocketLocked(const std::string& socket_path,
     return false;
   }
   const tracebox::HandlerSocketProbeV1 probe =
-      ProbeHandlerSocket(socket_path, kStaleHandlerSocketProbeMillis);
+      ProbeHandlerSocket(directory_fd, kStaleHandlerSocketProbeMillis);
   if (!tracebox::HandlerSocketProbePermitsCleanupV1(probe)) {
     return false;
   }
@@ -668,20 +659,19 @@ bool RemoveStaleHandlerSocketLocked(const std::string& socket_path,
   }
   if (current_entry != HandlerSocketEntry::kOwnedSocket ||
       !SameHandlerSocketEntry(initial, current) ||
-      unlinkat(directory_fd, kHandlerSocketFileName, 0) != 0) {
+      unlinkat(directory_fd, kHandlerSocketFileNameV1, 0) != 0) {
     return false;
   }
   return fsync(directory_fd) == 0;
 }
 
 bool CleanupStaleHandlerSocket(const std::string& socket_path) {
-  int directory_fd = -1;
-  if (!OpenLockedHandlerSocketParent(
-          socket_path, true, &directory_fd)) {
+  const int directory_fd = OpenLockedHandlerSocketParent(socket_path);
+  if (directory_fd < 0) {
     return false;
   }
   const bool cleaned =
-      RemoveStaleHandlerSocketLocked(socket_path, directory_fd);
+      RemoveStaleHandlerSocketLocked(directory_fd);
   static_cast<void>(flock(directory_fd, LOCK_UN));
   close(directory_fd);
   return cleaned;
@@ -2153,10 +2143,8 @@ bool StartControlServer(const std::string& socket_path) {
   if (socket_path.size() >= g_control_socket_path.size()) {
     return false;
   }
-  int directory_fd = -1;
-  if (!OpenLockedHandlerSocketParent(
-          socket_path, true, &directory_fd) ||
-      !RemoveStaleHandlerSocketLocked(socket_path, directory_fd)) {
+  const int directory_fd = OpenLockedHandlerSocketParent(socket_path);
+  if (directory_fd < 0 || !RemoveStaleHandlerSocketLocked(directory_fd)) {
     if (directory_fd >= 0) {
       static_cast<void>(flock(directory_fd, LOCK_UN));
       close(directory_fd);
@@ -2169,18 +2157,17 @@ bool StartControlServer(const std::string& socket_path) {
     close(directory_fd);
     return false;
   }
-  sockaddr_un address{};
-  address.sun_family = AF_UNIX;
-  std::memcpy(address.sun_path, socket_path.c_str(), socket_path.size() + 1);
+  const sockaddr_un address =
+      tracebox::HandlerSocketAddressForDirectoryV1(directory_fd);
   if (bind(socket_fd,
            reinterpret_cast<const sockaddr*>(&address),
            sizeof(address)) != 0 ||
-      chmod(socket_path.c_str(), 0600) != 0 ||
+      fchmodat(directory_fd, kHandlerSocketFileNameV1, 0600, 0) != 0 ||
       listen(socket_fd, kControlBacklog) != 0 ||
       fsync(directory_fd) != 0) {
     close(socket_fd);
     static_cast<void>(
-        unlinkat(directory_fd, kHandlerSocketFileName, 0));
+        unlinkat(directory_fd, kHandlerSocketFileNameV1, 0));
     static_cast<void>(fsync(directory_fd));
     static_cast<void>(flock(directory_fd, LOCK_UN));
     close(directory_fd);
@@ -2190,7 +2177,7 @@ bool StartControlServer(const std::string& socket_path) {
       !OpenClientLifecycleAdmission()) {
     close(socket_fd);
     static_cast<void>(
-        unlinkat(directory_fd, kHandlerSocketFileName, 0));
+        unlinkat(directory_fd, kHandlerSocketFileNameV1, 0));
     static_cast<void>(fsync(directory_fd));
     static_cast<void>(flock(directory_fd, LOCK_UN));
     close(directory_fd);
@@ -2216,7 +2203,7 @@ bool StartControlServer(const std::string& socket_path) {
     }
     static_cast<void>(BeginClientLifecycleDrain());
     static_cast<void>(
-        unlinkat(directory_fd, kHandlerSocketFileName, 0));
+        unlinkat(directory_fd, kHandlerSocketFileNameV1, 0));
     static_cast<void>(fsync(directory_fd));
     g_control_socket_path_active.store(false, std::memory_order_release);
     std::memset(
@@ -2576,6 +2563,13 @@ RegistrationOutcome ConnectControlSocket(const std::string& socket_path,
                                          tracebox::ClientConnectionModeV2*
                                              granted_mode,
                                          int* control_connection) {
+  const crashpad::ScopedFileHandle directory_fd(
+      OpenHandlerSocketParent(socket_path));
+  if (!directory_fd.is_valid()) {
+    return RegistrationOutcome::kUnavailable;
+  }
+  const sockaddr_un address =
+      tracebox::HandlerSocketAddressForDirectoryV1(directory_fd.get());
   const uint64_t overall_deadline =
       DeadlineAfterMilliseconds(kRegistrationDeadlineMillis);
   if (overall_deadline == 0) {
@@ -2588,9 +2582,6 @@ RegistrationOutcome ConnectControlSocket(const std::string& socket_path,
     if (socket_fd < 0) {
       return RegistrationOutcome::kSystemError;
     }
-    sockaddr_un address{};
-    address.sun_family = AF_UNIX;
-    std::memcpy(address.sun_path, socket_path.c_str(), socket_path.size() + 1);
     bool connected =
         connect(socket_fd,
                 reinterpret_cast<const sockaddr*>(&address),
@@ -3000,7 +2991,7 @@ bool RetireDrainedHandlerSocketMarker() {
   int unlink_result;
   do {
     unlink_result =
-        unlinkat(directory_fd, kHandlerSocketFileName, 0);
+        unlinkat(directory_fd, kHandlerSocketFileNameV1, 0);
   } while (unlink_result != 0 && errno == EINTR);
   if ((unlink_result != 0 && errno != ENOENT) ||
       fsync(directory_fd) != 0) {
@@ -3897,8 +3888,7 @@ int ConnectClientWithMode(JNIEnv* env,
       static_cast<tracebox::ClientRegistrationRequestV2>(
           requested_mode);
   if (process_role < 0 || policy_epoch < 0 ||
-      socket_path.empty() ||
-      socket_path.size() >= sizeof(sockaddr_un::sun_path) ||
+      !tracebox::IsCanonicalHandlerSocketPathV1(socket_path) ||
       !CopyByteArray(env, process_identity_value, &process_identity) ||
       !CopyByteArray(env, raw_artifact_id_value, &raw_artifact_id) ||
       IsAllZero(process_identity) ||

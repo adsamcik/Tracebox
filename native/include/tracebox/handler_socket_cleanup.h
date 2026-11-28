@@ -3,10 +3,31 @@
 
 #include <string_view>
 
+#if defined(__linux__)
+#include <sys/socket.h>
+#include <sys/un.h>
+
+#include <cstdio>
+#endif
+
 namespace tracebox {
 
+constexpr char kHandlerSocketFileNameV1[] = "tracebox-handler.sock";
 constexpr std::string_view kHandlerSocketSuffixV1 =
     "/tracebox/native-handler/tracebox-handler.sock";
+
+#if defined(__linux__)
+inline sockaddr_un HandlerSocketAddressForDirectoryV1(int directory_fd) {
+  // Unix socket addresses have a shorter pathname limit than the filesystem.
+  // Keep the socket file in the opened private directory and shorten
+  // only the pathname passed to bind() and connect().
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  std::snprintf(address.sun_path, sizeof(address.sun_path),
+                "/proc/self/fd/%d/%s", directory_fd, kHandlerSocketFileNameV1);
+  return address;
+}
+#endif
 
 enum class HandlerSocketProbeV1 {
   kListenerAlive,
