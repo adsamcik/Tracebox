@@ -5,7 +5,7 @@
 #endif
 #include <cassert>
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -51,7 +51,9 @@ void TestOnlyConclusiveDeadOrAbsentProbePermitsCleanup() {
       HandlerSocketProbeV1::kAmbiguous));
 }
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
+// Android verifies this path in the app process. The adb shell domain has
+// different permissions for pathname sockets reached through /proc/self/fd.
 void TestLongPathSocketUsesTheSameFileFromSeparateDescriptors() {
   const char* tmp = std::getenv("TMPDIR");
   std::string root = std::string(tmp && *tmp ? tmp : "/tmp") + "/tracebox-XXXXXX";
@@ -104,7 +106,7 @@ void TestLongPathSocketUsesTheSameFileFromSeparateDescriptors() {
 int main() {
   TestCanonicalOwnedPathValidation();
   TestOnlyConclusiveDeadOrAbsentProbePermitsCleanup();
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
   TestLongPathSocketUsesTheSameFileFromSeparateDescriptors();
 #endif
   return 0;
