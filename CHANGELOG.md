@@ -5,6 +5,19 @@ once its public API stabilizes.
 
 ## Unreleased
 
+## [0.1.0-alpha.9] - 2026-11-28
+
+### Fixed
+
+- Saving an approved diagnostics package in Android Files writes the full archive even
+  when Android recreates the diagnostics screen while the picker is open.
+- Receiving apps get the `tracebox.tbdiag` attachment name and exact byte size when
+  querying the shared package.
+- Native diagnostics start when the app's full private socket path exceeds the Unix
+  socket address limit. Restart also recovers a stale socket at that path.
+- Managed diagnostics remain available across app restarts, including secondary
+  processes that use managed capture.
+
 ### Changed
 
 - Updated the Gradle wrapper to 9.7.1 and Android Gradle Plugin to 9.4.0, with matching
