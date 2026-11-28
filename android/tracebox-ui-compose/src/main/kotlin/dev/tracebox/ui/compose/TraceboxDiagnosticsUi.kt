@@ -1,11 +1,27 @@
 package dev.tracebox.ui.compose
 
+import android.content.Context
+import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.referentialEqualityPolicy
+import androidx.compose.runtime.setValue
 import dev.tracebox.api.CaptureKind
 import dev.tracebox.api.DiagnosticPackage
 import dev.tracebox.api.LogLevel
+import dev.tracebox.api.SaveFailure
+import dev.tracebox.api.SavePackageResult
 import dev.tracebox.api.TraceboxPolicy
 import java.io.Closeable
 import java.io.InputStream
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The action performed after the user reviews and approves the exact diagnostic package. */
 enum class TraceboxPrimaryAction {
@@ -188,9 +204,15 @@ class TraceboxUploadRequest internal constructor(
         diagnosticPackage.useInputStream(block)
 }
 
-/** Single-slot UI ownership that closes packages on replacement and screen disposal. */
+/** Single-slot UI ownership that closes packages on replacement and screen retirement. */
 internal class DiagnosticPackageOwner : Closeable {
-    private var active: DiagnosticPackage? = null
+    private var active by mutableStateOf<DiagnosticPackage?>(null, referentialEqualityPolicy())
+    private val saveScope = CoroutineScope(SupervisorJob())
+
+    var saving by mutableStateOf(false)
+        private set
+    var saveResult by mutableStateOf<SavePackageResult?>(null)
+        private set
 
     @Synchronized
     fun replace(replacement: DiagnosticPackage) {
@@ -211,7 +233,36 @@ internal class DiagnosticPackageOwner : Closeable {
     @Synchronized
     internal fun current(): DiagnosticPackage? = active
 
-    override fun close() = retire()
+    fun save(applicationContext: Context, destination: Uri): Boolean {
+        val diagnosticPackage = current() ?: return false
+        if (saving) return false
+        saving = true
+        saveScope.launch(Dispatchers.Main.immediate) {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    diagnosticPackage.save(applicationContext, destination) { !isActive }
+                }
+                if (result is SavePackageResult.Complete || result is SavePackageResult.PartialCopyWarning) {
+                    retire(diagnosticPackage)
+                }
+                saveResult = result
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                saveResult = SavePackageResult.Failed(SaveFailure.WRITE_FAILED)
+            } finally {
+                saving = false
+            }
+        }
+        return true
+    }
+
+    fun consumeSaveResult(): SavePackageResult? = saveResult.also { saveResult = null }
+
+    override fun close() {
+        saveScope.cancel()
+        retire()
+    }
 }
 
 /** Backend outcome intentionally excludes raw server messages from the user-facing UI. */

@@ -30,11 +30,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.retain.RetainedEffect
+import androidx.compose.runtime.retain.retain
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -105,10 +107,13 @@ fun TraceboxDiagnosticsScreen(
         actions = actions,
         uploaderAvailable = uploader != null,
     )
-    var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
-    val packageOwner = remember(handle) { DiagnosticPackageOwner() }
-    var currentPackage by remember(handle) { mutableStateOf<DiagnosticPackage?>(null) }
+    var operationBusy by remember { mutableStateOf(false) }
+    var savePickerOpen by rememberSaveable { mutableStateOf(false) }
+    var message by rememberSaveable { mutableStateOf<String?>(null) }
+    // Host handles may be recreated wrappers around the same application-scoped package service.
+    val packageOwner = retain(handle.packages) { DiagnosticPackageOwner() }
+    val busy = operationBusy || savePickerOpen || packageOwner.saving
+    val currentPackage = packageOwner.current()
     // Preserve the fail-closed delivery choice if Android recreates this screen while the
     // disclosure activity is open. Enums are directly saveable by Compose.
     var pendingPrimaryAction by rememberSaveable(handle) {
@@ -117,24 +122,14 @@ fun TraceboxDiagnosticsScreen(
     var advancedExpanded by rememberSaveable { mutableStateOf(advanced.initiallyExpanded) }
     var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
 
-    DisposableEffect(packageOwner) {
-        onDispose { packageOwner.close() }
-    }
-
-    fun replaceCurrentPackage(replacement: DiagnosticPackage) {
-        packageOwner.replace(replacement)
-        currentPackage = replacement
-    }
-
-    fun retireCurrentPackage(expected: DiagnosticPackage? = null) {
-        packageOwner.retire(expected)
-        if (expected == null || currentPackage === expected) currentPackage = null
+    RetainedEffect(packageOwner) {
+        onRetire { packageOwner.close() }
     }
 
     fun runOperation(operation: suspend () -> String) {
-        if (busy) return
+        if (operationBusy || savePickerOpen || packageOwner.saving) return
+        operationBusy = true
         scope.launch {
-            busy = true
             message = try {
                 operation()
             } catch (cancelled: CancellationException) {
@@ -142,7 +137,7 @@ fun TraceboxDiagnosticsScreen(
             } catch (_: Exception) {
                 uiString(strings.operationFailure)
             } finally {
-                busy = false
+                operationBusy = false
             }
         }
     }
@@ -153,7 +148,7 @@ fun TraceboxDiagnosticsScreen(
             transport.upload(TraceboxUploadRequest(diagnosticPackage))
         }) {
             is TraceboxUploadResult.Uploaded -> {
-                retireCurrentPackage(diagnosticPackage)
+                packageOwner.retire(diagnosticPackage)
                 uiString(strings.uploadSuccess)
             }
             TraceboxUploadResult.RetryableFailure -> uiString(strings.uploadRetryableFailure)
@@ -163,7 +158,7 @@ fun TraceboxDiagnosticsScreen(
     }
 
     fun applyPolicy(next: TraceboxPolicy) = runOperation {
-        retireCurrentPackage()
+        packageOwner.retire()
         when (withContext(Dispatchers.IO) { handle.updatePolicy(next) }) {
             PolicyUpdateResult.SUCCESS -> uiString(strings.policyUpdated)
             PolicyUpdateResult.LOCAL_ONLY_RESTRICTED -> uiString(strings.policyRestrictedLocally)
@@ -189,7 +184,7 @@ fun TraceboxDiagnosticsScreen(
                 PackageResult.NotReady -> return@runOperation uiString(strings.diagnosticsNotReady)
                 PackageResult.Rejected -> return@runOperation uiString(strings.packageApprovalMismatch)
             }
-            replaceCurrentPackage(diagnosticPackage)
+            packageOwner.replace(diagnosticPackage)
             when (delivery) {
                 ResolvedPrimaryAction.UPLOAD -> uploadPackage(diagnosticPackage)
                 ResolvedPrimaryAction.SHARE -> {
@@ -222,27 +217,23 @@ fun TraceboxDiagnosticsScreen(
     val saveLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
-        val destination = result.data?.data
+        val requested = savePickerOpen
+        savePickerOpen = false
+        val destination = result.data?.data.takeIf { result.resultCode == Activity.RESULT_OK }
         if (destination == null) {
             message = uiString(strings.saveCancelled)
-        } else {
-            runOperation {
-                val diagnosticPackage = currentPackage
-                    ?: return@runOperation uiString(strings.reviewFirst)
-                when (val saved = withContext(Dispatchers.IO) {
-                    diagnosticPackage.save(context, destination)
-                }) {
-                    is SavePackageResult.Complete -> {
-                        retireCurrentPackage(diagnosticPackage)
-                        uiQuantity(strings.savedBytes, saved.bytesWritten)
-                    }
-                    is SavePackageResult.PartialCopyWarning -> {
-                        retireCurrentPackage(diagnosticPackage)
-                        uiQuantity(strings.partialCopyBytes, saved.bytesWritten)
-                    }
-                    is SavePackageResult.Failed -> uiString(strings.saveFailed)
-                }
-            }
+        } else if (!requested || !packageOwner.save(context.applicationContext, destination)) {
+            message = uiString(strings.reviewFirst)
+        }
+    }
+
+    LaunchedEffect(packageOwner, packageOwner.saveResult) {
+        message = when (val saved = packageOwner.consumeSaveResult()) {
+            is SavePackageResult.Complete -> uiQuantity(strings.savedBytes, saved.bytesWritten)
+            is SavePackageResult.PartialCopyWarning ->
+                uiQuantity(strings.partialCopyBytes, saved.bytesWritten)
+            is SavePackageResult.Failed -> uiString(strings.saveFailed)
+            null -> return@LaunchedEffect
         }
     }
 
@@ -328,7 +319,17 @@ fun TraceboxDiagnosticsScreen(
                     }
                     if (actions.save) {
                         OutlinedButton(
-                            onClick = { saveLauncher.launch(diagnosticPackage.createSaveIntent()) },
+                            onClick = {
+                                if (!operationBusy && !savePickerOpen && !packageOwner.saving) {
+                                    savePickerOpen = true
+                                    try {
+                                        saveLauncher.launch(diagnosticPackage.createSaveIntent())
+                                    } catch (_: Exception) {
+                                        savePickerOpen = false
+                                        message = uiString(strings.saveFailed)
+                                    }
+                                }
+                            },
                             enabled = !busy,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(uiString(strings.savePackage)) }
@@ -479,7 +480,7 @@ fun TraceboxDiagnosticsScreen(
             ) { Text(uiString(strings.deleteAllData)) }
         }
 
-        if (busy) {
+        if (operationBusy || packageOwner.saving) {
             CircularProgressIndicator(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
@@ -510,7 +511,7 @@ fun TraceboxDiagnosticsScreen(
                 TextButton(onClick = {
                     showDeleteConfirmation = false
                     runOperation {
-                        retireCurrentPackage()
+                        packageOwner.retire()
                         when (withContext(Dispatchers.IO) {
                             handle.delete(DeleteRequest.ALL_TRACEBOX_DATA)
                         }) {

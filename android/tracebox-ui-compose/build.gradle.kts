@@ -21,6 +21,7 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.compose.foundation)
     implementation(libs.compose.material3)
+    implementation(libs.compose.runtime.retain)
     implementation(libs.compose.ui)
     implementation(libs.lifecycle.runtime.compose)
     testImplementation(platform(libs.compose.bom))

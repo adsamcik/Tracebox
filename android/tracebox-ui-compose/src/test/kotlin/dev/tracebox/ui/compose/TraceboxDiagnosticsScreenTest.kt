@@ -250,14 +250,28 @@ class TraceboxDiagnosticsScreenTest {
         assertEquals(TEST_SHARE_ACTION, shared.action)
         assertEquals(0, diagnosticPackage.deleteStagingCalls)
 
-        composeRule.onNodeWithText("Save a copy").performClick()
+        val destination = Intent().setData(Uri.parse("content://tracebox-test/diagnostics.tbdiag"))
+
+        composeRule.onNodeWithText("Save a copy").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        val cancelled = assertNotNull(shadowOf(composeRule.activity).nextStartedActivityForResult)
+        composeRule.activity.activityResultRegistry.dispatchResult(
+            cancelled.requestCode,
+            Activity.RESULT_CANCELED,
+            destination,
+        )
+        composeRule.onNodeWithText("Save was cancelled.").performScrollTo().assertIsDisplayed()
+        assertEquals(0, diagnosticPackage.saveCalls)
+        assertEquals(0, diagnosticPackage.deleteStagingCalls)
+
+        composeRule.onNodeWithText("Save a copy").performScrollTo().performClick()
         composeRule.waitForIdle()
         val save = assertNotNull(shadowOf(composeRule.activity).nextStartedActivityForResult)
         assertEquals(Intent.ACTION_CREATE_DOCUMENT, save.intent.action)
         composeRule.activity.activityResultRegistry.dispatchResult(
             save.requestCode,
             Activity.RESULT_OK,
-            Intent().setData(Uri.parse("content://tracebox-test/diagnostics.tbdiag")),
+            destination,
         )
 
         composeRule.waitUntil(timeoutMillis = 5_000) { diagnosticPackage.saveCalls == 1 }
